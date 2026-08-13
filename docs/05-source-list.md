@@ -1,0 +1,92 @@
+此处记录来源信息，信息格式为csv
+```csv
+Source,Category,Source Type,URL,Collection Method,Priority,Enabled,Event Candidate,Source Digest Candidate,Availability,"Language","Notes"
+Bloomberg Technology,Technology,Tier-1 media,https://feeds.bloomberg.com/technology/news.rss,RSS,High,Yes,Yes,Yes,Free,EN,
+Reuters Daily Briefing,General,Tier-1 media,dailybriefing@thomsonreuters.com,Email,High,Yes,Yes,Yes,Free,EN,
+Bloomberg Markets,Market,Tier-1 media,https://feeds.bloomberg.com/markets/news.rss,RSS,High,Yes,Yes,Yes,Free,EN,
+Bloomberg Economics,Economics,Tier-1 media,https://feeds.bloomberg.com/economics/news.rss,RSS,High,Yes,Yes,Yes,Free,EN,
+Bloomberg Opinion,long-form,Tier-1 media,https://feeds.bloomberg.com/bview/news.rss,RSS,High,Yes,No,No,Free,EN,
+Bloomberg,Business,Tier-1 media,https://feeds.bloomberg.com/business/news.rss,RSS,High,Yes,Yes,Yes,Free,EN,
+Financial Times,General,Tier-1 media,https://www.ft.com/news-feed,Web,High,Yes,Yes,Yes,Free,EN,
+FT world,General,Tier-1 media,https://www.ft.com/rss/home/international,RSS,High,Yes,Yes,Yes,Free,EN,
+FT Markets emergingmarkets,Market,Tier-1 media,https://www.ft.com/rss/markets/emerging,RSS,High,Yes,Yes,Yes,Free,EN,
+FT Markets,Market,Tier-1 media,https://www.ft.com/markets?format=rss,RSS,High,Yes,Yes,Yes,Free,EN,
+FT Company,Company,Tier-1 media,https://www.ft.com/rss/companies,RSS,High,Yes,Yes,Yes,Free,EN,
+FT Economy,Economics,Tier-1 media,https://www.ft.com/rss/economy,RSS,High,Yes,Yes,Yes,Free,EN,
+FT Lex Best,long-form,Tier-1 media,https://www.ft.com/rss/lex/best,RSS,High,Yes,No,No,Free,EN,
+WSJ: Economy,Economics,Tier-1 media,https://feeds.content.dowjones.io/public/rss/socialeconomyfeed,RSS,High,Yes,Yes,Yes,Free,EN,
+WSJ: World News,General,Tier-1 media,https://feeds.content.dowjones.io/public/rss/RSSWorldNews,RSS,High,Yes,Yes,Yes,Free,EN,
+WSJ: Markets & Finance,Economics,Tier-1 media,https://feeds.content.dowjones.io/public/rss/RSSMarketsMain,RSS,High,Yes,Yes,Yes,Free,EN,
+WSJ: Technology,Technology,Tier-1 media,https://feeds.content.dowjones.io/public/rss/RSSWSJD,RSS,High,Yes,Yes,Yes,Free,EN,
+WSJ: US Business,Business,Tier-1 media,https://feeds.content.dowjones.io/public/rss/WSJcomUSBusiness,RSS,High,Yes,Yes,Yes,Free,EN,
+WSJ: U.S. News,General,Tier-1 media,https://feeds.content.dowjones.io/public/rss/RSSUSnews,RSS,High,Yes,Yes,Yes,Free,EN,
+WSJ: Politics,Politics,Tier-1 media,https://feeds.content.dowjones.io/public/rss/socialpoliticsfeed,RSS,High,Yes,Yes,Yes,Free,EN,
+CNBC: World Markets,Market,Tier-1 media,http://www.cnbc.com/id/100003241/device/rss/rss.html,RSS,High,Yes,Yes,Yes,Free,EN,
+CNBC: World Top News & Analysis,General,Tier-1 media,https://www.cnbc.com/id/100003114/device/rss/rss.html,RSS,High,Yes,Yes,Yes,Free,EN,https://www.cnbc.com/id/100003114
+CNBC: Economy,Economics,Tier-1 media,https://www.cnbc.com/id/20910258/device/rss/rss.html,RSS,High,Yes,Yes,Yes,Free,EN,
+CNBC: Business,Business,Tier-1 media,https://www.cnbc.com/id/10001147/device/rss/rss.html,RSS,High,Yes,Yes,Yes,Free,EN,
+CNBC: Technology,Technology,Tier-1 media,https://www.cnbc.com/id/19854910/device/rss/rss.html,RSS,High,Yes,Yes,Yes,Free,EN,
+CNBC: Investing,Financial,Tier-1 media,https://www.cnbc.com/id/15839069/device/rss/rss.html,RSS,High,Yes,Yes,Yes,Free,EN,
+The Economist: Finance and economics,Economics,Tier-1 media,https://www.economist.com/feeds/print-sections/79/finance-and-economics.xml,RSS,High,Yes,Yes,Yes,Free,EN,这是最重要的，每天必看。
+The Economist: Business,Economics,Tier-1 media,https://www.economist.com/feeds/print-sections/77/business.xml,RSS,High,Yes,No,Yes,Free,EN,
+The Economist: Science and technology,Economics,Tier-1 media,https://www.economist.com/feeds/print-sections/80/science-and-technology.xml,RSS,High,Yes,No,Yes,Free,EN,
+The Economist: Leaders,Economics,Tier-1 media,https://www.economist.com/leaders/rss.xml,RSS,High,Yes,No,Yes,Free,EN,Economist 社论，代表编辑部观点。
+The Economist: Briefing,Economics,Tier-1 media,https://www.economist.com/briefing/rss.xml,RSS,High,Yes,Yes,Yes,Free,EN,很多长文，真正解释事件。
+The Economist: Letters,Economics,Tier-1 media,https://www.economist.com/rss/letters_rss.xml,RSS,High,Yes,No,Yes,Free,EN,
+The Economist: China,General,Tier-1 media,https://www.economist.com/feeds/print-sections/77729/china.xml,RSS,High,Yes,No,Yes,Free,EN,
+The Economist: International,General,Tier-1 media,https://www.economist.com/feeds/print-sections/74/international.xml,RSS,High,Yes,Yes,No,Free,EN,
+The Economist: United States,Economics,Tier-1 media,https://www.economist.com/united-states/rss.xml,RSS,High,Yes,Yes,Yes,Free,EN,
+The Economist: Financial Indicators,Policy,Tier-1 media,https://www.economist.com/rss/indicators_rss.xml,RSS,High,Yes,Yes,Yes,Free,EN,经济数据表格
+BBC: World,General,Tier-1 media,https://feeds.bbci.co.uk/news/world/rss.xml,RSS,High,Yes,Yes,No,Free,EN,
+BBC: Business,Business,Tier-1 media,https://feeds.bbci.co.uk/news/business/rss.xml,RSS,High,Yes,Yes,Yes,Free,EN,
+BBC: Technology,Technology,Tier-1 media,https://feeds.bbci.co.uk/news/technology/rss.xml,RSS,High,Yes,Yes,Yes,Free,EN,
+BBC: Science & Environment,General,Tier-1 media,https://feeds.bbci.co.uk/news/science_and_environment/rss.xml,RSS,High,Yes,Yes,Yes,Free,EN,
+Associated Press (AP 美联社),General,Tier-1 media,https://feedx.net/rss/ap.xml,RSS,High,Yes,Yes,Yes,Free,EN,全球通讯社，和 Reuters 类似。但美国政治、社会、突发事件更强。
+The Guardian 卫报,General,Tier-1 media,https://www.theguardian.com/uk/rss,RSS,High,Yes,Yes,Yes,Free,EN,
+The Associated Press,General,News Letter,morningwire@apnews.com,Email,Medium,Yes,No,Yes,Free,EN,
+Fed - 美联储,Policy,Government / Institution,https://www.federalreserve.gov/feeds/press_monetary.xml,RSS,High,Yes,Yes,No,Free,EN,FOMC、利率决议、会议声明等货币政策内容。
+BLS（美国劳工统计局）,Policy,Government / Institution,https://www.bls.gov/feed/bls_latest.rss,RSS,High,Yes,Yes,No,Free,EN,包含最新 CPI、PPI、就业、非农等所有重要经济数据发布。
+CPI,Policy,Government / Institution,http://www.bls.gov/feed/cpi.rss,RSS,High,Yes,Yes,No,Free,EN,BLS 发布的 CPI 数据。每月的第二周（约每月 10 日 ~ 14 日之间）
+PPI,Policy,Government / Institution,http://www.bls.gov/feed/ppi.rss,RSS,High,Yes,Yes,No,Free,EN,BLS 发布的 PPI 数据。CPI 公布后的 1 ~ 2 天内或同一周内公布
+Job & Labor,Policy,Government / Institution,http://www.bls.gov/feed/jolts.rss,RSS,High,Yes,Yes,No,Free,EN,BLS 发布的 就业 数据。每月第一个周五，美国东部时间 08:30（北京时间夏令时 20:30 / 冬令时 21:30）
+非农报告 Employment Situation,Policy,Government / Institution,http://www.bls.gov/feed/empsit.rss,RSS,High,Yes,Yes,No,Free,EN,每个月第一个周五的美国东部时间 08:30（对应北京时间冬令时 21:30 / 夏令时 20:30）
+BEA - 商务部数据,Policy,Government / Institution,https://apps.bea.gov/rss/rss.xml,RSS,High,Yes,Yes,No,Free,EN,GDP、PCE、Personal Income、Trade Balance 等官方发布
+ECB（欧洲央行）,Policy,Government / Institution,https://www.ecb.europa.eu/rss/press.html,RSS,Medium,Yes,Yes,No,Free,EN,欧洲央行新闻稿、利率决议、讲话等
+CME FedWatch Economic Research,long-form,Government / Institution,https://www.cmegroup.com/rss/commentary-home-insights-analysis.rss,RSS,Medium,Yes,No,No,Free,EN,CME 的经济学团队会在该栏目发布关于美联储政策、利率走势、货币政策预测及 FedWatch 相关的深度分析报告与研报
+CME FedWatch Financials,long-form,Government / Institution,https://www.cmegroup.com/rss/china-feed.rss,RSS,Medium,Yes,No,No,Free,ZH,涵盖利率（Interest Rates）、国债期货及金融衍生品相关的经济发布数据与市场报告
+CME FedWatch AllFeaturedReports,long-form,Government / Institution,https://www.cmegroup.com/rss/AllFeaturedReports.rss,RSS,Medium,Yes,No,No,Free,EN,涵盖利率（Interest Rates）、国债期货及金融衍生品相关的经济发布数据与市场报告
+S&P Press Releases,Policy,Government / Institution,https://investor.spglobal.com/rss/pressrelease.aspx,RSS,Medium,Yes,Yes,No,Free,EN,标普新闻稿
+The Information,long-form,Expert Blog,http://www.theinformation.com/feed,RSS,High,Yes,No,Yes,Free,EN,信息来源很广，观点比较权威的信息平台，大多是长文
+The Information,Financial,News Letter,hello@theinformation.com,Email,Medium,Yes,No,Yes,Free,EN,
+The Daily Upside,Financial,News Letter,squad@thedailyupside.com,Email,Medium,Yes,No,Yes,Free,EN,
+SemiAnalysis,AI,News Platform,https://semianalysis.com/feed/,RSS,Medium,Yes,No,Yes,Free,EN,目前分析 Nvidia、AI Datacenter、TSMC、HBM、GPU supply chain 非常重要的来源
+Stratechery,long-form,Expert Blog,https://stratechery.com/feed/,RSS,Medium,Yes,No,Yes,Free,EN,作者Ben Thompson，科技公司战略分析
+TrendForce,AI,News Platform,https://www.trendforce.com/feed/Semiconductors.html,RSS,Medium,Yes,No,Yes,Free,EN,半导体信息平台
+DIGITIMES-半導體,AI,News Platform,https://www.digitimes.com.tw/tech/rss/xml/xmlrss_10_40.xml,RSS,Medium,Yes,No,Yes,Free,ZH,半导体信息平台
+TechCrunch,Technology,News Platform,https://techcrunch.com/feed/,RSS,High,Yes,No,Yes,Partial,EN,创业界最重要的媒体，没有之一！
+Fast Company,Technology,News Platform,http://feeds.feedburner.com/fastcompany/headlines,RSS,High,Yes,No,Yes,Free,EN,关注度很高的媒体
+Inc.com,Technology,News Platform,http://www.inc.com/rss.xml,RSS,High,Yes,No,Yes,Free,EN,
+Y Combinator Startup Podcast,Technology,News Platform,http://backtracks.fm/ycombinator/ycombinator/feed,RSS,High,Yes,No,Yes,Free,EN,全球最著名的孵化器
+Wired,Financial,Scientific Journal,http://feeds.wired.com/wired/index,RSS,High,Yes,No,Yes,Partial,EN,
+JACS,Science,Scientific Journal,http://www.azonano.com/syndication.axd?format=rss,RSS,Medium,Yes,No,Yes,Free,EN,
+reidhoffman Blog,long-form,Expert Blog,https://www.reidhoffman.org/feed/,RSS,Medium,Yes,No,No,Free,EN,创投界传奇人物，Blog都是精华，有些甚至是经典作品
+Hugging Face,AI,News Platform,https://huggingface.co/blog/feed.xml,RSS,low,Yes,No,Yes,Free,EN,AI界的Github，所有新LLM的集合地；是获取AI模型最新信息最好的地方之一
+Feld Thoughts（Techstars）,long-form,Expert Blog,http://feeds.feedburner.com/FeldThoughts,RSS,Medium,Yes,No,No,Free,EN,从 2004 年开始运营个人博客 Feld Thoughts，是创业投资领域历史最悠久、影响力最大的个人博客之一。
+Guy Kawasaki 盖伊·川崎,long-form,Expert Blog,http://guykawasaki.com/feed/,RSS,Medium,Yes,No,No,Free,EN,创投界传奇人物的Blog
+VentureBeat,long-form,Expert Blog,http://venturebeat.com/feed/,RSS,Medium,Yes,No,No,Free,EN,
+NASA Image of the Day,Science,Scientific Journal,http://www.nasa.gov/rss/image_of_the_day.rss,RSS,Medium,Yes,No,No,Free,EN,每日一图，单独加一个栏目展示。好看就好
+Nature,Science,Scientific Journal,http://www.nature.com/nature/current_issue/rss,RSS,Medium,Yes,No,Yes,Free,EN,
+Nature: Chemistry,Science,Scientific Journal,https://www.nature.com/subjects/chemistry.rss,RSS,Medium,Yes,No,Yes,Free,EN,
+Nature:  Biotechnology,Science,Scientific Journal,https://www.nature.com/subjects/biotechnology.rss,RSS,Medium,Yes,No,Yes,Free,EN,
+Scientific American 科学美国人,Science,Scientific Journal,http://www.sciam.com/xml/sciam.xml,RSS,Medium,Yes,No,Yes,Free,EN,
+Science,Science,Scientific Journal,https://feeds.science.org/rss/science.xml,RSS,Medium,Yes,No,Yes,Free,EN,
+Science Magazine,Science,Scientific Journal,http://www.sciencemag.org/rss/current.xml,RSS,Medium,Yes,No,Yes,Free,EN,
+ScienceDaily: Science,Science,Scientific Journal,https://www.sciencedaily.com/rss/top/science.xml,RSS,Medium,Yes,No,Yes,Free,EN,科研新闻解释，容易阅读
+MIT Technology Review,Technology,Scientific Journal,http://www.technologyreview.com/rss/rss.aspx,RSS,Medium,Yes,No,Yes,Free,EN,MIT的观点，哪些科学技术未来可能改变产业。
+IEEE Spectrum,Technology,Scientific Journal,https://spectrum.ieee.org/rss/fulltext,RSS,Medium,Yes,No,Yes,Free,EN,工程技术。robotics、semiconductor、biotech devices 资讯
+xkcd,General,Expert Blog,http://xkcd.com/rss.xml,RSS,Medium,Yes,No,No,Free,EN,有趣的图，单独展示
+Superhuman,AI,News Letter,superhuman@mail.joinsuperhuman.ai,Email,Medium,Yes,No,Yes,Free,EN,
+Lenny's Substack,long-form,Substack,lenny@substack.com,Email,low,Yes,No,No,Free,EN,
+增长黑客AI周报,long-form,Substack,ghacker@substack.com,Email,low,Yes,No,No,Free,EN,
+The Pragmatic Engineer,long-form,Substack,pragmaticengineer@substack.com,Email,low,Yes,No,No,Free,EN,
+```
