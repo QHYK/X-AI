@@ -1,0 +1,914 @@
+
+> x-ai-field@0.0.0 spike:rss
+> tsx scripts/spike-rss.ts
+
+
+## Bloomberg Technology
+https://feeds.bloomberg.com/technology/news.rss
+[
+  {
+    "source_item_origin_id": "TJQGNCKJH6V400",
+    "title": "Z.ai to Rival Anthropic, OpenAI in Coding With New AI Model",
+    "url": "https://www.bloomberg.com/news/articles/2026-08-14/z-ai-aims-to-catch-anthropic-openai-in-coding-with-new-ai-model",
+    "author": "Bloomberg News",
+    "published_at": "2026-08-14T05:00:41.000Z",
+    "content_text": "Z.ai Co. is set to upgrade its flagship AI model, adding to a series of Chinese open-weight offerings seeking to outcompete Anthropic PBC and OpenAI.",
+    "image_url": null,
+    "source_tags": null,
+    "metadata": {
+      "source_name": "Bloomberg Technology",
+      "source_feed_url": "https://feeds.bloomberg.com/technology/news.rss",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": true,
+          "textLength": 149
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 149
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "content"
+    }
+  },
+  {
+    "source_item_origin_id": "TJQI7CKJH6V400",
+    "title": "Nintendo Shares Rise as ‘Pokopia’ Global Sales Top 5 Million",
+    "url": "https://www.bloomberg.com/news/articles/2026-08-14/nintendo-shares-rise-as-pokopia-global-sales-top-5-million",
+    "author": "Ririko Tada and Alice French",
+    "published_at": "2026-08-14T05:35:25.000Z",
+    "content_text": "Nintendo Co. shares surged after global sales of its hit game Pokémon Pokopia topped 5 million units since its March launch, with some analysts saying the stock is back on its upward trajectory.",
+    "image_url": null,
+    "source_tags": null,
+    "metadata": {
+      "source_name": "Bloomberg Technology",
+      "source_feed_url": "https://feeds.bloomberg.com/technology/news.rss",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": true,
+          "textLength": 194
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 194
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "content"
+    }
+  },
+  {
+    "source_item_origin_id": "TJCD28KIP3JC00",
+    "title": "will.i.am: Why Human Creativity Will Survive",
+    "url": "https://www.bloomberg.com/news/videos/2026-08-14/will-i-am-why-human-creativity-will-survive",
+    "author": null,
+    "published_at": "2026-08-14T05:00:09.000Z",
+    "content_text": "The musician and tech CEO will.i.am tells Mishal Husain why he believes AI can assist human creativity and what the song “Where Is the Love?” means in a fractured world. (Source: Bloomberg)",
+    "image_url": null,
+    "source_tags": null,
+    "metadata": {
+      "source_name": "Bloomberg Technology",
+      "source_feed_url": "https://feeds.bloomberg.com/technology/news.rss",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": true,
+          "textLength": 189
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 189
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "content"
+    }
+  }
+]
+
+## Dow Jones
+https://feeds.content.dowjones.io/public/rss/socialeconomyfeed
+[
+  {
+    "source_item_origin_id": "WP-WSJ-0003817033",
+    "title": "President Trump unveiled a slate of tariffs to address a national-security threat posed by imports of drones and their components, particularly from China",
+    "url": "https://www.wsj.com/economy/trade/trump-announces-drone-tariffs-to-protect-national-security-bolster-u-s-supply-chains-87bab5b8?mod=rss_socialeconomyfeed",
+    "author": "Fabiana Negrin Ochoa",
+    "published_at": "2026-08-14T04:41:00.000Z",
+    "content_text": "The White House said the drone tariff program will protect the security of the U.S. and its defense and defense-adjacent industrial base.",
+    "image_url": "https://images.wsj.net/im-54692894",
+    "source_tags": null,
+    "metadata": {
+      "source_name": "Dow Jones",
+      "source_feed_url": "https://feeds.content.dowjones.io/public/rss/socialeconomyfeed",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": true,
+          "textLength": 137
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 137
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "content"
+    }
+  },
+  {
+    "source_item_origin_id": "WP-WSJ-0003814800",
+    "title": "U.S. Jobless Claims Rose Again Last Week",
+    "url": "https://www.wsj.com/economy/jobs/u-s-jobless-claims-rose-again-last-week-29384997?mod=rss_socialeconomyfeed",
+    "author": "Dean Seal",
+    "published_at": "2026-08-13T12:59:00.000Z",
+    "content_text": "The number of people who filed for unemployment benefits was 209,000 in the week through Aug. 8, higher than the 204,000 claims expected by economists.",
+    "image_url": "https://images.wsj.net/im-65429208",
+    "source_tags": null,
+    "metadata": {
+      "source_name": "Dow Jones",
+      "source_feed_url": "https://feeds.content.dowjones.io/public/rss/socialeconomyfeed",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": true,
+          "textLength": 151
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 151
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "content"
+    }
+  },
+  {
+    "source_item_origin_id": "WP-WSJ-0003814785",
+    "title": "U.S. Producer-Price Index Unchanged in July",
+    "url": "https://www.wsj.com/economy/central-banking/u-s-producer-price-index-unchanged-in-july-9ad7702d?mod=rss_socialeconomyfeed",
+    "author": "Jessica Coacci",
+    "published_at": "2026-08-13T12:48:00.000Z",
+    "content_text": "The producer-price index was flat in July, after falling by 0.1% in June, as energy prices edged down, the Labor Department said.",
+    "image_url": "https://images.wsj.net/im-55159870",
+    "source_tags": null,
+    "metadata": {
+      "source_name": "Dow Jones",
+      "source_feed_url": "https://feeds.content.dowjones.io/public/rss/socialeconomyfeed",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": true,
+          "textLength": 129
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 129
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "content"
+    }
+  }
+]
+
+## BLS
+https://www.bls.gov/feed/bls_latest.rss
+[
+  {
+    "source_item_origin_id": null,
+    "title": "Major Economic Indicators Latest Numbers",
+    "url": "https://www.bls.gov/bls/",
+    "author": "U.S. Bureau of Labor Statistics",
+    "published_at": "2026-08-13T12:32:01.000Z",
+    "content_text": "Consumer Price Index (CPI): +0.1% in Jul 2026 News Release Historical Data Unemployment Rate: 4.1% in Jul 2026 News Release Historical Data Payroll Employment: -23,000(p) in Jul 2026 News Release Historical Data Average Hourly Earnings: +$0.02(p) in Jul 2026 News Release Historical Data Producer Price Index - Final Demand: unchanged in Jul 2026 News Release Historical Data Employment Cost Index (ECI): +0.9% in 2nd Qtr of 2026 News Release Historical Data Productivity: +1.4% in 2nd Qtr of 2026 News Release Historical Data U.S. Import Price Index: +0.3% in Jun 2026 News Release Historical Data U.S. Export Price Index: -0.6% in Jun 2026 News Release Historical Data p - preliminary",
+    "image_url": null,
+    "source_tags": null,
+    "metadata": {
+      "source_name": "BLS",
+      "source_feed_url": "https://www.bls.gov/feed/bls_latest.rss",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": true,
+          "textLength": 686
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 685
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "content"
+    }
+  }
+]
+
+## TechCrunch
+https://techcrunch.com/feed/
+[
+  {
+    "source_item_origin_id": "https://techcrunch.com/?p=3152989",
+    "title": "Investors sue Selena Gomez alleging fraud tied to her mental health startup",
+    "url": "https://techcrunch.com/2026/08/13/investors-sue-selena-gomez-alleging-fraud-tied-to-her-mental-health-startup/",
+    "author": "Aisha Malik",
+    "published_at": "2026-08-13T22:12:40.000Z",
+    "content_text": "The plaintiffs say they invested nearly $1.2 million in the company, and are accusing Gomez of failing to build and market the startup.",
+    "image_url": null,
+    "source_tags": [
+      "Biotech & Health",
+      "Startups",
+      "fraud",
+      "In Brief",
+      "lawsuit"
+    ],
+    "metadata": {
+      "source_name": "TechCrunch",
+      "source_feed_url": "https://techcrunch.com/feed/",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": true,
+          "textLength": 135
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 135
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "content"
+    }
+  },
+  {
+    "source_item_origin_id": "https://techcrunch.com/?p=3152977",
+    "title": "Flock says its new tool will help identify police abuse, but hasn’t explained how it works",
+    "url": "https://techcrunch.com/2026/08/13/flock-says-its-new-tool-will-help-identify-police-abuse-but-hasnt-explained-how-it-works/",
+    "author": "Lorenzo Franceschi-Bicchierai",
+    "published_at": "2026-08-13T22:02:04.000Z",
+    "content_text": "The surveillance company announced it's making a tool called \"Audit Assistance\" mandatory for all customers, claiming it's already helped catch abuse. But the company has yet to explain how the tool works in detail, raising questions about its effectiveness.",
+    "image_url": null,
+    "source_tags": [
+      "Security",
+      "Flock",
+      "privacy",
+      "surveillance"
+    ],
+    "metadata": {
+      "source_name": "TechCrunch",
+      "source_feed_url": "https://techcrunch.com/feed/",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": true,
+          "textLength": 258
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 258
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "content"
+    }
+  },
+  {
+    "source_item_origin_id": "https://techcrunch.com/?p=3152998",
+    "title": "If Apple sends you a push notification alerting you to a spyware attack, take it seriously",
+    "url": "https://techcrunch.com/2026/08/13/if-apple-sends-you-a-push-notification-alerting-you-to-a-spyware-attack-take-it-seriously/",
+    "author": "Zack Whittaker",
+    "published_at": "2026-08-13T21:50:11.000Z",
+    "content_text": "Apple now sends out push notifications to iPhone lock screens when the company identifies government spyware targeting someone's devices.",
+    "image_url": null,
+    "source_tags": [
+      "Security",
+      "Apple",
+      "cybersecurity",
+      "iPhone",
+      "Spyware"
+    ],
+    "metadata": {
+      "source_name": "TechCrunch",
+      "source_feed_url": "https://techcrunch.com/feed/",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": true,
+          "textLength": 137
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 137
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "content"
+    }
+  }
+]
+
+## Nature Chemistry
+https://www.nature.com/subjects/chemistry.rss
+[
+  {
+    "source_item_origin_id": "https://www.nature.com/articles/s41467-026-76791-y",
+    "title": "Reconciling strong coordination and anion-reinforced solvation structure enables nonflammable electrolytes for potassium-ion batteries",
+    "url": "https://www.nature.com/articles/s41467-026-76791-y",
+    "author": null,
+    "published_at": "2026-08-14T00:00:00.000Z",
+    "content_text": "",
+    "image_url": null,
+    "source_tags": null,
+    "metadata": {
+      "source_name": "Nature Chemistry",
+      "source_feed_url": "https://www.nature.com/subjects/chemistry.rss",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": false,
+          "textLength": 0
+        },
+        "contentSnippet": {
+          "present": false,
+          "textLength": 0
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": null
+    }
+  },
+  {
+    "source_item_origin_id": "https://www.nature.com/articles/s41467-026-76735-6",
+    "title": "Macroscopic chirogenesis and photoinduced chiral motions enabled by selective accommodation of protic guests",
+    "url": "https://www.nature.com/articles/s41467-026-76735-6",
+    "author": null,
+    "published_at": "2026-08-14T00:00:00.000Z",
+    "content_text": "",
+    "image_url": null,
+    "source_tags": null,
+    "metadata": {
+      "source_name": "Nature Chemistry",
+      "source_feed_url": "https://www.nature.com/subjects/chemistry.rss",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": false,
+          "textLength": 0
+        },
+        "contentSnippet": {
+          "present": false,
+          "textLength": 0
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": null
+    }
+  },
+  {
+    "source_item_origin_id": "https://www.nature.com/articles/s44386-026-00066-1",
+    "title": "On the generalization and usability of cofolding models for GPCR drug discovery",
+    "url": "https://www.nature.com/articles/s44386-026-00066-1",
+    "author": null,
+    "published_at": "2026-08-14T00:00:00.000Z",
+    "content_text": "",
+    "image_url": null,
+    "source_tags": null,
+    "metadata": {
+      "source_name": "Nature Chemistry",
+      "source_feed_url": "https://www.nature.com/subjects/chemistry.rss",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": false,
+          "textLength": 0
+        },
+        "contentSnippet": {
+          "present": false,
+          "textLength": 0
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": null
+    }
+  }
+]
+
+## SemiAnalysis
+https://semianalysis.com/feed/
+[
+  {
+    "source_item_origin_id": "https://semianalysis.com/?p=150450148",
+    "title": "xAI’s Colossus 2 – First Gigawatt Datacenter In The World, Unique RL Methodology, Capital Raise",
+    "url": "https://semianalysis.com/2025/09/16/xais-colossus-2-first-gigawatt-datacenter/",
+    "author": "Jeremie Eliahou Ontiveros",
+    "published_at": "2025-09-16T17:38:01.000Z",
+    "content_text": "Much has been written about xAI’s Colossus 1. The Memphis build belongs in the history books: the largest AI training cluster, erected from scratch in 122 days. With roughly 200,000 H100/H200s and ~30,000 GB200 NVL72, it remains, today, the largest fully operational, single-coherent cluster (setting apart Google, master of multi-datacenter-training ). However, Colossus 1’s ~300 MW looks modest next to the Gigawatt-scale clusters under construction by OpenAI , Meta and Anthropic . Their hyperscaler partners are happy to leverage their balance sheet and win the market by throwing dollars at it. Was xAI’s prowess a one-time wonder? Today we will publicize some data from our industry leading datacenter model over the last year that is accessible to clients. This is the our same proprietary data that called the Oracle deals many months ahead of the announcement. Source: SemiAnalysis Datacenter Industry Model &#8211; note: there is a lag between Datacenter operational and GPUs operational &#8211; Google and exact figures available in model Short answer: no . xAI is still squarely in the frontier-AI race and is positioned to leapfrog most rivals again on compute. By our estimates, its total datacenter capacity for a single training cluster will surpass Meta Superintelligence and Anthropic by Q3 2025. The datacenter capacity will be ready for the GPUs to be moved in to create the largest single datacenter in the world, yet again. xAI has to raise the capital for those GPUs, but they have the allocations from Nvidia to have it fully training large scale models early next year. Elon came up with a new genius trick to beat rivals at time-to-market. Colossus 2 will be an even more impressive achievement than xAI’s first cluster. Let’s dig in. The first half of this report will dig into the Colossus 2 prowess. The second half will discuss Grok models, our mid-to-long term thoughts on xAI, and the unique RL method xAI is using that may lead them to leapfrog OpenAI, Anthropic, and Google. SemiAnalysis Is Hiring We are seeking a highly motivated & skilled Member of Technical Staff to join our growing special projects engineering team. You will play a crucial role in developing industry leading gpu cloud benchmarks & evaluation framework. Our gpu cloud evaluation frameworks is endorsed by many tier 1 & 2 frontier labs. You may be a good fit if you have the following experience: Demonstrated experience in ML frameworks such as PyTorch or JAX through professional experience, personal projects, or personal Substack blogs 1-2 years using GPU or TPU clusters and/or running a multi-tenant GPU cluster Past experience working at a hyperscaler or a GPU cloud (preferred) Solid understanding of SLURM, Kubernetes, NCCL & GPU Cloud industry Strong research skills and the ability to synthesize information from various sources to draw insights Compensation is competitive & as part of the interview process, you&#8217;ll complete a paid coding challenge designed to reflect typical daily tasks at SemiAnalysis Apply Here Colossus 2: from zero to 200MW in six months The Colossus 2 project was kicked off on March 7 th , 2025, when xAI acquired a 1m sqft warehouse in Memphis, and two adjacent sites totaling 100 acres. By August 22 nd , 2025, we count 119 air-cooled chillers on site, i.e. roughly 200MW of cooling capacity . That&#8217;s enough to power roughly 110k GB200 NVL72. And an Elon tweet shows some racks were already installed in July. xAI built in six months what took 15 months for Oracle, Crusoe and OpenAI! Source: SemiAnalysis Datacenter Industry Model Looking closer at the picture above, readers familiar with our Datacenter Anatomy series might wonder where the power infrastructure is. The picture doesn’t show any onsite substation, nor does it show onsite turbines… How is the datacenter powered? Subscribe to get notified of all SemiAnalysis articles Log in or Subscribe By subscribing, you agree to the Privacy Policy and Terms and Conditions . Colossus 2: in Tennessee, Mississippi… or both? Things get more confusing once factoring-in a Greater Memphis Chamber statement in May that no turbines would be sited in Memphis . They’re not lying. Memphis and Tennessee have been getting a lot of pushback, so xAI’s genius move was to develop a Gigawatt-scale energy hub right across the border in Southaven, Mississippi . In mid-2025, the company acquired a former Duke Energy power plant in Southaven. Shortly after, Mississippi regulators granted xAI temporary approval to run gas turbines there for up to 12 months without a permit! Source: SemiAnalysis Datacenter Industry Model To transport and manage power generated by the Mississippi power plant, xAI is building infrastructure near Colossus 2. We show below the first deployment of Tesla Megapacks, as well as the Medium Voltage power lines connecting the two sites. Source: SemiAnalysis Datacenter Industry Model From 200MW to 1.1GW and Solaris Energy Infrastructure partnership In Southaven, MS, xAI is moving at the pace of light. The discontinued power plant now sees seven 35MW turbines in operations. Source: SemiAnalysis Datacenter Industry Model Subscribe to get notified of all SemiAnalysis articles Log in or Subscribe By subscribing, you agree to the Privacy Policy and Terms and Conditions . To deploy faster than peers, xAI relies on rental turbine companies. NYSE-listed Solaris Energy Infrastructure owns a fleet of 600MW of gas turbines, of which ~400MW currently serve xAI. Musk&#8217;s firm weighs 67% of SEI&#8217;s 1700MW orderbook, i.e. 1,140MW. There are ~240MW on the Memphis Colossus 1 site, while the remaining 900MW will be owned by a Joint Venture owned at 50.1% by Solaris and 49.9% by xAI. Source: Solaris Energy Infrastructure As shown below, ~460MW are currently installed and in operations/under construction. Source: SemiAnalysis Datacenter Industry Model The newly formed JV already spent $112 million in capital expenditures in Q2 2025. After a slow Q3, spending will pick up again in Q4 2025 and Q1 2026. Solaris expects to have over 1.1GW of fully operating turbines for xAI by Q2 2027. There remains ~425MW available for contracting, and we think xAI will likely pull the trigger to get to over 1.5GW of total gross power. Solaris also appears to temporarily lease power generation capacity from third parties to deliver faster: During the second quarter, the Power Solutions segment generated revenue from approximately 600 megawatts of capacity, an increase of greater than 50% from the prior quarter. This increase was driven by increased demand from our customers, which we are meeting using a combination of new equipment deliveries as well as selective short-term sourcing of third-party power generation capacity . Solaris Energy Infrastructure, Q2 2025 Source: Solaris Energy Infrastructure As such, xAI has figured out how to scale to >1GW from a power perspective. In terms of datacenter space, we see four options: Given a 40ft height, xAI could turn their 1mm sqft warehouse into a two-story datacenter, doubling the space. Given ultra-high density, 2mm sqft could be enough for >1GW. xAI could build a second, smaller facility in parcel 3 They could acquire more land, possibly in Mississippi near the Southaven plant. Using non-standard layout of the datacenter, they could achieve >1GW as is. Parcels of land owned by xAI at the Colossus 2 site Can xAI afford Colossus 2? Further expansion will require ample funding. Required CapEx for Colossus 2 will be in the tens of billions of dollars, and xAI is yet to generate any meaningful external revenue, with the preponderance of the rumored 9 digit revenue ARR being inter-company transfers from X.com to xAI. We’ve forecasted xAI’s CapEx on Core Research, our institutional research service and are now closely tracking the ROIC of AI investments across the hyperscalers and AI labs in our new Tokenomics model . Source: SemiAnalysis Tokenomics Model Estimates Middle East – funding + datacenters, a winning combination? To be clear, in typical xAI & Elon fashion, the company’s future is highly unpredictable. But given funding needs, we see a large-scale expansion in the Middle East as likely. Musk and the Middle have a long-time relationship: KSA’s Kingdom Holding Company (owned at 16.87% by the Public Investment Fund) owned and kept a $1.9B stake in Twitter when Musk took the company private in 2022. It also owned a $800M stake in xAI prior to the merger with X. UAE’s privately owned Vy Capital brought in $700M in 2022 to support Elon’s takeover of Twitter. It also invested in xAI’s Series C, alongside UAE state fund MGX. Qatar’s QIA also owned and kept a $375M stake in Twitter, and participated on xAI’s Series C. According to the FT , xAI is preparing a new round in the tens of billions, valuing the company close to $200B, with Saudi’s PIF sovereign wealth fun playing a large role. This is challenging though because its hard for most investors to justify xAI as having a valuation higher than Anthropic. We&#8217;ve heard of a raise as large as $40B. Given skyrocketing datacenter growth in the area, we see a two-way deal as likely, with xAI deploying that capital in a new large scale datacenter in the Kingdom. Source: SemiAnalysis Datacenter Industry Model We show below a likely location for xAI’s expansion, a large-scale planned located Saudi Arabia that recently broke ground. While still early, there is plenty of land and power to serve large-scale AI campuses. Source: SemiAnalysis Datacenter Industry Model For more details on the Middle East’s AI expansion, check out our May 2025 deep dive. AI Arrives In The Middle East: US Strikes A Deal with UAE and KSA Beyond external capital sources, Elon could generate capital internally. Since merging X.com with xAI to form X Holdings, we believe an ever growing piece of xAI&#8217;s revenues is inter-company transfers, i.e. calls to @Grok to answer questions or just X.com licensing the LLM technology for functionality such as search, ad recsys, or even content creation. This is just money going from Elon&#8217;s right pocket to his left pocket. From what we can track externally, Ani was a huge boon for Grok app revenue but even growth in that revenue stream has flattened out in recent months. Ani needs more gacha to grow revenue further. Source: SemiAnalysis estimates and Sensortower At the end of the day, Elon can get Tesla to invest more or take loans on more of his Tesla and SpaceX stocks to invest tens of billions into xAI. This will allow them to build Colossus 2. No one truly knows how levered Elon is already, but it is widely understood he can always sell and unlock a lot more of his dry powder into xAI. Elon will do everything he can to not lose to Sam Altman. Let’s now discuss xAI as a business and whether we think the company has a shot at being a Frontier AI Lab and justifying a multi-hundred-bullion dollar valuation. We have some unique info and insights below and why they may have a shot at being first to AGI due to their different approach. Does xAI have a shot at becoming a frontier lab? Subscribe for full access to this article With a SemiAnalysis subscription you&#8217;ll get access to newsletter articles and article discussions. Model access not included &#8211; please reach out to sales@semianalysis.com for our institutional offerings. Log in By subscribing, you agree to the Privacy Policy and Terms and Conditions .",
+    "image_url": "https://i0.wp.com/semianalysis.com/wp-content/uploads/2025/09/image-91.png?resize=1024%2C552&#038;quality=80&#038;ssl=1",
+    "source_tags": [
+      "Archive"
+    ],
+    "metadata": {
+      "source_name": "SemiAnalysis",
+      "source_feed_url": "https://semianalysis.com/feed/",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": true,
+          "textLength": 11448
+        },
+        "content": {
+          "present": true,
+          "textLength": 392
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 386
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "contentEncoded",
+      "comments": "https://semianalysis.com/2025/09/16/xais-colossus-2-first-gigawatt-datacenter/#comments"
+    }
+  },
+  {
+    "source_item_origin_id": "https://semianalysis.com/?p=150450611",
+    "title": "Another Giant Leap: The Rubin CPX Specialized Accelerator & Rack",
+    "url": "https://semianalysis.com/2025/09/10/another-giant-leap-the-rubin-cpx-specialized-accelerator-rack/",
+    "author": "Dylan Patel",
+    "published_at": "2025-09-10T19:57:18.000Z",
+    "content_text": "Nvidia announced the Rubin CPX, a solution that is specifically designed to be optimized for the prefill phase, with the single-die Rubin CPX heavily emphasizing compute FLOPS over memory bandwidth. This is a game changer for inference, and its significance is surpassed only by the March 2024 announcement of the GB200 NVL72 Oberon rack-scale form factor. Only with hardware specialized to the very different phases of inference, prefill and decode, can disaggregated serving achieve its full potential. As a result, the rack system design gap between Nvidia and its competitors has become canyon-sized. AMD and custom silicon competitors may have made a small step forward in emulating Nvidia’s 72-GPU rack scale design, but Nvidia has just made another Giant Leap, again leaving competitors very distant objects in the rear-view mirror. AMD and ASIC providers have already been investing heavily to catch up in terms of their own rack-scale solutions. AMD in particular has been working tirelessly to improve their software stack to try to close the gap with Nvidia, but now everyone will needs to redouble their investments yet again as they will have to develop their own prefill chips, delaying further the timeframe with which they can close this gap. With this announcement, all of Nvidia’s competitors will be sent back to the drawing board to reconfigure their entire roadmaps again in a repeat of how Oberon changed roadmaps across the industry. The Rubin CPX Because the prefill stage during inference tends to heavily utilize compute (FLOPS) and only lightly use memory bandwidth, running prefill on a chip with lots of expensive HBM featuring very high memory bandwidth is a waste. The answer is a chip that is skinny on memory bandwidth and relatively fat on compute. Enter the Rubin CPX GPU. Source: Nvidia The Rubin CPX features 20 PFLOPS of FP4 dense compute but only 2TB/s of memory bandwidth. It also features 128GB of GDDR7 memory, a lower quantity of less expensive memory when compared to the VR200. By comparison, the dual-die R200 chip offers 33.3 PFLOPS of FP4 dense and 288GB of HBM offering 20.5 TB/s of memory bandwidth. Source: SemiAnalysis, Nvidia The introduction of the Rubin CPX expands the VR200 family of rack scale servers into three flavors: VR200 NVL144: 72 GPUs packages across 18 compute trays, with 4 R200 GPU packages in each compute tray. VR200 NVL144 CPX: 72 Logical GPUs packages in addition to 144 Rubin CPX GPU packages across 18 compute trays, with 4 R200 GPU packages and 8 Rubin CPX GPU packages in each compute tray. Vera Rubin CPX Dual Rack: Two discrete racks – one VR200 NVL144 rack plus one VR CPX rack with 144 Rubin CPX GPUs across 18 compute trays, with 8 Rubin CPX GPUs in each compute tray. Source: SemiAnalysis, Nvidia In this report, we will first explain the story so far and the impetus for the development of the Rubin CPX because of the different role memory plays during prefill and decode phases of inference. We will then dive deep into the architecture of the Rubin CPX chip and the rack-scale solutions where it is deployed. We will then shift focus from the past and present to what the future holds with respect to disaggregated inference serving and how today’s announcement impacts future roadmaps and competitiveness for other merchant accelerator providers and custom silicon projects. In the final part of this article, we will briefly present a comprehensive list of key bill of materials (BoM) items for both racks and a power budget analysis by major component groups. Memory: The Story So Far The memory wall has been the most important constraint for AI. Larger memory capacities have been necessary to load larger models into accelerators, while memory bandwidth has been the main gating factor for inference and training token throughput. This is why high bandwidth memory (HBM) capacity and bandwidth per GPU have increased rapidly – from 80GB and 3.4TB/s for the H100 to 288GB and 8.0TB/s for the GB300, more than tripling memory capacity and increasing bandwidth by ~2.5x in less than three years. Consequently, HBM has consistently increased as a % of accelerator BOM from Hopper to Blackwell, with HBM now being the largest single component of the package BOM for the GB300. HBM is extremely valuable for both training and inference, but when we break down inference to its constituent parts of prefill and decode steps, HBM only has high value for the decode step. During prefill, which is compute intensive, the generation of KVCache is much less bandwidth intensive due to the parallel nature of prefill, therefore the HBM is underutilized during this step. HBM carries such an expensive premium relative to other forms of DRAM because of its additional bandwidth, and when this B/W is underutilized, this HBM is “wasted”. The escalating proportion of BOM taken up by HBM presents yet another “wall” and is the impetus behind the development of the Rubin CPX GPU. Source: SemiAnalysis Now that we have briefly explored the role memory has played thus far, let’s pivot to today’s announcement and explore in detail the architecture of the Rubin CPX and the rack scale servers where it is deployed. Bandwidth and Compute Difference Each Rubin CPX chip will be a monolithic SoC on a conventional flip chip BGA package. Instead of HBM, Rubin CPX will have 128GB of GDDR7 DRAM. Switching from using HBM to cheaper GDDR7 memory reduces the cost per GB by more than 50%. Memory speeds will likely be at 32Gbps with a 512-bit bus. This results in 2TB/s of memory bandwidth per Rubin CPX compared to 20.5TB/s of memory bandwidth per R200. Notably, with this keynote, Nvidia also confirms a significant bandwidth upgrade for regular Rubin. R200’s HBM4 speeds have been significantly increased to 10Gbps to achieve 20.5TB/s of memory bandwidth per R200 as we discussed in the Accelerator and HBM model previously . This compares to the R200 being first unveiled as &#8220;only&#8221; having 13TB/s of memory bandwidth specifications at a 6.4Gbps speed bin. We discussed and quantify the impacts to HBM suppliers in the model as well . The 144 CPX chips that each deliver 2.0 TB/s of memory bandwidth and the 72 R200 chips that deliver 20.5TB/s will combine to deliver total system memory bandwidth of 1.7PB/s. For compute, each CPX offers 30 PFLOPs of sparse FP4 computing throughput (20 PFLOP dense) compared to the R200 at 50 PFLOPs sparse FP4 (33.3 PFLOPs dense). Dense PFLOPs for the Rubin CPX follow the same 3:2 sparse to dense ratio as the R200 because it inherits a similar tensor core architecture as Rubin R200. The CPX offers very strong FP4 compute throughput for a single compute die relative to the two dies for R200. The gains are likely from reducing higher precision compute units to have more FP4 ALUs. This was what was implemented with the B300 to get higher FP4 throughput than the B200 while staying on the same 4NP node. However, as always, peak theoretical FLOPs are extremely hard to attain in practice. Like Nvidia’s other GPUs that are power-limited, it will be very difficult for Rubin CPX to sustain anywhere close to peak FLOPs given what we estimate to be rated power of only around 800W: we do not see it feasible to break past 1W/mm2 of power density, especially as the board comes is integrated in a sandwiched form factor (more on this below). What is also different is the network. There is no NVLink SerDes for scale-up, instead Rubin CPX relies on PCIe Gen 6 to talk to other GPUs through the CX-9 NICs on the scale-out network. This reduced network capability is more than feasible through implementing pipeline parallelism which we discuss below. Source: SemiAnalysis Accelerator & HBM Model , AI TCO Model , Above Figures are Demonstrative Because of the lower total silicon content and less expensive memory, the production cost of Rubin CPX is drastically lower than that of the R200. Lowering total memory capacity and using lower cost GDDR7 means that memory cost is 5x lower. The chip architecture is also far simpler since avoiding HBM and only have a single reticle-sized die without any I/O chiplets means CoWoS packaging is not required. For perspective, the design of Rubin CPX is similar to a next-generation RTX 5090 or RTX PRO 6000 Blackwell, as both use a large monolithic die with a 512-bit wide GDDR7 memory interface. As these chips are based on the consumer Blackwell GPU die, those chips only have 20% of the FLOPS as their HBM-enabled big brother, the B200. With Rubin CPX, this ratio jumps to 60% as it will be a separate tapeout that looks closer to the R200 compute die. As an exercise in achieving maximum FLOPS per unit cost &#8211; Rubin CPX is unmatched. Later in the article, we will break down the BOM advantage of Rubin CPX and estimate how much can be saved by moving prefill off R200 and onto Rubin CPX. Nvidia Oberon Rack Architecture Upgrade: VR NVL144 CPX, VR NVL144, VR CPX Let’s move outside of the Rubin CPX chip and into the two new Vera Rubin racks that will host the CPX. In March of last year, at GTC 2024, Nvidia presented the first generation of its Oberon Architecture: the GB200 NVL72. Fast forward a year and a half later, the second generation of Oberon, the GB300 NVL72, is about to ship in mass production volume. There are very few design changes and upgrades between the two generations. The third generation of Oberon architecture, Vera Rubin (VR), was the focus of Ian’s talk today at the AI Infra Summit. Available in 2026, less than three years after the debut of the Oberon rack-scale form factor, VR will see significant design changes and upgrades from GB200/GB300. Vera Rubin Oberon pushes power density of the Oberon architecture to its limits, requiring a significant upgrade in power delivery content and design changes in cooling solutions. The cableless design is chosen with consideration to overcome the difficulties with routing flyover cables in the GB200/GB300 assembly & the reliability challenges that the intra-tray cables caused. The cables connecting the OSFP cages to the ConnectX NIC have been removed. Cables connecting from PCIe to the frontend Bluefield DPU & to local NVMe storage have also been removed amongst other side band cables. The key changes and upgrades found in Vera Rubin are focused on a revamp of the following three Vera Rubin (VR) Compute Tray SKUs: VR NVL144 (Rubin Only) VR CPX (Rubin CPX Only) VR NVL144 CPX (Rubin + Rubin CPX in same tray) These three compute tray flavors are the building blocks for the three rack solutions discussed: VR NVL144 VR NVL144 CPX VR NVL144 + VR CPX (Dual Rack) Source: SemiAnalysis The first rack presented was the VR NVL144 CPX. This is similar to the VR NVL144, except that for the VR NVL144 CPX, in each of the 18 Compute Trays, in addition to 4 R200 GPUs and 2 Vera CPUs, we now also have 8 Rubin CPX GPUs in each compute tray as well. The VR NVL144 CPX rack will also be liquid cooled – but will have a much higher power budget at ~370kW vs the ~190kW for the VR NVL144. Source: SemiAnalysis, Nvidia Source: SemiAnalysis, Nvidia The other deployment option is the Vera Rubin CPX Dual Rack. As the name suggests, this solution allows customers that will have deployed VR NVL144 racks to subsequently add VR CPX racks to their datacenter later, enabling specialized hardware for disaggregated PD inferencing. VR CPX is not connected via NVLink, hence the VR CPX rack does not contain NVSwitch Trays. The VR CPX rack is connected to the cluster through scale-out InfiniBand or Ethernet networking and can be added on subsequently to a cluster in a convenient physical location – it need not be physically adjacent to a VR NVL144. The dual rack solution offers a lot more flexibility compared to VR NVL144 CPX as the customers can design the prefill to decode ratio to their likings. Also, not everyone’s datacenter infra will be ready for the ~370kW VR NVL144 CPX. In addition there is a smaller blast radius of failures compared to the single rack variant. Source: SemiAnalysis, Nvidia In the table below, we can see how much compute and networking content is crammed into one compute tray – a total of 22 Nvidia chips (14 of them being XPUs) in each compute tray, or 396 chips per VR NVL144 CPX rack. To cram all this content above into a single compute tray, Nvidia has moved to a cableless and modular design and is also redesigning the cooling loops within the compute tray. Source: Nvidia, SemiAnalysis Estimates The NVL144 CPX will maintain a similar compute board set up as GB200/GB300 for the back half of the compute tray chassis. The notable difference is the adoption of socketable SOCAMM DRAM modules instead of soldered LPDDR5X for the memory that runs off the CPU. Most of the difference between VR NVL144 CPX and GB200/GB300 is in the front half of the chassis below the Host Processor Motherboard (‘HPM’) compute board, also known as the “Bianca” board for Blackwell generation. At the front, the VR NVL144 CPX design is modular made up of 7 daughter card modules. Four daughter card modules are placed on both sides of the chasis. Each side has two daughter cards stacked on top of each other. These four daughter cards each contain two 800G CX-9 NICs, one 1.6T OSFP cage, one E1.S SSD NVMe Module, and two Rubin CPXs. One daughter card in the middle of the chassis (lower center of the diagram below) houses the Bluefield-4 Module, which contains one grace CPU and one CX-9 NIC. One daughter card stacked on top of this Bluefield-4 module houses the power delivery board (PDB). The PDB is responsible for stepping down power from 48-54V to 12-13.5V as it enters the chassis from the busbar connector at the back. The last daughter card is much smaller and is placed just to the right of the Bluefield-4 module. It is much slimmer and houses the utility management module containing items such as the BMC, HMC, DC-SCM, and management I/O. Source: SemiAnalysis Estimates, Nvidia Source: SemiAnalysis Estimates, Nvidia Source: SemiAnalysis Estimates, Nvidia Source: SemiAnalysis Estimates, Nvidia Source: SemiAnalysis Estimates, Nvidia We estimate the TDP of the Rubin CPX chip to be around 800W, though that rises to 880W in total when factoring in the whole module which contains the GDDR7 memory. To cool down the 7,040W of Rubin CPX modules at the front of the compute tray, the front of chassis cooling must be upgraded from air cooling to liquid cooling. To accomplish this, NVIDIA has brought back a design from its 2009 GTX 295. The Rubin CPX and CX9 daughter cards are arranged in a sandwiched design with a shared liquid-cooled cold plate in between. Source: SemiAnalysis Estimates, Nvidia Source: SemiAnalysis Estimates, Nvidia Source: SemiAnalysis Estimates, Nvidia On the outer sides of the PCBs, heat pipes and heat spreaders transfer heat from the back of each clamshell GDDR7 memory modules to the main cold plate. Halving the compute tray area needed to house these GPUs by making full use of the 1U tray height and using both sides of the cold plate allows for maximum density. Source: SemiAnalysis Estimates, Nvidia Another key design change of VR NVL144 CPX is the adoption of cableless design. As we discussed in our PCB Supercycle Core Research note as well as our recent Core Research note on Amphenol’s AI Content , there are two reasons for this design. First, flyover cables present multiple different points of failure as they can easily be damaged during assembly. Second, the high-density design of VR NVL144 CPX leaves no space for cables to be routed. So how are the signals routed without cables? The answer is simple: signals from the HPM (Bianca) board travel off the board via the Paladin board to board connector from Amphenol. This is discussed in more detail in our recent article on Amphenol’s AI Content . The signal is then routed through a PCB midplane sitting in the middle of the chassis. On the other side of the PCB midplane, the daughter cards connect to the PCB midplane via another set of Paladin B2B connectors. Source: SemiAnalysis Estimates, Nvidia Source: SemiAnalysis Estimates, Nvidia To accommodate this cableless design, the CX-9 NICs on the upper part of the HPM (Bianca) board are moved from the back half to the front half of the chassis as illustrated in the diagram below. For the GB200/GB300, the PCIe signal distance between the GPU/CPU and the CX-7/8 is shorter than the Ethernet/Infiniband signal distance between the CX-7/8 and the OSFP cages. Previously – having to transmit a 200G Ethernet/InfiniBand signal from the NIC in the back half of the compute tray to the OSFP cage in the front of the compute tray necessitated the use of flyover cables as the signal loss over PCB at 200Gbit/s (uni-directional) per lane is too high. But now that the NIC is closer to the OSFP cage, the lower speed per lane PCIe Gen6 signals (64Gbit/s per lane uni-directional) travel the longer distance, and this connectivity can now be routed over PCB. Although it is still challenging to drive PCIe Gen6 signals over PCB, proper signal integrity can still be achieved by upgrading PCB materials. Source: SemiAnalysis Estimates, Nvidia Source: SemiAnalysis Estimates, Nvidia For better serviceability, the daughter cards are also designed as a module. Each daughter card module can slide in and out of the daughter card module bay. Within the compute tray, there are internal rail kits designed for this purpose. Below we show how the signals are routed within different Vera Rubin compute tray SKUs as well as the compute tray topology of the VR Rubin SKUs. One highlight from these diagrams is that CX-9 plays a critical role in enabling Rubin CPX and scale out connections, as it is an integrated PCIe switch too. Source: SemiAnalysis, Nvidia Source: SemiAnalysis, Nvidia Source: SemiAnalysis, Nvidia Source: SemiAnalysis, Nvidia Source: SemiAnalysis, Nvidia Source: SemiAnalysis, Nvidia The Giant Leap: Disaggregated Serving Today’s announcement of Rubin CPX is a game changer for inference, and its significance is surpassed only by the first announcement of the GB200 NVL72 Oberon rack-scale form factor. Only with hardware specialized to the very different phases of inference, prefill and decode, can disaggregated serving truly be attained. In this section we will explain the evolution from traditional serving to disaggregated serving with uniform hardware and end with an analysis on disaggregated serving with specialized hardware. We will demonstrate how much waste is incurred by disaggregated serving with uniform hardware. Once specialized inference hardware becomes ubiquitous, using uniform hardware will feel like buying a jackhammer to squash a bug. As we mentioned earlier in the article, the release of the Rubin CPX will send Nvidia’s competitors back to the drawing board to reshape their roadmaps. To not release a prefill specialized chip of their own will mean saddling their own customers with inefficient systems that will guarantee those customers will lose in the tokenomics marketplace. Serving an LLM request involves two phases: the prefill phase and decode phase. In the prefill phase, the LLM generates the first token from the user prompt. This phase affects the time-to-first token (TTFT), and it is usually compute-bounded, under-utilizing the memory bandwidth . On the other hand, the decode phase generates a new token while loading the previous tokens from the KV cache. This phase affects time-per-output-token (TPOT), and it is always memory-bounded, under-utilizing the compute. Source: NVIDIA Source: SemiAnalysis Estimates In the chart below, we see an illustrative example highlighting the tradeoff between memory bandwidth and FLOPS utilization when conducting prefill and decode on the same system. The FLOPS required to prefill a single token scales linearly with respect to input sequence length. FLOPS requirements for decode also scales with respect to users on the system (i.e. batch size) and sequence lengths. A short input sequence length may not fully saturate the FLOPS available on an inference system, in which case the system’s output will be limited by the speed at which parameters can be loaded into chip memory – which is a function of memory bandwidth. As input sequence length increases, however, eventually the workload will grow to use all available FLOPS on the inference system, and the workload will be constrained by the total system FLOPS. In the right half of the chart below, we illustrate that when sequence length exceeds 32k, the FLOPS utilization reaches 100% while the memory bandwidth utilization drops. Source: SemiAnalysis Thus we can see that when a node is conducting a very prefill heavy workload – with long sequence lengths or large batch sizes, the memory bandwidth goes unutilized. As mentioned in the previous section, with the % of Chip BOM dedicated to memory increasing continually over the past few years, this ends up being a very expensive underutilization of resources! Inefficiency also comes from the fact that the workload characteristics of the prefill and the decode phases are so inherently different that prefill and decode requests always interfere with each other’s performance when they are processed concurrently. There are many optimizations to try to balance both – for example adding prefill calculations to decide to ensure a somewhat uniform request length to improve utilization, but they always result in tradeoffs. Another approach is to separate the prefill and decode phases completely, but if you prioritize the decode phase, then your prefill will need to wait – resulting in a long time to first token. Conversely, if you prioritize prefill, your decode phase will be forced to wait and your inter-token latency will be slow as memory bandwidth then goes underutilized. An Initial Step: Disaggregated Prefill and Decode with the Same Hardware The first order solution is to implement disaggregated serving to first tackle the interference by routing prefill and decode requests to separate compute units, making it simpler to reason about performance. This has the benefit of being able to better manage service level agreements (SLAs) that tend to focus on a certain level of token/s/user. There are a few catches however. This complete disaggregation only seems to provide excellent results under certain input/output sequence length ratios and for long decode lengths, with other scenarios seeing underwhelming benefits. In addition, this disaggregation still leaves the “wrong sizing” problem whereby a pure prefill operation will almost always heavily underutilize memory bandwidth. In the illustrative example below, we show how an R200 would hardly use much of its memory bandwidth when being used solely for prefill. As we increase sequence length and more efficiently use FLOPS available, the memory bandwidth utilization becomes increasingly minimal – effectively wasting very expensive HBM memory. Source: SemiAnalysis The Next Step: Disaggregated Prefill and Decode on Specialized Hardware – Enter the Rubin CPX Since prefill is inherently going to underutilize memory bandwidth resources one approach to reduce wastage is to reduce the quantity and cost of the memory. This is exactly the approach the Rubin CPX has taken by using lower quantities of less expensive GDDR7 memory. In the illustrative example below, we show how an R200 hardly use much of its memory bandwidth when being used solely for prefill. In contrast, the Rubin CPX actually utilizes a higher percent of its memory bandwidth at fairly short input lengths before dropping even further for input lengths that we would consider typical. Source: SemiAnalysis Indeed, we stress this is not about efficiency for efficiency’s sake –and there is a huge impact to the bottom line! In the table below, we use provide an example to compare the memory bandwidth utilization for the R200 GPU and the Rubin CPX GPU. In this scenario, both suffer from very low memory bandwidth utilization, but the difference is that the Rubin CPX GPU is at least leaving lower quantities of far less expensive memory on the table. For the R200 – we see that the exact same prefill workload as is run on the CPX results in a $0.90/hr total cost of ownership wastage! Source: SemiAnalysis Rubin CPX brings more memory capacity but the bits are “lower quality” as they are GDDR7, which is less than half the cost of HBM on a per GB basis. From a memory vendor perspective, GDDR7 is less margin because it is a less technically demanding product with more competition (i.e. Samsung can supply it). What this means is that the use of CPX systems lowers HBM’s share of total system content. For every dollar spent on the VR200 NVL144 CPX or a VR CPX rack, a lower share of that dollar is spent on HBM when compared to the same dollar spend on a standalone VR200 NVL144 rack. All else being equal, assuming a fixed dollar spent on AI systems, HBM demand per dollar spent will decline. Why Not Just Reduce Memory Further? Many readers are doubtless salivating at the idea of spending less on HBM and are thinking: Why not curtail the amount of memory in a system even further? If a typical prefill sequence length means a memory utilization of low double digits or even single digits &#8211; why not reduce memory capacity to 1/10 th the size? Does this mean doom for HBM demand and memory demand in general? Source: SoftRAM However, things are not so simple in technology. What Rubin CPX does is reduce the cost of pre-fill and tokens. Lower cost of tokens increases demand, which means more demand for decode increases as well. Like many other technological innovations that drive down cost, increases in demand usually more than offsets a drop in cost, netting out to a higher total dollar market size. There are additional supply chain implications of this GDDR7 demand. The RTX Pro 6000 also uses GDDR7 but at a lower 28Gbps speed. Nvidia has put in huge supply chain orders for the RTX Pro SKU, with the original plan being to sell chips to China as a replacement for the H20 before export licenses for the H20 were reissued. These orders were primarily placed with Samsung, who had the capacity to meet these sudden rush orders. SK Hynix and Micron were not able to meet this demand as their wafer capacity was tied up to serve their HBM orders among other things. As Samsung can deliver competitive GDDR7, Samsung could similarly benefit from the Rubin CPX. More on Prefill Pipeline Parallelism: One Interesting Upside of Disaggregated Prefill with the Rubin CPX In the prior section we outlined how the Rubin CPX reduces memory wastage, but Rubin CPX foregoes the use of very fast scale-up network capabilities solutions such as NVLink is another key saving. Rubin CPX’s off-chip I/O is limited to 16 lanes of PCIe Gen6 which is approximately 1Tbit/s of unidirectional bandwidth vs 14.4Tbit/s of NVLink for R200. This is enough I/O for performing prefill even for modern MoE frontier LLMs. For instance, DeepSeek V3 when running on the NVFP4 number format will require 335GB of memory capacity to load all the model weights – this exceeds the 128GB of memory capacity of a single CPX chip. This can be overcome by using pipeline parallelism (‘PP’), where multiple layers of a model are split across different GPUs. In PP, each GPU processes tokens sequentially and will pass activations down the pipeline. The disadvantage of PP is that the tokens are passed sequentially across many GPUs, incurring latency from inter-stage communications. The important implication is that PP will tend to deliver higher token throughput per GPU than Expert Parallelism (EP), but the tradeoff is that PP suffers from a higher time to first token (TTFT) than EP. PP has higher tok/s/gpu throughput because EP has high communications overhead as it involves all-to-all collective operations vs a simple send and receive operation in the case of PP. So, for pipeline parallel inference, the simpler communications requirements mean that prefill will almost never saturate communications links – meaning there is no need to provision expensive fast scale-up networking. Like with HBM, this is another area where one can find savings by peeling away yet another layer of equipment that goes unused during prefill-only operations – sparing the system owner wasted TCO dollars. In the table below, we show that prefill for DeepSeek using a parallelism scheme of PP8 or PP4 results in a message size per token of 7kB. If we were to fully saturate the PCIe Gen6 x16 lanes of I/O with messages, this means we could at most transmit (and therefore process) 18.3M tokens per second. This is the communications bound. Turning to the compute bound scenario, we see that prefill FLOP per token is 0.074 TFLOP. So, if we divide the Rubin CPX’s dense FP4 throughput of 19,800 PFLOPS by 0.074 TFLOP, we arrive a maximum token throughput of 267.6k tokens/second. This is far below the communications bound and vastly under saturates even a fairly vanilla PCIe Gen6 I/O let alone NVLink which delivers over 14x the bandwidth of 16 lanes of PCIe Gen6. We estimate that the total NVLink Scale-up cost to the end system owner (inclusive of NVSwitches and Backplane) stands at around ~$8k per GPU – which is just over 10% of the all-in cluster cost per GPU. This is the other dimension along which Rubin CPX delivers considerable savings to the end user. Source: SemiAnalysis However, attempting to use Expert Parallelism with lower speed networking connectivity will lead to latency issues and bottlenecks. Communications need scale with respect to the product of top_k times number of layers. DeepSeek V3 has a top_k of 8 and has 61 layers, so a back of the envelope calculation would indicate that using EP over PP would increase communications requirements by ~488x. One More Thing on Scaling and Huang’s Law Today’s discussion focused on metrics for inference using the NVFP4 number format. Indeed, inference providers have been continually unlocking more throughput by pulling the level of adopting lower and lower precision number formats. However – once we are at FP4 – we will start to run out of juice to squeeze. Sparsity has been presented as another lever to pull to keep unlocking more throughput, a key reason why most marketing specifications and decks communicate in terms of Sparse TFLOPS, however sparsity has yet to actually deliver the promised benefits – falling well short of the 2x pickup it promises. Today’s announcement also unveiled sparsity for Rubin. This sparsity scheme is unlike the 2:4 structured sparsity used in Hopper and Ampere, and it isn’t like Blackwell’s 4:8 pairwise structured sparsity either. We hope Rubin Sparsity is able to yield meaningful throughput benefits and keep Huang’s law on track! Downsides of Hardware-specialized Disaggregated Serving As exciting as the advent of prefill specialized chips are, we have not yet reached Nirvana, and hardware specialized disaggregated serving comes with its downsides too. As a provider’s workloads and models change, it is crucial for them to be able to change the prefill to decode instance ratio (PD ratio). What Now For Custom Silicon? The optimum PD ratio is sensitive to numerous factors, including model architecture, SLA, networking bandwidth, etc. However, one key disadvantage of the Vera Rubin NVL144 CPX is that it has a fixed number and ratio of Rubin and Rubin CPX chips, which makes it less flexible should one wish to change the PD ratio. Nvidia’s agility in evolving chips is shifting the landscape rapidly around its competitors. Just as soon as competitors are in striking distance of parity in terms of performance or architecture, Nvidia evolves its products along another dimension. Let’s discuss how widespread adoption of Rubin CPX GPU could impact competing solutions. Google TPU The TPU’s 3D Torus scale-up network provides a unique advantage in that it allows a maximum pod size of up to 9,216 TPUs. This is the largest world size in the industry, yet it offers some of the lowest scale-up networking cost per accelerator. This enables a very broad array of parallelism schemes that other smaller world sizes might not support. With that said, it would be ideal for Google to develop a prefill only chip to continue to maintain their performance per dollar advantage for internal workloads. They have the internal workloads to generate anchor demand to bootstrap and fund the development of a prefill-only chip that can also be later marketed for external use. Google’s unique topology means that there will be certain inference system configurations and models where performance may even exceed that of certain Nvidia systems. AWS Trainium3 Max NVL72, AWS EFA NICs and Meta MTIAv4 SUE72 Systems from providers that have internal workloads but are pursuing designs that emulate the NVL72 rack form factor form another category. These providers also have the internal workloads to bootstrap the development of prefill only chips, and it is ideal for them to do so in order to remain at parity with Nvidia’s VR200 NVL144 CPX. For instance, a prefill only chip for use in conjunction with the Trainium3 Teton-3 Max NL72 (featuring a 72-logical GPU with all to all switched scale-up size just like the VR200 NVL144) can lean on Anthropic’s demand to codesign and gain adoption for their inference workloads. There will be major time to market challenges for AWS for its VR 144 CPX due to the fact that their 1U compute tray is already tightly integrated and packed with 4 large Rubin GPU packages and 8 CPX GPU packages leaving no space to add AWS’s custom EFA NICs into the compute tray. Amazon does not want to use ConnectX-9. AWS LOVES EFA! We believe that they will continue using EFA and overcome this challenge by disaggregating their EFA NICs into an EFA NIC only sidecar rack and use external PCIe AEC cables to connect between the VR 144 CPX rack and the EFA NIC only sidecar rack. Furthermore, since they will not use the ConnectX-9 NIC, which has an integrated PCIe switch, they would also need to use Astera Labs’ dedicated PCIe switches to connect between the Vera CPU, local NVMe, Rubin CPX GPU as well as the external PCIe AEC cable to the EFA NIC in the sidecar rack. MTIAv4’s SUE72 (featuring a 72-logical GPU with all to all switched scale-up size just like the VR200 NVL144) design similarly can lean on Meta internal inference workloads. Even emerging designs such as OpenAI’s chip with Broadcom stand to compete given they will be codesigned with Frontier Models in mind and with an internal workload as a backstop. Despite enjoying the benefit of internal demand, the MTIAv3 is excluded from this category due to its small 16 GPU world size. It will effectively now need to develop prefill-only silicon to even have a shot at parity with upcoming Nvidia systems. AMD MI400 Series UALoE72 and MI500 UAL256 However, with the launch of Rubin CPX GPU, AMD’s comeback strategy is now looking to be not fast or aggressive, and AMD will find itself chasing Nvidia once again. AMD was about to catch up with the rack scale MI400, but Nvidia raised the bar. The key difference between AMD and the aforementioned providers is AMD’s lack of robust internal workloads to provide the revenue and demand backstop for yet another chip development project just to keep up. AMD had made waves earlier this year with its Advancing AI Event where it debuted its MI400 72 GPU rack scale system. Our analysis at the time pointed out that the MI400 could offer a lower total cost of ownership relative to FP4 FLOPS than a VR200 NVL144 system – all while providing 19.8TB/s of memory bandwidth vs the 13.0 TB/s of memory bandwidth initially advertised for the VR200 NVL144. Nvidia’s VR200 NVL144 is now advertising a memory bandwidth of ~20.5TB/s per logical GPU by requesting much faster speed bins from their suppliers. VR200 memory bandwidth now matches that of the AMD MI400 with fewer HBM sites. Source: SemiAnalysis AI TCO Model If the MI400’s FP4 effective dense FLOPS (i.e. what microbenchmarks will actually deliver in performance as opposed to marketed throughput) turns out to be on par with or lower than the VR200 NVL144, AMD will effectively show up later than Nvidia to market with a carbon copy of the VR200 NVL144. Meanwhile, Nvidia will yet again pull ahead as the VR200 CPX NVL144 delivers better performance per TCO for long context lengths. AMD will then have to wait again until 2027 to catch up. However, we believe that AMD remains in war mode, and it now needs to open another front to fight the prefill only silicon battle on top of developing their rack scale system and improving their software to have a shot at catching up with Nvidia by 2027. Nvidia Lastly – why should Nvidia stop at only having a prefill focused chip &#8211; why not a decode focused chip as well? Nvidia has so far only debuted a prefill focused chip, and the decode step stays with the existing R200 chip rather than a decode specialized SKU. A decode specialized chip would be the opposite of the prefill chip: skinny compute, fat on memory bandwidth. This chip would look like a R200 but without the need for as much compute. Ideally, I/O would be preserved for both memory and off-package I/O by maintaining the size of the I/O chiplets, but the edges of the main compute die facing the I/O dies can be reduced, whilst keeping the same edge to fit 2 HBM site per edge. The result is a much smaller compute die. Additional savings could be also had from a significant increase in parametric yields with a lot of defeatured SMs as well as much TDP reducing costs associated with power delivery and thermal management. This is the opposite of the case of the pre-fill chip where the amount of HBM is preserved, while there are reductions in other parts of the system, bringing HBM’s share of BOM back up. Subscribe for full access to this article With a SemiAnalysis subscription you&#8217;ll get access to newsletter articles and article discussions. Model access not included &#8211; please reach out to sales@semianalysis.com for our institutional offerings. Log in By subscribing, you agree to the Privacy Policy and Terms and Conditions .",
+    "image_url": "https://i0.wp.com/semianalysis.com/wp-content/uploads/2025/09/1.-CPX-Chip-1.jpg?resize=600%2C338&#038;quality=89&#038;ssl=1",
+    "source_tags": [
+      "Archive",
+      "Accelerators",
+      "Hardware Architecture"
+    ],
+    "metadata": {
+      "source_name": "SemiAnalysis",
+      "source_feed_url": "https://semianalysis.com/feed/",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": true,
+          "textLength": 38228
+        },
+        "content": {
+          "present": true,
+          "textLength": 358
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 352
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "contentEncoded",
+      "comments": "https://semianalysis.com/2025/09/10/another-giant-leap-the-rubin-cpx-specialized-accelerator-rack/#comments"
+    }
+  },
+  {
+    "source_item_origin_id": "https://semianalysis.com/?p=150442090",
+    "title": "Huawei Ascend Production Ramp: Die Banks, TSMC Continued Production, HBM is The Bottleneck",
+    "url": "https://semianalysis.com/2025/09/08/huawei-ascend-production-ramp/",
+    "author": "Dylan Patel",
+    "published_at": "2025-09-08T09:54:57.000Z",
+    "content_text": "Compute is the lifeblood of AI. He who controls the spice controls the universe the compute will control the production of tokens and reap the benefits of AI. Without compute you do not have a seat at the table. The United States technology community is all in on compute and AI as the next platform and is now adding compute at a staggering pace. There is competition, and it not only comes from companies but from countries , and the US government has placed a series of export controls to limit China’s rising compute. Today the US controls and is the undisputed leader in compute with more than 70% of the worlds deployed FLOPs . One way to stay ahead is to keep going full steam while hindering your competition. Limiting your competitor nation state from compute, which will limit them from intelligence, is the current policy to stay ahead in the AI race. These moves have led to backlash, including with China cutting rare earth minerals and magnets off from the US. Secretary of Commerce Howard Lutnick says the resumption of Nvidia GPU sales to China were required to restart China&#8217;s shipments of their linchpin supply chain materials. But constraints have also led to adaptation, and Chinese companies have adapted. High batch sizes and disaggregated serving are but two examples. Despite advances, in the case of DeepSeek, most of their tokens are still inferenced on western hardware. We wrote about this dynamic in our recent DeepSeek debrief. Training of DeepSeek&#8217;s next generation model was also delayed by the use of Huawei chips , as we also said in the debrief. Jul 03, 2025 DeepSeek Debrief: >128 Days Later Wei Zhou, AJ Kourabi, Dylan Patel This is not a stable equilibrium. There are always moving pieces in the race for intelligence. Beijing plans for the long term and knows it must secure its own domestic compute destiny. There is an irony: in the 2010s China kicked out Google to enforce its Great Firewall and foster its domestic industry, this time the US government is withholding hardware technology so they cannot seize the lead in AI. We believe that at China’s core, they want to control not only its internet and AI, but the hardware that supports it. From silicon to tokens, China seeks sovereignty over every layer of the stack, and given recent history will never want to be beholden to foreign powers. Enter Huawei. China loves national champions, and in it’s characteristic capitalism, tends to funnel resources to a few national champions. Today’s champion is probably Nvidia&#8217;s greatest adversary: Huawei. We expect Huawei to be able to make millions of chips this year, and to be bottlenecked by HBM next year. Today we want to talk about Huawei, which can translate as “China’s achievement”. All In with Huawei’s chips Huawei is the key piece for China’s compute destiny. Huawei’s chip ecosystem is vertically integrated and capable network of tools, fabs, and design that allows it to express a full stack vision of hardware. This hardware is very impressive although less efficient then western hardware. Apr 16, 2025 Huawei AI CloudMatrix 384 – China&#8217;s Answer to Nvidia GB200 NVL72 Dylan Patel, Daniel Nishball, Myron Xie, Patrick Zhou, Ivan Chiam, AJ Kourabi, Christopher Seifel, Doug OLaughlin Our previous investigation into Huawei’s fab network is a great example of their broad reaching network. Oct 28, 2024 Fab Whack-A-Mole: Chinese Companies are Evading U.S. Sanctions Dylan Patel, Jeff Koch, Sravan Kundojjala Source: SemiAnalysis Huawei wants to vertically integrate the entire manufacturing process. The goal is to own not just the manufacturing of the logic die, the brains of the chip, but also the memory and packaging. They have even created their own tool company, SiCarrier to copy foreign firms tools . Huawei has bought over $9B of tools to put in their own fabs as well as reverse engineer to replicate . Their efforts are not to be underestimated. SiCarrier, for example, has recently raised $2.8B in funding. That money is going into building fabs dedicated for Huawei staffed by Huawei employees. Some reporting on these fabs , which we believe to be Huawei owned and operated, suggests that their combined production by next year could entirely exceed SMIC, the current leader and where production is currently outsourced. With Huawei ramping up their own efforts, allocation at SMIC can be freed up for other chips, including Cambricon. The Cambricon chip is itself popular among Chinese companies, especially ByteDance. Huawei operating their own fabs will represent a material increase in Chinese production, but also in their ability to iterate, control, and improve on processes. Huawei and SMIC will directly work on increasing yields, refining R&D for the next node, and bolstering Chinese semiconductor manufacturing capability. Currently, all high volume chip production is outsourced to SMIC, the leading Chinese pure-play foundry. This includes the Ascend series of accelerator chips along with the Kirin mobile processors. Yields are poor for SMIC’s 7 nm-class processes due to a combination of immaturity, export controls, and the inherent difficulty in yielding large die such as the Ascend. Thus a relatively low percentage of SMIC’s overall capacity is allocated to producing Ascend die, since smaller mobile processors just make better business sense at this point. But this can change quickly. Let’s discuss what is possible for Huawei…. Source: SemiAnalysis Huawei Production Numbers and SMIC&#8217;s Ramp Our data shows Huawei’s production is 507k Ascend units shipped in 2024 , the majority of which are 910Bs, and 805k this year, 653k of those being 910C. The 910C is the more advanced version. This includes die made by TSMC and SMIC. SMIC, hampered by export controls, struggled to get production off the ground. But Huawei got Ascend die fabricated at TSMC while SMIC ramped. This was a violation of export controls and Huawei ended up receiving more than 2.9M Ascend die, which can be used for both 910B and 910C. We detailed this here. It is specifically this “Die Bank” of foreign chips from TSMC that gets them through 2024 and 2025. Without this Die Bank, Huawei&#8217;s Ascend production numbers would be much lower. Source: SemiAnalysis We expect that the TSMC die bank to run out within the next 9 months. SMIC, however, now has more than enough capacity to produce meaningful volumes of chips. We forecast that SMIC will no longer be the bottleneck for Ascend production, as they will have sufficiently ramped capacity by end of year. Source: SemiAnalysis The chart above shows a baseline scenario with a modest increase in SMIC capacity allocation for Ascend. It requires at most 20k wafers per month (wspm) of SMIC capacity to produce millions of Ascend die per month. For reference, a conservative estimate of SMIC&#8217;s total advanced node capacity (7nm and below) is 45k wspm by end of 2025, increasing to 60k wspm in 2026 and 80k wspm in 2027. In addition, Huawei is building their own fabs, not all of which are export controlled, and collaborating with SMIC on process technology, so production could ramp higher for advanced process technologies. If 100% of capacity was allocated to Ascend die, their production capability would be in the tens of millions per year. They are on track to be more than capable of supporting a large domestic demand for China-produced compute die. Source: SemiAnalysis Our forecasts above use a conservative estimate for both yield and its rate of improvement in the future. It&#8217;s very likely that SMIC can exceed these estimated as its 7nm nodes mature. Our estimates for yields are lower than TSMC, Intel, Samsung, ASE, Amkor, etc for front end wafers and packaging. Source: SemiAnalysis Indeed, yield is an important lever that can be pulled to increase production without giving up more allocation. With just small increases in yield beyond our forecast above, SMIC will be able to produce several million Ascend die at lower allocation amounts than they would otherwise. Every percentage counts and SMIC has their best engineers working on exactly this problem. Source: SemiAnalysis In other words, SMIC only needs small amounts, as low as single digit percentages, of allocation to produce more than a million die as soon as early next year. Production to a couple million is possible, more allocation is all that is needed. For the reasons we articulate above, we believe the reported number of 200k Ascend chips to be significantly off the mark. While SMIC is expanding and is no longer the bottleneck and Ascend production, Huawei&#8217;s long-term ambitions include its own fab network buildout. We noted in our Fab Whack-A-Mole report : Huawei is clearly taking full advantage to the tune of $7.3B of WFE expenditure in 2024, up 27% year-on-year. They’ve gone from effectively zero in 2022 to the 4 th largest WFE customer globally in two years. Since we published that report in fall of 2024, the Huawei fab buildout has, if anything, accelerated. Their ecosystem of semiconductor-related shell companies is expanding. Massive new cleanroom buildouts are in progress. And improved domestic options and possible diversion of $30B+ of imports of wafer fabrication equipment means they are likely able to equip these fabs as well. The details are worthy of their own report, but suffice to say Huawei continues with a large, concentrated effort to own every vertical in the Ascend supply chain. TSMC Access Huawei currently makes many mobile chips, but there is zero reason to do so from a strategic geopolitical perspective. Oppo and Xiaomi currently fabricate mobile SoCs at TSMC. They are ramping up their own designs to decrease dependence on companies like MediaTek and Qualcomm. Huawei can reduce their mobile SoC production while not consuming, in any meaningful volume, SMIC allocation. The continued access to TSMC for other Chinese entities decreases the pressure for SMIC to make mobile SoCs, meaning more can be allocated to AI chips. Huawei and SMIC can ramp up AI production without having to worry about serving all the nation’s demand for mobile chips due to other companies&#8217; access to TSMC. Export Control Lag Benefits SMIC Another part of SMIC’s expansion strategy is stockpiling considerable amounts of semiconductor tooling. The controls are released on an announced schedule and it&#8217;s usually easy to anticipate what will be included. This is due to timing differences in controls that they can take advantage of. For example, the U.S. routinely exempts Japanese and Dutch companies from its equipment export controls. Ostensibly this is done because they are allied countries and have their own export control regimes and semiconductor industries. The problem, however, is that when new export controls come out, Japan and the Netherlands do not immediately follow. In many instances, matching controls are delayed by 6 months or never. Chinese companies can rush order years’ worth of equipment to stockpile, while American vendors are shut out of the process. Japanese WFE vendors are happy to sell into this gap with margins fattened by order expedites. Many key suppliers are seeing well above 40% revenue share from China: Source: SemiAnalysis In cases where controls do follow the US, Japan and the Netherlands do not have any matching controls on re-exporting. This means that it is possible for restricted tooling to reach China if it goes through a different country first. In addition, the use of “advanced ICs” as the bar for restricting tools leaves room for issues. ASML’s NXT:1980 scanners are perfectly capable of 7nm-class logic , and likely beyond if economics (throughput and yield) can be ignored or subsidized. These are allowed into China and even to certain SMIC facilities. Export controls, as noted, can be expanded in addition to very stringent enforcement of existing mechanisms. This includes tighter coordination with allies on timelines for matching controls and getting buy in on re-exporting. We are broadly encouraged by the administration’s Action Plan . As an example, we are pleased to see controls on semiconductor subsystems being called out. This is a drum SemiAnalysis has been beating for a while and think it is the right direction. With that said, many subsystem firms that supply western players such as VAT Group in countries like Switzerland without controls will not be stopped from shipping critical chambers to China. The Action Plan also included concrete suggestions around aligning protection measures globally, which we think if implemented, will greatly ameliorate the issue of alliance&#8217;s lags in export controls described above. The issue is that SMIC and CXMT are able to continue to expand production because the sanctions on them are flimsy. International co-operation, especially with partners in Korea, is key to get right and ensure that Chinese commercial bottlenecks are not eased. Korea manufactures a huge amount of memory and Samsung has historically supplied large amounts of memory into China, so tight alignment of goals and enforcement is critical. The other part of the supply chain that is just as critical is memory. This is where we believe the key constraint lies. HBM Is the Bottleneck We believe HBM production is the bottleneck . China does too , which is why they have asked US officials to relax controls on HBM as part of the recent trade talks . What the ask omits is telling: it does not include more TSMC access or lithography tools. Beijing is specifically asking Washington to loosen HBM restrictions. Much like how Huawei was able to stockpile TSMC logic wafer inventory, they were also able to stockpile HBM inventory. Samsung, due to their failures in entering the accelerator supply chain for Western chips, sold their product to Chinese customers that funneled this inventory to Huawei. This is why it is so critical to work with Korea on enforcement of memory controls moving forward. Aug 12, 2025 Scaling the Memory Wall: The Rise and Roadmap of HBM Dylan Patel, Myron Xie, Tanj Bennett, Ivan Chiam, Jeff Koch Samsung alone has directly provided 11.4 million stacks of HBM to China, including a staggering 7M stacks in the 1-month gap between controls announcement and enforcement dates . When including other providers and methods of shipment, that is 13 million stacks of HBM. Specifically, on December 2 nd 2024, the Bureau of Industry and Security (BIS) announced controls on anything more advanced than HBM2E. Full compliance was required on December 31 st 2024. Samsung exported as much as possible to China in that one quarter. This comprises the majority of China&#8217;s HBM. They were able to achieve this due to the US Government and media telecasting the restrictions for many months before they came out. Source: SemiAnalysis After the ruling, Samsung HBM still made it into China. We previously detailed how companies like CoAsia Electronics and Faraday supplied non-functional chips with HBM into China, though we believe due to our efforts in exposing this both privately in late January and publicly later that it has now stopped with revenue numbers returning to normal. This does not mean that HBM smuggling has stopped entirely, though. There could be other sources. Source: SemiAnalysis, Company Reports In sum, China has procured 13M HBM stacks which is sufficient for 1.6M Ascend 910C packages . Despite this, we expect that China will be bottlenecked by HBM by the end of the year as they run out of foreign HBM. Source: SemiAnalysis China can easily make more than 805k Huawei Ascends this year from TSMC and SMIC capacity, but they will not because they do not have enough HBM. We expect SMIC&#8217;s production to be 1M 910Cs and almost half a million 910Bs this year, however, not all of them will be turned into ASICs as the HBM is not available. If some HBM enters through smuggling, then Huawei can produce more Ascend AI ASICs. Without Foreign HBM, China has no Domestic AI Accelerator Industry Without access to more foreign HBM, Huawei will not be able to fabricate even 1 million Huawei Ascend chips next year. They must rely entirely on domestic production which we will detail below. Nvidia and AMD have effectively 0 competition in China once these HBM banks run out. The other option available to China is utilize slower GDDR and LPDDR memory, but this is not suitable for the leading language models with modern reinforcement learning techniques or for large scale inference deployments. Aug 12, 2025 Scaling the Memory Wall: The Rise and Roadmap of HBM Dylan Patel, Myron Xie, Tanj Bennett, Ivan Chiam, Jeff Koch Domestic HBM Industry &#8211; CXMT China&#8217;s main DRAM player, CXMT, has caught up with the west rapidly. This is due to a combination of extremely strong domestic engineering capabilities, poaching engineers from Samsung, SK Hynix, and Micron, as well as the leading tool vendors Applied Materials, Lam Research, and Tokyo Electron teaching them sub-processes. CXMT is able to ship DDR5 memory, only a couple years behind SK Hynix, Micron, and Samsung, and is winding down profitable DDR4 production previously reserved for PCs and mobile. While they have not shipped much HBM, their roadmap is aggressive. By next year, their production capacity will rival that of Micron&#8217;s, though not fast enough to save Huawei Ascend&#8217;s production. In 2026, we expect them to be producing 257k WPM, which would be just under 15% of global DRAM production. In our estimates, this scales to 490k in 2030. CXMT’s Hefei facility for DRAM and HBM production, one of the largest in the world. Source: SemiAnalysis. CXMT&#8217;s shift in focus and production ramp are driven in part by investments from the CCP. China&#8217;s &#8220;Big Fund III&#8221;, which started in May 2024, invested $2B into the company. CXMT is also expanding in Shanghai as well as Beijing, with HBM packaging subsidiaries being set up in the former. Expecting, though ultimately averting, an entity listing by USG, CXMT stockpiled years of tools in 2024 and is likely still adding HBM-specific gear. CXMT is still not entity listed! While HBM was noted as a key focus in that salvo of controls, the previous administration failed to include China’s HBM champion. The Trump administration needs to solve this failure from the Biden administration immediately . The stockpiling matters as advanced tools, like Hanmi&#8217;s TCB systems for HBM3, are restricted, but they are not that instrumental. Older systems can be run slower without impacting cost too much. More importantly, CXMT can still procure leading edge equipment for Through Silicon Via (TSV) formation &#8211; that is critical for making HBM -through Japanese suppliers. In addition, Chinese OSATs such as JCET and Tong Fu are also racing ahead with their R&D efforts and building capacity for the critical TSV and stacking processes to package front end HBM wafers from CXMT. This is unlike the Western memory incumbents who have vertically integrated these processes. This is a typical example of Chinese industrial development where multiple players are encouraged to develop domestic manufacturing capabilities: creating cutthroat competition that accelerates the speed of development. It is therefore critical to not just focus controls on CXMT, but the whole of China as critical process steps can always be outsourced. Because front-end logic is currently not the binding constraint, Beijing&#8217;s main asks in the trade deal target HBM and the relaxation of controls relating to this set of tooling . Given the importance of HBM, it is critical to understand CXMT&#8217;s future production depending on various allocation scenarios. CXMT Production Forecast This can play out in several ways, depending on how much wafer capacity is given to HBM. China can easily produce tens of millions of stacks with less than 50% of wafer capacity. CXMT is at a bit over ~250,000 wafers a month of production capacity and is expected to reach 300,000 wafers by the end of the year. Currently they have not built out the tooling required to convert standard DRAM production lines to HBM, but it is inevitable. Properly designed, targeted sanctions can slow this conversion massively. Source: SemiAnalysis Different scenarios lead to different amounts of Huawei Ascends produced. As noted, SMIC can produce the die needed to match the HBM. To be clear, this could change. The rate of production for CXMT could increase if they continue stockpiling key tooling or significantly improve yields. The might of China’s manufacturing capability and capacity knows no bounds. This estimate is somewhat conservative, it is likely that CXMT is able to produce the significantly more capable HBM3e in 2026. We believe CXMT will only be able to make ~2 million stacks of HBM next year, which is only sufficient for 250,000-300,000 Ascend 910C&#8217;s. Yields and capacity conversion will take some time to improve for CXMT to commit significant capacity. If all leading edge logic die capacity could be paired with HBM, Huawei production of Ascend would grow from 805k this year to 1,175k in 2025. More importantly, production next year would grow from 300k to over 5 million Ascend 910C! Our analysis indicates that export controls have been effective in constraining and limiting Chinese chip production capabilities. Assuming no smuggling, China will be able to make less Ascends next year, not more. CXMT is squeezed tight . Had controls not been present, the Ascend ramp would be fully realized, Chinese models would be served on Huawei Ascend at scale, and there would be enough compute capacity that advanced models like DeepSeek R2 and V4 would already be here. Not to mention, with more capacity, China would be better positioned to export their AI on their chips. As such, it is absolutely critical to ensure the application, enforcement, and continued updating of export controls to prevent CXMT and related entities from ramping production. As mentioned, this includes not just CXMT but OSATs and subsidiaries they work with. Second, it is also important for the intelligence community to track and identify any instances of HBM smuggling, like the Faraday + CoAsia scheme which we disclosed privately in January and publicly reported on later . By no means should HBM be allowed to be shipped into China . Production of AI chips over the next few years is heavily gated by CXMT&#8217;s ramp and foreign shipments of HBM. There is very strong incentive to find ways to ship HBM into China. This is why enforcement of controls are so critical. There is another pillar to China&#8217;s production strategy, separate from memory and logic. This pillar is about networking the chips together and where they are made. Networking and Datacenter CPU Chips do not exist in isolation. We have argued that the system matters more than the microarchitecture for years. Clusters are comprised of many tens of thousands of interconnected chips and how they are interconnected matters. We detailed Huawei&#8217;s CloudMatrix 384, or CM384, system below. Apr 16, 2025 Huawei AI CloudMatrix 384 – China&#8217;s Answer to Nvidia GB200 NVL72 Dylan Patel, Daniel Nishball, Myron Xie, Patrick Zhou, Ivan Chiam, AJ Kourabi, Christopher Seifel, Doug OLaughlin We believe the networking equipment used, specifically the scale up switches, are being made at TSMC and not at SMIC through shell companies. We also think they are stockpiling this equipment. We believe Huawei has also been able to manufacture their datacenter CPU at TSMC. This showcases that current controls aimed to limit Huawei&#8217;s access to TSMC are insufficient. The Ascend AI ASIC is 7nm, but because of poor screening, Huawei has been able to procure technology from the more advanced TSMC 5nm node. Huawei&#8217;s KunPeng 930. Source: Kunal , SemiAnalysis By producing these chips at TSMC, this frees up capacity at SMIC, meaning more allocation can be given to the Ascend or Cambricon programs (HBM permitting). This, as mentioned earlier in the report, is a critical variable. If SMIC had to make the networking equipment, this would squeeze the wafer allocations towards Ascend significantly. There is all the incentive in the world for China to offload as much production as possible to TSMC. They have used shell companies before and there is ample evidence they are still doing it. While some ideas around KYC and red flags have been implemented, we believe that existing frameworks are insufficient. Nvidia and Huawei: Blackwell and the H20 The US government previously banned the Nvidia H20 chip from going into China, but recently indicated that Nvidia will be granted a license to be able to export the chip. As we have previously noted, the H20 is a capable chip with more memory than the banned the H100, though it has less much fewer FLOPs. Having more memory is helpful for inference performance. Nvidia is poised to sell its existing inventory of the H20 and H20E (a variant with even more memory) at a minimum. This will amount to more than several hundreds of thousands of chips and billions of dollars of revenue. There have also been reports of a more advanced version based on the Blackwell series. This is slated to have just as much memory as the H20 but will also contain significantly more FLOPs. Specifically, the B30A could have more than 10x the FLOPs than the H20, significantly above the export control threshold. The B30A could be positioned at half the price and have half the performance of the B300. The solution to this is rather simple: just buy 2x the chips for equivalent performance. Given how strong and weak scaling work in machine learning workloads , this is a valid path to remain competitve. The B30A is argued as needed to be shipped to China due to decreased interest from China in the H20. A lot of this is due to government pressure of China&#8217;s major tech firms. While there is significant messaging that China has decreased interest in the H20, we do not believe this to be true. Specifically, we do not believe this is reflective of China’s demand for compute or foreign chips. It is an incorrect policy being pushed from the top down which will be reversed as soon as Huawei runs out of HBM to produce more Ascend chips, or it could even be orchestrated brinkmanship to get approval to a more powerful chip. This is on the tail of other news, like DeepSeek unable to get acceptable performance on Huawei&#8217;s chips . That is no coincidence. Export controls are working and the biggest blocker for more progress is compute. China may be trying to psyop their way into getting the significantly more performant Blackwell chip. While the H20 and the H20E have much, much better software than the 910C, it is arguable that they are in the same league. However, it is unquestionable that the B30A would be in a league of its own. Given that the H20, H20E, and especially the B30A are good at inference, this also allows Chinese companies more compute to serve their models and applications. It will allow them to export Chinese AI on hardware they own. This will increase the proliferation of Chinese AI and Chinese apps, inevitably taking market share away from American applications. The American AI stack is American AI on American chips, not just the chips. The US needs to balance having China on the US AI stack and slowing the development of their own, while also limiting the quality and volumes that are shipped into China . The H20 is allowed into China, but the progression of shipping more powerful chips into China should be closely guarded and watched considering China&#8217;s domestic capabilities . The US should only move the quality of a chip shipped to China when it becomes clear China can ship something competitive to the H20E in significant volumes. Regardless of the exact SKU, the export licenses have several implications discussed below. Implications of Compute Diplomacy First, it means that there will be more chips for top players like DeepSeek and Alibaba to use for Reinforcement Learning (RL). RL is a big driver of progress right now. The majority of RL compute is inference, which the H20 and especially the H20E, are good at. The B30A will have even better performance. Jun 08, 2025 Scaling Reinforcement Learning: Environments, Reward Hacking, Agents, Scaling Data Dylan Patel, AJ Kourabi Players like DeepSeek had enough compute to keep improving – R1 received a major update with performance increases on a timeline that is like o1 -> o3. We firmly believe GPT-5, Claude 4, and Grok 4 are considerably ahead of R1 though, especially in agentic tasks. However, problems in AI are solvable by two things: talent and compute . DeepSeek has always had the former, now they will have more of the latter. We expect DeepSeek&#8217;s rate of progress to materially increase as they receive substantial volumes of any chip that gets into China. DeepSeek has ambitions to release a multimodal model in V4, but scarce compute is slowing progress. Alibaba (Qwen) and Moonshot (Kimi K2), have also yet to produce a large multimodal model, primarily focusing on text only due to compute limitations. They will release multimodal models this year, but they are still squarely behind OpenAI, Anthropic, and Google in many capabilties. If Blackwell GPU shipments come too early, that will accelerate China&#8217;s pace. The second major implication of this is that China will now have more compute to serve and inference models to its population. Compute constraints affect user experience, with DeepSeek deliberately serving R1 at low speeds to users to preserve compute . Poor user experience from the lack of compute has greatly limited China&#8217;s ability to deploy AI. As user experience improves, so will adoption, and the economic benefits from AI. It is easy see a future in which models are pre-trained via H800s, post-trained on H20s, then served to the population on Ascends and H20s. There is so much demand for AI powered products that should more capacity to serve these models exist, it would immediately be satisfied. One of the reasons Chinese models are open sourced is that it allows for other people to serve their models for them. With more capacity, models can be closed sourced and dependence on American providers cut off. Claims that models trained on one chip must be inferenced on the same type are entirely false. Anthropic did different stages of research and training for Claude 4 on GPUs and TPUs. Additionally, Claude 4 inference is offered on Nvidia GPUs, Google TPUs, and Amazon Trainiums . This complexity is all while Anthropic is also the fastest growing AI company in terms of revenue with by far the most capable model for software engineering. DeepSeek, Alibaba, Moonshot, etc primarily train their models on Nvidia chips and we do not think this will change anytime soon. If the Blackwell version ships, gains across all levels will be more pronounced. Source: SemiAnalysis China’s compute at a snapshot With the H20 approved, this represents a material increase in the number of FLOPs and memory that China has access to. The 910C will be the first meaningful effort of indigenous production in China in terms of realized FLOPs and memory. We also expect some re-exportation into China by various bad actors, constituting meaningful volumes of H100 and low volumes of B200. Source: SemiAnalysis Should the Blackwell version ship, gains around FLOPs will be even more pronounced as the chip has significantly more FLOPs. China will end up having more FLOPs in that scenario, in addition to more memory. Source: SemiAnalysis This is not to mention that Chinese players, including major ones like ByteDance, can still access compute through renting in non-restricted countries. For example, ByteDance can still access top of the line Blackwell GPUs from providers like Oracle and Google. We have previously covered this relationship in detail. Malaysia, in no uncertain terms, has become a huge market for Nvidia. Export controls were also effective in ensuring that it remains that way, with Malaysia immediately distancing themselves from any effort around the Huawei Ascend . Jun 30, 2025 How Oracle Is Winning the AI Compute Market Jeremie Eliahou Ontiveros, Dylan Patel, Daniel Nishball Renting enables a path for Chinese dependence on Nvidia without Nvidia chips being in China, which is possible because the chips do not need to be in China. Bytedance&#8217;s Seed models were trained in the US on a US cloud. Inspecting GPUs is much easier in Malaysia than in China. As such, it is an effective way to limit any unauthorized re-exporting by bad actors, as we believe methods like location tracking are technically intractable and easy to bypass. Note that renting will still allow China access to the capability of training advances models. If allowed to be used for serving the models, this allows China the chance to proliferate their AI through new and improved AI powered applications, taking market share away from American products. The critical difference, though, is that access can be cut off. With that said, China will not allow their data to be shipped out of China in large volumes hence there is still significant need for domestic AI capabilities. Selling chips into China does not change China&#8217;s drive for total silicon self sovereignty and will only serve to help provide a buffer while local production meets demand. It is worth remembering that China&#8217;s focus on silicon self sovereignty predates US export controls. The argument Blackwell needs to be sold into China is a false narrative as Huawei will soon run out of HBM. Selling chips into China only served to bail them out until domestic production ramps. The production ramp will not slow until self sufficiency is achieved. Shipments of Blackwell must be weighed with a close eye on production of domestic capabilties. If Huawei, Cambricon, and CXMT accelerate production faster than expected, then the US should raise the bar sooner. Next, we dive into Nvidia’s future in China. This includes expected revenue from the H20 and newer China specific chips on the horizon. We also compare how much compute China has relative to the US how the is absolutely dominating China when it comes to both memory and FLOPs. Subscribe for full access to this article With a SemiAnalysis subscription you&#8217;ll get access to newsletter articles and article discussions. Model access not included &#8211; please reach out to sales@semianalysis.com for our institutional offerings. Log in By subscribing, you agree to the Privacy Policy and Terms and Conditions .",
+    "image_url": "https://i0.wp.com/semianalysis.com/wp-content/uploads/2025/07/upload-header-new-.png?fit=300%2C167&amp;quality=80&amp;ssl=1",
+    "source_tags": [
+      "Archive",
+      "Accelerators",
+      "AI Infrastructure",
+      "Export Controls",
+      "Foundries",
+      "Semiconductors",
+      "Supply Chain"
+    ],
+    "metadata": {
+      "source_name": "SemiAnalysis",
+      "source_feed_url": "https://semianalysis.com/feed/",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": true,
+          "textLength": 34719
+        },
+        "content": {
+          "present": true,
+          "textLength": 309
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 303
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "contentEncoded",
+      "comments": "https://semianalysis.com/2025/09/08/huawei-ascend-production-ramp/#comments"
+    }
+  }
+]
+
+## NASA Image of the Day
+https://www.nasa.gov/rss/image_of_the_day.rss
+[
+  {
+    "source_item_origin_id": "https://www.nasa.gov/image-detail/perseidsorion-2/",
+    "title": "Perseids Meteor Shower",
+    "url": "https://www.nasa.gov/image-detail/perseidsorion-2/",
+    "author": null,
+    "published_at": "2026-08-13T15:09:00.000Z",
+    "content_text": "The constellation Orion is framed by two Perseid meteors on Aug. 12, 2018, in Cedar Breaks National Monument, Utah.",
+    "image_url": "https://www.nasa.gov/wp-content/uploads/2026/08/perseidsorion.webp",
+    "source_tags": null,
+    "metadata": {
+      "source_name": "NASA Image of the Day",
+      "source_feed_url": "https://www.nasa.gov/rss/image_of_the_day.rss",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": true,
+          "textLength": 115
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 115
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "content",
+      "source": "NASA Image of the Day"
+    }
+  },
+  {
+    "source_item_origin_id": "https://www.nasa.gov/image-detail/2026-total-solar-eclipse-2/",
+    "title": "2026 Total Solar Eclipse in Spain",
+    "url": "https://www.nasa.gov/image-detail/2026-total-solar-eclipse-2/",
+    "author": null,
+    "published_at": "2026-08-12T20:17:00.000Z",
+    "content_text": "A total solar eclipse is seen from San Millán de los Caballeros, Spain, Wednesday, Aug. 12, 2026.",
+    "image_url": "https://www.nasa.gov/wp-content/uploads/2026/08/55459753868-458217b2c9-o.jpg",
+    "source_tags": null,
+    "metadata": {
+      "source_name": "NASA Image of the Day",
+      "source_feed_url": "https://www.nasa.gov/rss/image_of_the_day.rss",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": true,
+          "textLength": 97
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 97
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "content",
+      "source": "NASA Image of the Day"
+    }
+  },
+  {
+    "source_item_origin_id": "https://www.nasa.gov/image-detail/stsci-01kx6d0xbhsyp7q1em5qtc43rp/",
+    "title": "Lion Nebula Roars in Webb's Sights",
+    "url": "https://www.nasa.gov/image-detail/stsci-01kx6d0xbhsyp7q1em5qtc43rp/",
+    "author": null,
+    "published_at": "2026-08-11T17:03:00.000Z",
+    "content_text": "NASA’s James Webb Space Telescope imaged the planetary nebula NGC 2392, the Lion Nebula, using the observatory’s NIRCam and MIRI instruments. The central star’s remains are responsible for the nebula’s structure, including a lion face-shaped bubble of ionized gas and dust “mane.”",
+    "image_url": "https://www.nasa.gov/wp-content/uploads/2026/08/stsci-01kx6d0xbhsyp7q1em5qtc43rp.png",
+    "source_tags": null,
+    "metadata": {
+      "source_name": "NASA Image of the Day",
+      "source_feed_url": "https://www.nasa.gov/rss/image_of_the_day.rss",
+      "content_field_status": {
+        "contentEncoded": {
+          "present": false,
+          "textLength": 0
+        },
+        "content": {
+          "present": true,
+          "textLength": 280
+        },
+        "contentSnippet": {
+          "present": true,
+          "textLength": 280
+        },
+        "summary": {
+          "present": false,
+          "textLength": 0
+        },
+        "description": {
+          "present": false,
+          "textLength": 0
+        },
+        "mediaDescription": {
+          "present": false,
+          "textLength": 0
+        }
+      },
+      "selected_content_field": "content",
+      "source": "NASA Image of the Day"
+    }
+  }
+]
+
+# Final Report
+
+## Bloomberg Technology
+1. RSS fields: feed_items=20; normalized_items=3; feed='feedUrl', 'image', 'paginationLinks', 'title', 'description', 'generator', 'link', 'language', 'copyright', 'lastBuildDate'; item='creator', 'title', 'link', 'pubDate', 'dc:creator', 'dcCreator', 'content', 'contentSnippet', 'guid', 'isoDate'
+2. Stable mappings: 'source_item_origin_id', 'title', 'url', 'author', 'published_at', 'content_text', 'metadata'
+3. Metadata-only fields: (none)
+   Content fields observed: 'content', 'contentSnippet'. Per-item content field status is stored in metadata.content_field_status.
+4. Parse status: ok
+
+## Dow Jones
+1. RSS fields: feed_items=36; normalized_items=3; feed='image', 'title', 'description', 'link', 'language', 'copyright', 'lastBuildDate'; item='creator', 'title', 'link', 'pubDate', 'dc:creator', 'dcCreator', 'mediaContent', 'content', 'contentSnippet', 'guid', 'isoDate'
+2. Stable mappings: 'source_item_origin_id', 'title', 'url', 'author', 'published_at', 'content_text', 'image_url', 'metadata'
+3. Metadata-only fields: (none)
+   Content fields observed: 'content', 'contentSnippet'. Per-item content field status is stored in metadata.content_field_status.
+4. Parse status: ok
+
+## BLS
+1. RSS fields: feed_items=1; normalized_items=1; feed='title', 'description', 'link', 'language'; item='creator', 'title', 'link', 'pubDate', 'dc:creator', 'dcCreator', 'content', 'contentSnippet', 'isoDate'
+2. Stable mappings: 'title', 'url', 'author', 'published_at', 'content_text', 'metadata'
+3. Metadata-only fields: (none)
+   Content fields observed: 'content', 'contentSnippet'. Per-item content field status is stored in metadata.content_field_status.
+4. Parse status: ok
+
+## TechCrunch
+1. RSS fields: feed_items=20; normalized_items=3; feed='feedUrl', 'image', 'paginationLinks', 'title', 'description', 'generator', 'link', 'language', 'lastBuildDate'; item='creator', 'title', 'link', 'pubDate', 'dc:creator', 'dcCreator', 'content', 'contentSnippet', 'guid', 'categories', 'isoDate'
+2. Stable mappings: 'source_item_origin_id', 'title', 'url', 'author', 'published_at', 'content_text', 'source_tags', 'metadata'
+3. Metadata-only fields: (none)
+   Content fields observed: 'content', 'contentSnippet'. Per-item content field status is stored in metadata.content_field_status.
+4. Parse status: ok
+
+## Nature Chemistry
+1. RSS fields: feed_items=30; normalized_items=3; feed='title', 'description', 'pubDate', 'link', 'lastBuildDate', 'ttl'; item='title', 'link', 'pubDate', 'content', 'contentSnippet', 'guid', 'isoDate'
+2. Stable mappings: 'source_item_origin_id', 'title', 'url', 'published_at', 'metadata'
+3. Metadata-only fields: (none)
+   Content fields observed: (none). Per-item content field status is stored in metadata.content_field_status.
+4. Parse status: ok
+
+## SemiAnalysis
+1. RSS fields: feed_items=10; normalized_items=3; feed='feedUrl', 'image', 'paginationLinks', 'title', 'description', 'link', 'language', 'lastBuildDate'; item='creator', 'title', 'link', 'pubDate', 'content:encoded', 'content:encodedSnippet', 'dc:creator', 'comments', 'contentEncoded', 'dcCreator', 'content', 'contentSnippet', 'guid', 'categories', 'isoDate'
+2. Stable mappings: 'source_item_origin_id', 'title', 'url', 'author', 'published_at', 'content_text', 'image_url', 'source_tags', 'metadata'
+3. Metadata-only fields: 'comments'
+   Content fields observed: 'contentEncoded', 'content', 'contentSnippet'. Per-item content field status is stored in metadata.content_field_status.
+4. Parse status: ok
+
+## NASA Image of the Day
+1. RSS fields: feed_items=60; normalized_items=3; feed='feedUrl', 'paginationLinks', 'title', 'description', 'webMaster', 'managingEditor', 'link', 'language', 'docs'; item='title', 'link', 'pubDate', 'enclosure', 'source', 'content', 'contentSnippet', 'guid', 'isoDate'
+2. Stable mappings: 'source_item_origin_id', 'title', 'url', 'published_at', 'content_text', 'image_url', 'metadata'
+3. Metadata-only fields: 'source'
+   Content fields observed: 'content', 'contentSnippet'. Per-item content field status is stored in metadata.content_field_status.
+4. Parse status: ok
+
+## Schema Notes
+The proposed raw_articles shape is sufficient for this spike: IDs, title, URL, author, published time, readable text, image URL, tags, and metadata cover the tested feeds.
+Do not add source-specific columns yet. Fields like media credit/title, comments, source feed object, and parser extras are uneven and fit metadata.
+Keep metadata.content_field_status because feeds vary between content, content:encoded, contentSnippet, description, and media description.
+Consider making content_text nullable only if empty RSS summaries should be stored; otherwise keep it required and filter empty items before DB insertion.
+Parsing failures: none.
+Image coverage: Bloomberg Technology 0/3; Dow Jones 3/3; BLS 0/1; TechCrunch 0/3; Nature Chemistry 0/3; SemiAnalysis 3/3; NASA Image of the Day 3/3.

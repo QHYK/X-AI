@@ -1,6 +1,7 @@
 This document defines the interface contract between the application and the LLM.
+# X-AI-field Prompt Spec
 
-# Stage 1: Content Understanding & Selection
+## Stage 1: Content Understanding & Selection
 
 Goal: Understand each article and determine whether it should be included in today's Daily Brief.
 
@@ -45,7 +46,7 @@ Prompt Guidelines:
 + Tier-1 media 的 Exclusive 内容要仔细看，一般都是重大事件或重要内容
 + Generate Chinese title and Chinese summary for selected articles.
 
-# Stage 2: Event Understanding & Merge
+## Stage 2: Event Understanding & Merge
 
 Input: Stage1 Output Event Candidate
 
@@ -75,7 +76,7 @@ Prompt Guidelines:
 + 合并时提取报导的共同信息，并保留不同来源的信息差异。
 + 当现有来源无法完整描述事件、存在信息冲突或需要补充背景时，主动检索外部可信信息，并记录信息来源。
 
-# Stage 3: Daily Brief Prioritization
+## Stage 3: Daily Brief Prioritization
 
 Input: 
 Stage2 Output Candidate: Merged Events, Source Digest Candidates, Long-form Candidates
