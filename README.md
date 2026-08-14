@@ -13,9 +13,9 @@ X-AI-field 是一个 AI 驱动的信息筛选系统。
 - Technical Spec
 - Source List
 - RSS ingestion spike
+- Project Bootstrap
 
 下一阶段：
-- 初始化项目
 - 建立 PostgreSQL / Drizzle Schema
 - 实现 Source Collection
 - 实现 Stage 1–3 AI Pipeline
@@ -64,7 +64,7 @@ Daily Brief
 
 ## Tech Stack
 * Application: Next.js
-<!-- * Language: TypeScript -->
+* Language: TypeScript
 * Database: PostgreSQL / Supabase
 * ORM: Drizzle ORM
 * AI: LLM + Structured Output
@@ -74,7 +74,38 @@ MVP 使用单一 Next.js Application，不引入 Microservices、Message Queue�
 
 ## Local Development
 
-项目初始化后补充。
+### Requirements
+
+* Node.js 20+
+* npm
+* PostgreSQL connection string, for example from Supabase
+
+### Setup
+
+```bash
+npm install
+cp .env.example .env.local
+```
+
+Update `.env.local` with the real database connection:
+
+```bash
+DATABASE_URL="postgresql://..."
+DATABASE_SSL="true"
+```
+
+### Commands
+
+```bash
+npm run dev        # Start the Next.js development server
+npm run lint       # Run ESLint
+npm run typecheck  # Run TypeScript type checking
+npm run build      # Build the Next.js app
+npm run spike:rss  # Run the one-off RSS normalization spike
+```
+
+Task 0 only configures the database connection and Drizzle tooling. Business
+tables and migrations will be added in the Database Schema task.
 
 ## Documentation
 

@@ -43,7 +43,7 @@ Human Feedback Capture               ← Code
 
 Responsibility: 理解单篇内容，并判断它是否值得保留、应该进入 Daily Brief 的哪个分支。
 
-Input: Raw Article + Source Metadata + Source Default Tags
+Input: Raw Article + Source Metadata
 
 Output:
 

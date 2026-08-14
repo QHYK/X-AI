@@ -11,8 +11,7 @@ Input Schema:
   "title":"",
   "content":"",
   "source":"",
-  "source_metadata":{},
-  "default_tags":[]
+  "source_metadata":{}
 }
 ```
 
