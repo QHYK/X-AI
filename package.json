@@ -14,18 +14,26 @@
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx scripts/import-sources.ts",
     "collect:rss": "tsx scripts/collect-rss.ts",
+    "complete:content": "tsx scripts/complete-content.ts",
+    "validate:stage1": "tsx scripts/validate-stage1.ts",
+    "process:stage1": "tsx scripts/process-stage1.ts",
+    "test:openai": "tsx scripts/test-openai-call.ts",
     "spike:rss": "tsx scripts/spike-rss.ts"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
     "csv-parse": "^7.0.2",
     "drizzle-orm": "^0.45.2",
+    "jsdom": "^29.1.1",
     "next": "^16.3.1",
+    "openai": "^7.4.0",
     "pg": "^8.23.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "rss-parser": "^3.13.0"
   },
   "devDependencies": {
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^26.2.0",
     "@types/pg": "^8.21.0",
     "@types/react": "^19.2.18",

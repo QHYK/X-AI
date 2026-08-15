@@ -180,6 +180,25 @@ Today's Events是重大事件合并后的内容，且须保留不同来源的观
 因此对Content Level中内容类型为Big Event的内容还须合并。
 **合并规则记录在：Event Merge Principles中**
 
+# Collector Workflow
+```
+RSS / Email / Web
+      ↓
+Raw Article Discovery
+      ↓
+raw_articles
+      ↓
+Need Content Completion?
+      ↓
+  yes      no
+   ↓        ↓
+Web Extraction
+   ↓
+update content_text
+      ↓
+Stage 1
+```
+
 
 # Selection Principles
 
@@ -192,6 +211,14 @@ Today's Events是重大事件合并后的内容，且须保留不同来源的观
   - 代表新的行业趋势或技术变化
   - 是重要事件的关键后续发展
   - 具有明显的信息增量
+- 以下内容默认排除：
+  - 单纯营销稿
+  - 重复转载
+  - 缺乏新增信息的跟进文章
+  - 纯娱乐八卦
+  - 标题党
+  - 没有可靠来源支持的传闻
+  - 体育、娱乐、生活方式、3C设备；
 
 ## 其他规则说明
 + 如果来源Source Type存在，且为Tier-1 media，则所有Tag为Press Release的都进入候选

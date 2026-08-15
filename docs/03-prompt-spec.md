@@ -9,8 +9,11 @@ Input Schema:
 ```json
 {
   "title":"",
+  "url":"",
+  "author":"",
   "content":"",
-  "source":"",
+  "source_name":"",
+  "source_tags":[],
   "source_metadata":{}
 }
 ```
@@ -20,10 +23,9 @@ Output Schema:
 {
   "category":"",
   "tags":[],
-  "topic":[],
   "entities":[],
-  "content_type":"",
-  "routing": "Event|Digest|Long-form|Inspiration",
+  "entities_zh":[],
+  "routing": "Event|Digest|Long-form|Inspiration|Ignore",
   "generated_content":{
     "summary":"",
     "summary_zh":"",
@@ -33,17 +35,30 @@ Output Schema:
 ```
 <!-- 写 Prompt 时遵守的规则 -->
 Prompt Guidelines:
-+ 来源为xkcd,NASA Image of the Day直接进入Daily Inspiration
-+ 科研论文全部进入 Source Digest，除非是重复转载
-+ Category 的可选值：Finance & Business & Economy，Technology，Science，Policy，Company，General，Long-form
-+ 所有保留内容都生成 Summary
-+ Faithful to the original article.
-+ Long-form Category sources 全部保留，Summary可稍长，但不要超过200字。
-+ Prefer important topics：Fed, CME, ECB, BLS, BEA, IMF, BOJ, 加拿大央行, 大型科技公司财报, 美国、欧洲、中国重大政策, 重大风险事件, 重要地缘冲突进展, 债券市场重大变化, 货币市场重大波动
-+ Prefer Systemic Risk
-+ Prefer Massive Impact
-+ Tier-1 media 的 Exclusive 内容要仔细看，一般都是重大事件或重要内容
-+ Generate Chinese title and Chinese summary for selected articles.
+- `xkcd`、`NASA Image of the Day` → `Inspiration`
+- 科研论文 → `Digest`，除非重复转载
+- Long-form Category 来源 → `Long-form`
+- Category 可选值：`Finance & Economy`, `Technology`, `Science`, `Policy`, `Company`, `General`, `Long-form`
+- 优先保留：
+    - Important Topics：Fed、CME、ECB、BLS、BEA、IMF、BOJ、加拿大央行、大型科技公司财报、美欧中重大政策、重大风险事件、重要地缘冲突进展、债券和货币市场重大变化
+    - 具有广泛影响、系统性风险、显著信息增量
+    - 代表重要行业/技术趋势
+    - 重要事件的关键后续发展
+- Tier-1 media 的 Exclusive 内容需要重点审视，通常应优先保留
+- 默认排除：
+    - 单纯营销稿
+    - 重复转载
+    - 缺乏新增信息的跟进文章
+    - 纯娱乐八卦
+    - 标题党
+    - 无可靠来源支持的传闻
+    - 体育、娱乐、生活方式、3C 消费设备
+- 所有 `routing != Ignore` 的内容生成 Summary、中文标题和中文摘要
+- `tags`: 最多 5 个，用于补充和细化 Category；选择最能描述内容的具体标签，避免无意义的泛化标签。
+- `entities`: 最多 3 个，只保留对识别文章核心事件有帮助的主要实体，用于后续 Event Merge；不要提取所有被提及的人名、指标、产品、媒体来源或次要实体。
+- Long-form Summary 可以更详细，但不超过约 400 字
+- Summary 必须忠于原文，不补写原文不存在的事实
+
 
 ## Stage 2: Event Understanding & Merge
 

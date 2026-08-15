@@ -1,0 +1,58 @@
+import { config } from "dotenv";
+import { Pool } from "pg";
+import { processStage1Batch } from "../src/processing/stage1-job.js";
+
+config({ path: ".env" });
+config({ path: ".env.local", override: true });
+
+async function main() {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is required to process Stage 1.");
+  }
+
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is required to process Stage 1.");
+  }
+
+  const pool = new Pool({
+    connectionString: databaseUrl,
+    ssl:
+      process.env.DATABASE_SSL === "true"
+        ? {
+            rejectUnauthorized: false,
+          }
+        : undefined,
+  });
+
+  try {
+    const summary = await processStage1Batch(pool, {
+      limit: optionalPositiveInteger(process.env.STAGE1_LIMIT),
+      concurrency: optionalPositiveInteger(process.env.STAGE1_CONCURRENCY),
+      collectedWithinHours: optionalPositiveInteger(process.env.STAGE1_COLLECTED_WITHIN_HOURS),
+      model: process.env.OPENAI_MODEL,
+    });
+
+    console.log(JSON.stringify(summary, null, 2));
+  } finally {
+    await pool.end();
+  }
+}
+
+function optionalPositiveInteger(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const numberValue = Number(value);
+  if (!Number.isInteger(numberValue) || numberValue <= 0) {
+    throw new Error(`Expected a positive integer, got "${value}".`);
+  }
+
+  return numberValue;
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

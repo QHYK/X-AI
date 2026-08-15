@@ -523,11 +523,8 @@ Ignore 内容不创建 `processed_contents`。
 | `routing`        | text        | NOT NULL + CHECK               |
 | `category`       | text        | NOT NULL                       |
 | `tags`           | text[]      | nullable                       |
-| `topics`         | text[]      | nullable                       |
-| `topics_zh`      | text[]      | nullable                       |
 | `entities`       | text[]      | nullable                       |
 | `entities_zh`    | text[]      | nullable                       |
-| `content_type`   | text        | nullable                       |
 | `title_zh`       | text        | nullable                       |
 | `summary`        | text        | nullable                       |
 | `summary_zh`     | text        | nullable                       |

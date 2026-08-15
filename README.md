@@ -15,10 +15,16 @@ X-AI-field 是一个 AI 驱动的信息筛选系统。
 - RSS ingestion spike
 - Project Bootstrap
 - PostgreSQL / Drizzle Schema
+- Source List Import
+- RSS Collector
+- Content Completion
+- Stage 1 Contract / LLM validation
+- Stage 1 Batch Processing & Persistence
 
 下一阶段：
-- 实现 Source Collection
-- 实现 Stage 1–3 AI Pipeline
+- 扩大运行 Stage 1 pending articles
+- 实现 Stage 2 Event Understanding & Merge
+- 实现 Stage 3 Prioritization
 - 实现 Daily Brief API 和基础页面
 
 ## Core Features
@@ -92,31 +98,46 @@ Update `.env.local` with the real database connection:
 ```bash
 DATABASE_URL="postgresql://..."
 DATABASE_SSL="true"
+OPENAI_API_KEY="..."
+OPENAI_BASE_URL="https://128api.cn/v1"
+OPENAI_MODEL="gpt-5.4"
 ```
 
 ### Commands
 
 ```bash
-npm run dev        # Start the Next.js development server
-npm run lint       # Run ESLint
-npm run typecheck  # Run TypeScript type checking
-npm run build      # Build the Next.js app
-npm run db:seed    # Sync docs/05-source-list.md into the sources table
-npm run collect:rss # Collect enabled RSS sources into raw_articles
-npm run spike:rss  # Run the one-off RSS normalization spike
+npm run dev                              # Start the Next.js development server
+npm run lint                             # Run ESLint
+npm run typecheck                        # Run TypeScript type checking
+npm run build                            # Build the Next.js app
+npm run db:generate                      # Generate Drizzle migrations from src/db/schema.ts
+npm run db:check                         # Validate Drizzle migration metadata
+npm run db:migrate                       # Apply Drizzle migrations
+npm run db:seed                          # Sync docs/05-source-list.md into the sources table
+npm run collect:rss                      # Collect enabled RSS sources into raw_articles
+npm run complete:content                 # Try content completion for eligible raw_articles
+npm run test:openai                      # Run one minimal model connectivity check
+npm run validate:stage1                  # Run Stage 1 validation dataset without persistence
+npm run process:stage1                   # Process pending raw_articles from the last 24 hours
+npm run spike:rss                        # Run the one-off RSS normalization spike
+```
+
+Useful Stage 1 environment controls:
+
+```bash
+STAGE1_LIMIT=20 npm run process:stage1
+STAGE1_CONCURRENCY=2 npm run process:stage1
+STAGE1_COLLECTED_WITHIN_HOURS=24 npm run process:stage1
 ```
 
 ### Updating Sources
 
-1. Update the CSV block in `docs/05-source-list.md`.
+1. 更新 `docs/05-source-list.md` 中的 CSV。
 2. Run `npm run db:seed` to sync the `sources` table.
-3. Run `npm run collect:rss` to collect enabled RSS sources.
-4. For manual retry audits, retry failed URLs one at a time with at least a
-   3-second delay between requests.
+3. Run `npm run collect:rss` to collect RSS sources.
+4. For manual retry audits, retry failed URLs one at a time with at least a 3-second delay between requests.
 
-The source sync uses `Source + Collection Method` as the source identity, so URL
-changes update existing records. Sources removed from the CSV are disabled
-instead of deleted.
+The source sync uses `Source + Collection Method` as the source identity, so URL changes update existing records.
 
 ## Documentation
 

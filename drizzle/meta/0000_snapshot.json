@@ -239,18 +239,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "topics": {
-          "name": "topics",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "topics_zh": {
-          "name": "topics_zh",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false
-        },
         "entities": {
           "name": "entities",
           "type": "text[]",
@@ -260,12 +248,6 @@
         "entities_zh": {
           "name": "entities_zh",
           "type": "text[]",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "content_type": {
-          "name": "content_type",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
