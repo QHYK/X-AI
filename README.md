@@ -14,9 +14,9 @@ X-AI-field 是一个 AI 驱动的信息筛选系统。
 - Source List
 - RSS ingestion spike
 - Project Bootstrap
+- PostgreSQL / Drizzle Schema
 
 下一阶段：
-- 建立 PostgreSQL / Drizzle Schema
 - 实现 Source Collection
 - 实现 Stage 1–3 AI Pipeline
 - 实现 Daily Brief API 和基础页面
@@ -101,11 +101,22 @@ npm run dev        # Start the Next.js development server
 npm run lint       # Run ESLint
 npm run typecheck  # Run TypeScript type checking
 npm run build      # Build the Next.js app
+npm run db:seed    # Sync docs/05-source-list.md into the sources table
+npm run collect:rss # Collect enabled RSS sources into raw_articles
 npm run spike:rss  # Run the one-off RSS normalization spike
 ```
 
-Task 0 only configures the database connection and Drizzle tooling. Business
-tables and migrations will be added in the Database Schema task.
+### Updating Sources
+
+1. Update the CSV block in `docs/05-source-list.md`.
+2. Run `npm run db:seed` to sync the `sources` table.
+3. Run `npm run collect:rss` to collect enabled RSS sources.
+4. For manual retry audits, retry failed URLs one at a time with at least a
+   3-second delay between requests.
+
+The source sync uses `Source + Collection Method` as the source identity, so URL
+changes update existing records. Sources removed from the CSV are disabled
+instead of deleted.
 
 ## Documentation
 

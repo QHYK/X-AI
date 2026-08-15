@@ -14,7 +14,7 @@ Do not treat this file as a replacement for the Specs.
 3. 如果任务影响 AI Workflow，阅读 `02-ai-workflow-spec.md`。
 4. 如果任务涉及 LLM 行为或 Prompt，阅读 `03-prompt-spec.md`。
 5. 如果任务涉及架构、数据库、Workflow 或项目结构，阅读 `04-technical-spec.md`。
-6. 只实现当前任务范围内的内容。
+6. 只读取实现当前任务范围内的内容。
 
 如果实现需求与现有 Spec 冲突，不要自行修改架构或绕过 Spec，应先明确指出冲突。
 
