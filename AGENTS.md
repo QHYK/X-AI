@@ -47,7 +47,7 @@ Source 配置维护在：
 保持模块职责清晰：
 ```text
 collectors → 外部数据采集和标准化
-processing → Stage 1–3 Workflow
+processing → Stage 1–4 Workflow
 prompts → LLM Prompts
 db → Database Schema 和数据访问
 app → API 和 UI

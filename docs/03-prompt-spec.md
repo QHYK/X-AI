@@ -55,72 +55,81 @@ Prompt Guidelines:
     - 体育、娱乐、生活方式、3C 消费设备
 - 所有 `routing != Ignore` 的内容生成 Summary、中文标题和中文摘要
 - `tags`: 最多 5 个，用于补充和细化 Category；选择最能描述内容的具体标签，避免无意义的泛化标签。
-- `entities`: 最多 3 个，只保留对识别文章核心事件有帮助的主要实体，用于后续 Event Merge；不要提取所有被提及的人名、指标、产品、媒体来源或次要实体。
+- `entities`: 最多 3 个，只保留对识别文章核心事件有帮助的主要实体，用于后续 Merge Events；不要提取所有被提及的人名、指标、产品、媒体来源或次要实体。
 - Long-form Summary 可以更详细，但不超过约 400 字
 - Summary 必须忠于原文，不补写原文不存在的事实
 
 
-## Stage 2: Event Understanding & Merge
+## Stage 2: Merge Events
+
+Goal: Group Event Candidates that describe the same real-world event.
 
 Input: Stage1 Output Event Candidate
-
-Output:
+Each Event Candidate only needs:
 ```json
 {
-  "event_date": "",
-  "event_title": "",
-  "event_title_zh": [],
-  "event_entities_zh": [],
-  "event_summary": "",
-  "event_summary_zh": "",
-  "source_perspectives": [{
-    "source": "Reuters",
-    "summary": "..."
-  }],
-  "external_context": {
-    "performed": true,
-    "sources":[],
-    "sources_summary": ""
-  },
-  "sources": []
-}
-```
-Prompt Guidelines:
-+ Merge reports describing the same real-world event.
-+ 合并时提取报导的共同信息，并保留不同来源的信息差异。
-+ 当现有来源无法完整描述事件、存在信息冲突或需要补充背景时，主动检索外部可信信息，并记录信息来源。
-
-## Stage 3: Daily Brief Prioritization
-
-Input: 
-Stage2 Output Candidate: Merged Events, Source Digest Candidates, Long-form Candidates
-```json
-{
-  "events": [],
-  "source_digest_candidates": [],
-  "long_form_candidates": []
+  "temp_id": "",
+  "title": "",
+  "summary": "",
+  "entities": [],
+  "source": "",
+  "url": ""
 }
 ```
 
-Output:
+Output Schema:
 ```json
 {
   "events": [
     {
-      "event_id": "",
-      "rank": 1,
-      "reason": ""
+      "event_hint": "",
+      "sources": []
     }
-  ],
-  "source_digest": [
+  ]
+}
+```
+
+Prompt Guidelines:
+<!-- + 共享主要实体并不自动意味着属于同一个 Event。 -->
+- Merge reports describing the same real-world event when they share the same primary entity, core action or issue, and event context.
+- Do not merge unrelated events just because they share a broad topic, country, company, market, or category.
+- Keep a single candidate as its own Event when it does not clearly match another candidate.
+- Every input candidate must appear in exactly one Event's `sources` using its exact `temp_id`.
+- Do not invent or modify `temp_id`.
+- `event_hint` should be a short description of the real-world event.
+
+
+## Stage 3: Channel Ranking
+
+Goal: Rank candidates by relative importance or value within each Daily Brief Channel.
+
+Input Schema:
+### Event Groups
+```json
+{
+  "event_hint": "",
+  "sources": [
     {
-      "source": "Nature",
-      "articles": []
+      "source": "",
+      "title": "",
+      "summary": ""
     }
-  ],
-  "long_form": [
+  ]
+}
+```
+
+### Source Digest
+Source Digest contents grouped by Category.
+
+### Long-form
+Selected Long-form contents.
+
+Output Schema:
+```json
+{
+  "rankings": [
     {
-      "content_id": "",
+      "id": "",
       "rank": 1,
       "reason": ""
     }
@@ -129,8 +138,15 @@ Output:
 ```
 
 Prompt Guidelines:
+- Rank Event Groups globally by their importance as real-world events.
+- Rank Source Digest contents separately within each Category.
+- Rank Long-form contents globally by their reading value.
+- Do not compare candidates across different Channels.
+- Ranking is relative to the candidates provided in the current run.
+- Do not decide how many items should be displayed. Top N selection is handled by code.
+
 Event Prioritize by:
-- Has Systemic Risk
+- Systemic Risk
 - Important Topics
 - Impact (Economic, Geographic, Affected Group)
 - Media Coverage (Number of Sources, Source Authority)
@@ -150,3 +166,64 @@ Do NOT:
 - sort only by publish time
 - equally distribute sources
 - over-emphasize breaking news
+
+## Stage 4: Selected Event Enrichment
+
+Goal: Understand each selected Event Group and generate the complete Event content used by the Daily Brief.
+
+Input Schema:
+
+```json
+{
+  "event_hint": "",
+  "sources": [
+    {
+      // "id": "",
+      "title": "",
+      "summary": "",
+      "entities": [],
+      "source": "",
+      "url": ""
+    }
+  ]
+}
+```
+
+Output Schema:
+```json
+{
+  "event_date": "",
+  "event_title": "",
+  "event_title_zh": "",
+  "event_tags": [],
+  "event_tags_zh": [],
+  "event_entities": [],
+  "event_entities_zh": [],
+  "event_summary": "",
+  "event_summary_zh": "",
+  "source_perspectives": [{
+    "source": "Reuters",
+    "summary": "..."
+  }],
+  "external_context": {
+    "performed": false,
+    "sources":[],
+    "sources_summary": ""
+  }
+}
+```
+Prompt Guidelines:
++ Accurately describe what happened.
++ Extract the common information across reports while preserving meaningful differences between sources.
++ `event_tags`:  Up to 5 concise English tags
++ `event_tags_zh`: Up to 5 corresponding Chinese tags.
++ `event_entities`: Up to 3 core English entities. 只保留识别该 Event 最重要的核心实体。
++ `event_entities_zh`: Up to 3 corresponding Chinese entities.
++ 合并后提取共同事实，并保留不同来源提供的重要新增信息、不同视角或冲突信息。
++ `event_summary_zh`: 不超过200字。
++ Each `source_perspectives[].summary`: 不超过80字。
++ Summaries must be faithful to the provided reports.
++ 当现有来源无法完整描述事件、存在信息冲突或需要补充背景时，主动检索外部可信信息。
++ Record external source URLs and summarize only the context needed to understand the event.
++ `external_context.sources` 保存外部来源 URL。
++ `external_context.sources_summary` 不超过 250 字。

@@ -14,7 +14,7 @@ Selection
 ↓
 Event Detection
 ↓
-Event Merge
+Merge Events 
 ↓
 Ranking
 ↓

@@ -49,7 +49,6 @@ Output:
 
 - Category
 - Tags
-- Topic
 - Entity
 - Content Type (Event Candidate, Source Digest Candidate, Long-form Candidate, Ignore)
 - Generated Content: 

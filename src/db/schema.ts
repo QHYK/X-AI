@@ -70,6 +70,8 @@ export const events = pgTable(
     eventDate: date("event_date").notNull(),
     title: text("title").notNull(),
     titleZh: text("title_zh").notNull(),
+    eventTags: text("event_tags").array(),
+    eventTagsZh: text("event_tags_zh").array(),
     entities: text("entities").array(),
     entitiesZh: text("entities_zh").array(),
     summary: text("summary").notNull(),

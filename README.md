@@ -43,7 +43,7 @@ Daily Brief 包含四个部分：
 ```text
 Source Collection
         ↓
-Raw Articles
+Raw Articles -> eligible ? complete:content
         ↓
 Stage 1: Content Understanding & Selection
         ↓
@@ -51,9 +51,11 @@ Routing
         ↓
 Event / Digest / Long-form / Inspiration
         ↓
-Stage 2: Event Understanding & Merge
+Stage 2: Merge Events
         ↓
-Stage 3: Prioritization
+Stage 3: Channel Ranking
+        ↓
+Stage 4: Selected Event Enrichment
         ↓
 Daily Brief
 ```
@@ -99,7 +101,7 @@ Update `.env.local` with the real database connection:
 DATABASE_URL="postgresql://..."
 DATABASE_SSL="true"
 OPENAI_API_KEY="..."
-OPENAI_BASE_URL="https://128api.cn/v1"
+OPENAI_BASE_URL="openai_url"
 OPENAI_MODEL="gpt-5.4"
 ```
 
@@ -114,16 +116,15 @@ npm run db:generate                      # Generate Drizzle migrations from src/
 npm run db:check                         # Validate Drizzle migration metadata
 npm run db:migrate                       # Apply Drizzle migrations
 npm run db:seed                          # Sync docs/05-source-list.md into the sources table
-npm run collect:rss                      # Collect enabled RSS sources into raw_articles
-npm run complete:content                 # Try content completion for eligible raw_articles
+npm run collect:rss                      # 1.从 RSS 获取新信息 into raw_articles
+npm run complete:content                 # 2.对 raw_articles 内容不足的文章补充正文 
 npm run test:openai                      # Run one minimal model connectivity check
 npm run validate:stage1                  # Run Stage 1 validation dataset without persistence
-npm run process:stage1                   # Process pending raw_articles from the last 24 hours
+npm run process:stage1                   # 3.Stage 1: Process pending raw_articles from the last 24 hours
 npm run spike:rss                        # Run the one-off RSS normalization spike
 ```
 
 Useful Stage 1 environment controls:
-
 ```bash
 STAGE1_LIMIT=20 npm run process:stage1
 STAGE1_CONCURRENCY=2 npm run process:stage1

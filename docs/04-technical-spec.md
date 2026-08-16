@@ -47,10 +47,10 @@ Inspiration
 ```
 Ignore 内容不创建 `processed_contents` 记录。
 
-Event Candidate 在经过 Stage 2 合并后，通过 `event_id` 关联至对应 Event。
+Event Candidate 在经过 Stage 4 合并后，通过 `event_id` 关联至对应 Event。
 
 #### `events`
-保存 Stage 2 `Event Understanding & Merge` 产生的 Event。
+保存 Stage 4 `Selected Event Enrichment` 产生的 Event。
 一个 Event 可以关联多篇 Event Candidate。
 
 MVP 假设：
@@ -73,32 +73,44 @@ AI 原始结果应保留，人工修改后的展示结果单独记录，以便�
 每日 Workflow：
 
 ```text
-Source Collection
-        ↓
-Raw Articles
-        ↓
-Stage 1
-Content Understanding & Selection
-        ↓
-processed_contents
-        ↓
-        ├── Event Candidate
-        │       ↓
-        │     Stage 2
-        │ Event Understanding & Merge
-        │       ↓
-        │     events
-        │
-        ├── Source Digest
-        ├── Long-form
-        └── Inspiration
-                ↓
-              Stage 3
-      Daily Brief Prioritization
-                ↓
-       write ranking results
-                ↓
-             Publish
+09:00 Cron
+    ↓
+RSS Collection                           ← Code
+    ↓
+Content Completion
+    ↓
+Stage 1 — Content Understanding & Selection
+    ↓
+┌─────────────────────────────┐
+│ Event Candidates            │
+│ Source Digest               │
+│ Long-form                   │
+│ Inspiration                 │
+└─────────────────────────────┘
+    ↓
+Stage 2 — Merge Events
+    │
+    └── Event Candidates → Event Groups
+    ↓
+Stage 3 — Channel Ranking
+    │
+    ├── Event Groups → Global Ranking
+    ├── Source Digest → Ranking by Category
+    └── Long-form → Global Ranking
+    ↓
+Top N Selection                          ← Code
+    │
+    ├── Events → Top 8–12
+    ├── Source Digest → Top N by Category
+    └── Long-form → Top N
+    ↓
+Stage 4 — Selected Event Enrichment
+    │
+    └── Selected Event Groups → Complete Events
+    ↓
+Persist Results
+    ↓
+Daily Brief API / Page
 ```
 
 #### Source Collection
@@ -120,7 +132,7 @@ Collector 负责：
 * URL / GUID 等基础去重；
 * 写入 `raw_articles`。
 
-#### Stage 1
+#### Stage 1: Content Understanding & Selection
 
 调用 LLM 完成：
 
@@ -129,68 +141,104 @@ Collector 负责：
 * Routing；
 * Tagging；
 * Entity；
-* Topic；
 * Summary；
 * 中文标题及摘要。
 
 结果写入 `processed_contents`。
 
-#### Stage 2
+#### Stage 2 — Merge Events
 
-仅处理：
-```text
-processed_contents.routing = Event
-```
+读取当天 Stage 1 生成的 Event Candidates，一次性提交给 LLM 进行 Merge Events。
 
-调用 LLM 完成：
+Input:
+- 当天 `processed_contents.routing = event`
+- 使用 Stage 1 已生成的 title / summary / entities
+- 从关联数据获取 source / url
+- 为本次执行生成临时 `temp_id`
 
-* Event Detection；
-* Event Merge；
-* Common Facts；
-* Source Perspectives；
-* 必要的 External Context Retrieval。
+Output:
+- Event Groups
+- 每个 Group 仅包含 `event_hint` 和对应 Candidate `temp_id`
 
-结果写入 `events`。
+Event Groups 作为当前 workflow 的中间结果，不直接写入 `events` 表。
+优先单次处理当天全部 Event Candidates，不预先按 batch 拆分。
+Stage 2 不生成完整 Event 内容，不执行 Ranking。
 
-相关 Event Candidate 更新 `event_id`。
+#### Stage 3 — Channel Ranking
+Stage 3 对不同 Channel 独立执行 Ranking，不决定最终展示数量。
 
-#### Stage 3
+##### Event Ranking
+Input:
+- Stage 2 Event Groups
+- Event Group 对应的 Candidate title / summary / source 等必要信息
 
-分别对以下内容排序：
-```text
-events
+所有 Event Groups 在当天范围内进行全局 Ranking。
 
-processed_contents
-WHERE routing = Digest
+##### Source Digest Ranking
+按 Category 分组后分别 Ranking。
 
-processed_contents
-WHERE routing = Long-form
-```
+例如：
+- Finance & Economy
+- Technology
+- Science
+- Policy
+- Company
+- General
+
+只处理当天对应 Category 的 Source Digest Contents。
+
+##### Long-form Ranking
+当天 Long-form Contents 全局 Ranking。
+
+##### Output
+每个候选得到：
+- rank
+- ranking_reason
+
 排序结果直接写入对应记录。
-
 保留：
-
 ```text
 ai_rank
 display_rank
 ```
 
 默认：
-
 ```text
 display_rank = ai_rank
 ```
 
 人工调整只修改 `display_rank`，不覆盖 AI 原始排序。
-
-Digest 的排序发生在每个 Source 内部，可使用：
-
-```text
-ai_source_rank
-display_source_rank
-```
-
 Inspiration 不需要 AI 排序。
+
+#### Top N Selection
+
+由代码根据产品配置选择最终展示内容。
+- Events: Top 8–12
+- Source Digest: Top N by Category
+- Long-form: Top N
+Top N 不由 LLM 决定。
+
+#### Stage 4 — Selected Event Enrichment
+
+只处理经过 Stage 3 Ranking 和 Top N Selection 后入选的 Event Groups。
+每个 Selected Event Group 独立调用 LLM。
+
+Input:
+- event_hint
+- Group 内 Event Candidates 的 title / summary / entities / source / url
+
+Output:
+- event_date
+- event_title / event_title_zh
+- event_tags / event_tags_zh
+- event_entities / event_entities_zh
+- event_summary / event_summary_zh
+- source_perspectives
+- external_context
+
+Stage 4 可以有限并发执行。
+单个 Event 失败不应影响其他 Event 的处理。
+只有 Stage 4 成功完成的 Event 才写入 `events` 表。
 
 #### Daily Brief Composition
 
@@ -309,6 +357,8 @@ process-stage-1
 process-stage-2
     ↓
 process-stage-3
+    ↓
+process-stage-4
 ```
 
 Workflow 的实际业务逻辑由 Application Code 执行，而不是写入数据库 Cron。
@@ -326,7 +376,7 @@ Workflow 的实际业务逻辑由 Application Code 执行，而不是写入数�
 
 ### AI Integration
 
-Stage 1–3 调用 LLM。
+Stage 1–4 调用 LLM。
 
 AI 调用遵循 `03-prompt-spec.md` 定义的：
 * Input Schema；
@@ -339,7 +389,7 @@ AI 调用遵循 `03-prompt-spec.md` 定义的：
 
 ### External Retrieval
 
-Stage 2 在必要情况下允许 External Context Retrieval。
+Stage 4 在必要情况下允许 External Context Retrieval。
 
 外部信息主要用于：
 * 补充缺失事实；
@@ -558,13 +608,14 @@ display_rank = ai_rank
 ```
 人工调整只修改 `display_rank`，保留 `ai_rank` 用于后续 Eval。
 
-对于 Source Digest，`ai_rank` / `display_rank` 表示**同一 Source 内部的顺序**。
+对于 Source Digest，`ai_rank` / `display_rank` 表示同一 Category 内部的顺序。
 
 ---
 
 ### 3.4 events
 
-保存 Stage 2 `Event Understanding & Merge` 的结果。
+保存 Stage 4 `Selected Event Enrichment` 的结果。
+Stage 2 产生的 Event Groups 是 Workflow 中间结果，不直接写入 `events`。
 
 一个 Event 可以对应多篇 Event Candidate。
 MVP 假设：
@@ -581,6 +632,8 @@ processed_contents.event_id
 | `event_date`              | date        | NOT NULL           |
 | `title`                   | text        | NOT NULL           |
 | `title_zh`                | text        | NOT NULL           |
+| `event_tags`              | text[]      | nullable           |
+| `event_tags_zh`           | text[]      | nullable           |
 | `entities`                | text[]      | nullable           |
 | `entities_zh`             | text[]      | nullable           |
 | `summary`                 | text        | NOT NULL           |
@@ -731,9 +784,11 @@ Collection
     ↓
 Stage 1: Content Understanding & Selection
     ↓
-Stage 2: Event Understanding & Merge
+Stage 2: Merge Events
     ↓
-Stage 3: Daily Brief Prioritization
+Stage 3: Channel Ranking
+    ↓
+Stage 4: Selected Event Enrichment
     ↓
 Publish-ready data
 ```
@@ -867,7 +922,7 @@ Bloomberg: Fed ...
 FT: Fed ...
 ```
 这不是重复 Article。
-保留全部内容，并在 Stage 2 进行 Event Merge。
+保留全部内容，并在 Stage 2 进行 Merge Events。
 
 ---
 
@@ -918,29 +973,11 @@ processing_error = ...
 
 Stage 1 全部可处理内容完成后触发 Stage 2。
 
-查询当天：
-```text
-processed_contents
-WHERE routing = 'event'
-```
-作为 Event Candidates。
-
-Stage 2 对当天 Event Candidates 做整体或分组理解：
+Stage 2 使用当前 Daily Workflow 对应时间窗口内产生的 Event Candidates。
+MVP 默认时间窗口与 Stage 1 一致，为最近 24 小时 collected 内容。
+Stage 2：
 * 判断哪些报道属于同一现实事件；
-* 创建 Events；
-* 保留共同事实；
-* 保留不同来源 Perspective；
-* 必要时执行 External Context Retrieval。
-
-生成：
-```text
-events
-```
-并更新相关：
-```text
-processed_contents.event_id
-```
-不创建 `event_articles`。
+* 输出Event Group 作为 workflow 中间结果
 
 ---
 
@@ -950,7 +987,7 @@ Stage 2 完成后主动触发 Stage 3。
 
 输入：
 ```text
-当天 events
+当天 Event Groups
 
 processed_contents
 WHERE routing = 'digest'
@@ -960,38 +997,41 @@ WHERE routing = 'long_form'
 ```
 
 三个分支分别排序。
-Stage 3 结果直接写回原表。
+`routing = 'digest'` 会按 category 分别排序。
+Stage 3 完成后：
+- Source Digest / Long-form:
+  Stage 3 结果直接写入 `processed_contents.ai_rank`。
+  首次排序时设置 `display_rank = ai_rank`。
 
-#### Events
-```text
-events.ai_rank
-events.display_rank
-```
+- Event Groups:
+  Ranking 作为当前 Workflow 的中间结果保留。
+  Stage 4 创建最终 Event 时，将对应 `ai_rank` / `display_rank`
+  一并写入 `events`。
 
-#### Source Digest
-```text
-processed_contents.ai_rank
-processed_contents.display_rank
-```
-Digest Rank 表示同一 Source 内部排序。
-
-#### Long-form
-```text
-processed_contents.ai_rank
-processed_contents.display_rank
-```
-
-首次写入时：
-```text
-display_rank = ai_rank
-```
-人工修改只改变 `display_rank`。
-
+人工修改只改变 `display_rank`
 Inspiration 不需要 AI Ranking。
 
 ---
 
-### 4.8 Failure Handling
+### 4.8 Stage 4 Job
+
+Stage 3 完成后主动触发 Stage 4。
+
+对 Event Groups 进行完整事件理解，生成 Daily Brief 展示所需的事件信息，并在必要时补充外部背景。
+* 创建 Events；
+* 保留共同事实；
+* 保留不同来源 Perspective；
+* 必要时执行 External Context Retrieval。
+
+Stage 4 完成后：
+1. 写入 `events`
+2. 将组成该 Event 的 Event Candidates 回写 `processed_contents.event_id`
+3. 保存最终 Event rank / display_rank
+不创建 `event_articles`。
+
+---
+
+### 4.9 Failure Handling
 
 MVP 只处理明确的常见失败，不建立复杂 Workflow Engine。
 
@@ -1025,34 +1065,39 @@ MVP 只处理明确的常见失败，不建立复杂 Workflow Engine。
 
 #### Stage 2 Failure
 
-Stage 2 属于 derived data。
 失败时：
-* 保留 Stage 1 数据；
-* 重新执行当天 Event Understanding & Merge；
-* 不需要重新 Collection 或 Stage 1。
+→ 整个 Merge Events retry
 
 #### Stage 3 Failure
 
 失败时：
-* 重新读取已有 Events / Digest / Long-form；
-* 单独重跑 Stage 3；
-* 不重新执行前序 Stage。
+→ 只重跑失败的 Channel / Category
 
+#### Stage 4 Failure
+
+失败时：
+→ 只重跑失败的 Event
 ---
 
-### 4.9 Idempotency 幂等性
+### 4.10 Idempotency 幂等性
 
 Daily Workflow 必须可以安全重复执行。
+
 重复运行不应：
 * 重复插入相同 Raw Article；
 * 重复生成同一 Processed Content；
 * 重复调用已经成功完成的 Stage 1；
-* 创建重复 Event。
+* 因重复执行 Stage 2 / Stage 3 / Stage 4 而产生重复持久化数据；
+* 静默覆盖人工调整结果。
 
 #### Collection
-通过来源 item ID / URL 等去重。
+
+通过来源 item ID / URL 等稳定标识去重。
+
+同一来源重复采集相同内容时，不重复插入 `raw_articles`。
 
 #### Stage 1
+
 只处理：
 ```text
 stage1_status = pending
@@ -1063,23 +1108,35 @@ processed_contents.raw_article_id
 ```
 保持 UNIQUE。
 
+已经成功完成 Stage 1 的 Raw Article 不应在普通 Workflow 重跑时再次调用 LLM。
+
 #### Stage 2
-应支持安全重跑当天 Event Merge。
-实现时可选择：
-* 清理并重建当天 derived Events；
-* 或根据 Event 结果进行 upsert。
-优先采用实现更简单且可预测的方式。
+Stage 2 只生成当前 Workflow 使用的 Event Groups，不直接持久化 events。
+同一批 Event Candidates 可以安全重新执行 Merge Events。
+Stage 2 重跑时，直接重新生成本次 Workflow 的 Event Groups，不依赖或修改之前运行产生的 Event Groups。
 
 #### Stage 3
-Stage 3 只更新 Rank 字段。
-重复执行时覆盖 `ai_rank`。
-人工已经修改过的 `display_rank` 不应在普通重跑时被静默覆盖；如果需要重新同步 AI 排序，应显式执行。
+Stage 3 可以安全重新计算当前 Channel / Category 的 AI Ranking。
+重复执行时允许覆盖：`ai_rank`
+首次产生 AI Ranking 时：`display_rank = ai_rank`
+
+如果 `display_rank` 已被人工修改，普通 Stage 3 重跑不得静默覆盖。
+如果需要重新同步 AI 排序，应显式执行。
+
+#### Stage 4
+Stage 4 只处理本次 Top N Selection 后选中的 Event Groups。
+Stage 4 重跑必须避免为同一个 Selected Event Group 创建重复 Event。
+MVP 优先采用简单、可预测的重建策略：
+1. 在重新生成当天 Events 前，清理当天由 Workflow 生成的 Event 关联；
+2. 删除 / 重建当天 AI 生成的 Events；
+3. 重新执行 Selected Event Enrichment；
+4. 将成功生成的 Event Candidates 重新关联到新的 event_id。
 
 ---
 
-### 4.10 Publish
+### 4.11 Publish
 MVP 不建立独立 Publish Job 或 Brief Snapshot。
-Stage 3 完成后：
+Stage 4 完成后：
 ```text
 events
 processed_contents
@@ -1094,11 +1151,12 @@ Prompt 文件怎么管理、Structured Output、Web Search、失败重试、模�
 
 ### 5.1 Overview
 
-LLM is used in three processing stages:
+LLM is used in four processing stages:
 ```text
 Stage 1：Content Understanding & Selection
-Stage 2：Event Understanding & Merge
-Stage 3：Ranking
+Stage 2：Merge Events
+Stage 3：Channel Ranking
+Stage 4：Selected Event Enrichment
 ```
 The behavior and output requirements of each stage are defined in `03-prompt-spec.md`.
 Technical implementation should keep model invocation separate from business logic.
@@ -1111,8 +1169,9 @@ Each Stage uses an independent prompt.
 ```text
 prompts/
 ├── stage1-content-understanding.ts
-├── stage2-event-merge.ts
-└── stage3-ranking.ts
+├── stage2-merge-event.ts
+├── stage3-ranking.ts
+└── stage4-event-enrichment.ts
 ```
 Each prompt should follow the corresponding Stage definition in `03-prompt-spec.md`.
 Prompts should not contain database or workflow implementation details.
@@ -1121,7 +1180,7 @@ Prompts should not contain database or workflow implementation details.
 
 ### 5.3 Structured Output
 
-All three Stages should return structured output.
+All four Stages should return structured output.
 Use schema validation for model responses.
 ```text
 LLM Response
@@ -1172,32 +1231,8 @@ Stage 2 输入当天全部 Event Candidates，LLM 需要：
 ```text
 identify events
 merge related reports
-summarize shared facts
-preserve different source perspectives
-identify when external context may be useful
 ```
-
-#### External Context Retrieval
-
-Stage 2 may request additional Web Search when existing Event Candidates are insufficient to understand an important event.
-Conceptually:
-```text
-Event Candidates
-      ↓
-Stage 2 reasoning
-      ↓
-Need more context?
-   ↙       ↘
- no        yes
- ↓          ↓
-merge    Web Search
-            ↓
-        additional context
-            ↓
-        continue merge
-```
-Search 获得的信息作为补充 Context，不替代原始 Source。
-必要的信息保存到 `events.external_context`
+优先单次处理当天全部 Event Candidates，不预先按 batch 拆分。
 
 ---
 
@@ -1224,7 +1259,38 @@ display_rank
 
 ---
 
-### 5.8 Validation & Retry
+### 5.8 Stage 4 Invocation
+
+Stage 4 对 Ranking 后最终入选的 Event Groups 进行处理：
+summarize shared facts
+preserve different source perspectives
+identify when external context may be useful
+
+#### External Context Retrieval
+
+Stage 4 may request additional Web Search when existing Event Candidates are insufficient to understand an important event.
+Conceptually:
+```text
+Event Candidates
+      ↓
+Stage 4 reasoning
+      ↓
+Need more context?
+   ↙       ↘
+ no        yes
+ ↓          ↓
+merge    Web Search
+            ↓
+        additional context
+            ↓
+        continue merge
+```
+Search 获得的信息作为补充 Context，不替代原始 Source。
+必要的信息保存到 `events.external_context`
+
+---
+
+### 5.9 Validation & Retry
 
 ### Technical Failure
 
@@ -1255,12 +1321,13 @@ Do not silently accept invalid structured output.
 
 ---
 
-### 5.9 Prompt Versioning
+### 5.10 Prompt Versioning
 Prompt 文件随项目代码通过 Git 进行版本管理。
 当 Prompt 发生影响模型行为的修改时，更新对应 Stage 的版本号，例如：
 Stage 1 → v2
 Stage 2 → v1
 Stage 3 → v3
+Stage 4 → v3
 
 每次 Daily Workflow 执行时，在运行日志中记录：
 date
@@ -1268,6 +1335,7 @@ model
 stage1_prompt_version
 stage2_prompt_version
 stage3_prompt_version
+stage4_prompt_version
 
 ---
 
@@ -1295,12 +1363,14 @@ x-ai-field/
 │   ├── processing/
 │   │   ├── stage1.ts
 │   │   ├── stage2.ts
-│   │   └── stage3.ts
+│   │   ├── stage3.ts
+│   │   └── stage4.ts
 │   │
 │   ├── prompts/
 │   │   ├── stage1.ts
 │   │   ├── stage2.ts
-│   │   └── stage3.ts
+│   │   ├── stage3.ts
+│   │   └── stage4.ts
 │   │
 │   └── lib/
 │
@@ -1323,7 +1393,7 @@ x-ai-field/
 ```text
 collectors → 获取并规范化外部数据
 
-processing → 控制 Stage 1–3 的 Processing Workflow
+processing → 控制 Stage 1–4 的 Processing Workflow
 
 prompts → 定义 LLM Prompt
 

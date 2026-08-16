@@ -8,6 +8,13 @@
       "when": 1786699202035,
       "tag": "0000_optimal_nightshade",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786876689745,
+      "tag": "0001_nasty_wolf_cub",
+      "breakpoints": true
     }
   ]
 }

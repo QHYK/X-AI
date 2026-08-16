@@ -192,7 +192,6 @@ Content Level中每条内容应包括：
 Title
 Summary
 Tags
-Topic
 Importance Score
 Published Date
 Source Type

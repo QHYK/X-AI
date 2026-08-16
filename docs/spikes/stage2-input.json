@@ -1,0 +1,818 @@
+{
+  "event_candidates": [
+    {
+      "temp_id": "E001",
+      "title": "Hurricane Lala lashes Hawaii with strong winds and torrential rain",
+      "summary": "Hurricane Lala is battering Hawaii with strong winds and torrential rain. If it makes landfall, it would be Hawaii’s first direct hurricane hit in 34 years, making it a notable weather and disaster-risk event.",
+      "entities": [
+        "Hawaii",
+        "Hurricane Lala"
+      ],
+      "source": "BBC: Science & Environment",
+      "url": "https://www.bbc.co.uk/news/articles/crmrr7kjy9vo?at_medium=RSS&at_campaign=rss"
+    },
+    {
+      "temp_id": "E002",
+      "title": "Hurricane Lala lashes Hawaii with strong winds and torrential rain",
+      "summary": "Hurricane Lala is bringing strong winds and torrential rain to Hawaii. If it makes landfall, it would be the state's first direct hurricane hit in 34 years.",
+      "entities": [
+        "Hawaii",
+        "Hurricane Lala",
+        "BBC"
+      ],
+      "source": "BBC: World",
+      "url": "https://www.bbc.co.uk/news/articles/crmrr7kjy9vo?at_medium=RSS&at_campaign=rss"
+    },
+    {
+      "temp_id": "E003",
+      "title": "Ukraine launches one of its largest aerial attacks of the war, killing at least 6 people in Russia",
+      "summary": "Ukraine launched hundreds of drones across Russia in one of the largest aerial attacks of the war, killing at least six people. Russia said it destroyed 822 drones overnight, including 600 headed toward Moscow, while deaths were reported in the Rostov region and Moscow region.",
+      "entities": [
+        "Ukraine",
+        "Russia",
+        "Russian Ministry of Defense"
+      ],
+      "source": "Associated Press (AP 美联社)",
+      "url": "https://apnews.com/article/russia-ukraine-war-01294bf8744282086e8f76c8130e16ba"
+    },
+    {
+      "temp_id": "E004",
+      "title": "India Readies Big LPG Output Boost as Hormuz Uncertainty Lingers",
+      "summary": "India has instructed state companies and private refiners to prepare for a sharp increase in LPG production to strengthen domestic supplies, as uncertainty persists over the Strait of Hormuz amid the Iran war. The waterway is key for about 90% of India’s LPG imports.",
+      "entities": [
+        "India",
+        "Strait of Hormuz",
+        "Bloomberg"
+      ],
+      "source": "Bloomberg Markets",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-16/india-readies-big-lpg-output-boost-as-hormuz-uncertainty-lingers"
+    },
+    {
+      "temp_id": "E005",
+      "title": "Torrential rain and flood kill nine in Japan amid wettest month in decades",
+      "summary": "Torrential rain in eastern Japan has killed nine people, according to NHK, after an unprecedented deluge flooded more than 1,000 homes, disrupted roads and rail services, and caused power outages. Authorities issued the highest-level heavy rain warning for Chiba for the first time as landslide risks rose.",
+      "entities": [
+        "Japan",
+        "Chiba prefecture",
+        "NHK"
+      ],
+      "source": "The Guardian 卫报",
+      "url": "https://www.theguardian.com/world/2026/aug/16/torrential-rain-and-flood-kill-nine-in-japan-amid-wettest-month-in-decades"
+    },
+    {
+      "temp_id": "E006",
+      "title": "New UK cost of living crisis looms with soaring energy bills forecast to lift inflation",
+      "summary": "The article says UK households face a renewed cost-of-living squeeze as July inflation is expected to rise to about 2.9%, driven by sharply higher gas and electricity bills. The jump is linked to energy-market fallout from the Iran war and is likely to intensify pressure on the new prime minister and complicate the policy backdrop for the Bank of England.",
+      "entities": [
+        "United Kingdom",
+        "Office for National Statistics",
+        "Bank of England"
+      ],
+      "source": "The Guardian 卫报",
+      "url": "https://www.theguardian.com/business/2026/aug/16/new-uk-cost-of-living-crisis-looms-rising-energy-bills-inflation"
+    },
+    {
+      "temp_id": "E007",
+      "title": "China Plans to Speed Up New Energy Recycling, Waste Rules: CCTV",
+      "summary": "China is speeding up rules for recycling and reusing wind and solar equipment, with a goal of creating a closed-loop waste system for the new-energy industry before 2030, according to CCTV.",
+      "entities": [
+        "China",
+        "China Central Television"
+      ],
+      "source": "Bloomberg Markets",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-16/china-plans-to-speed-up-new-energy-recycling-waste-rules-cctv"
+    },
+    {
+      "temp_id": "E008",
+      "title": "Rescuers search for survivors of powerful Indonesia earthquake",
+      "summary": "Rescuers are searching for survivors after a powerful earthquake in Indonesia killed 47 people and destroyed hundreds of buildings. Officials said a rapid assessment of the damage and broader impact is under way.",
+      "entities": [
+        "Indonesia"
+      ],
+      "source": "BBC: World",
+      "url": "https://www.bbc.co.uk/news/articles/c3v00w5ylw9o?at_medium=RSS&at_campaign=rss"
+    },
+    {
+      "temp_id": "E009",
+      "title": "Most US voters say they are worse off under Trump — FT poll",
+      "summary": "An FT poll found that most US voters say they are worse off under Donald Trump, while Democrats hold an advantage over Republicans on the economy just months before the midterm elections. The piece points to growing voter dissatisfaction with economic conditions as a potentially important political signal ahead of the vote.",
+      "entities": [
+        "Donald Trump",
+        "Democratic Party",
+        "Republican Party"
+      ],
+      "source": "FT Economy",
+      "url": "https://www.ft.com/content/fd40a98d-2a7f-4246-a296-73e956bf03c0?syn-25a6b1a6=1"
+    },
+    {
+      "temp_id": "E010",
+      "title": "Miner Ferrexpo caught up in dispute between oligarch and Kyiv",
+      "summary": "Ferrexpo is seeking to raise cash while becoming entangled in a dispute between Ukraine and its sanctions-hit shareholder Konstantin Zhevago, who is fighting to preserve his stake. The article focuses on the miner’s financing pressures and the ownership conflict’s implications for the company.",
+      "entities": [
+        "Ferrexpo",
+        "Konstantin Zhevago",
+        "Ukraine"
+      ],
+      "source": "FT Company",
+      "url": "https://www.ft.com/content/1b318ce4-75ef-4f68-8db5-f148dd00fe9f?syn-25a6b1a6=1"
+    },
+    {
+      "temp_id": "E011",
+      "title": "World’s largest carmakers seek to avert motor oil crisis",
+      "summary": "Major carmakers are trying to avoid a motor oil supply disruption caused by shortages of Group III base oils, a key input for modern engine lubricants. The industry is responding by exploring alternative oil blends to maintain supply and protect vehicle servicing and production needs.",
+      "entities": [
+        "global automakers",
+        "lubricants industry",
+        "Group III base oils"
+      ],
+      "source": "FT Company",
+      "url": "https://www.ft.com/content/161ee092-d2b6-4375-a853-e7a6fbee60e2?syn-25a6b1a6=1"
+    },
+    {
+      "temp_id": "E012",
+      "title": "World’s largest carmakers seek to avert motor oil crisis",
+      "summary": "Major automakers are seeking alternative lubricant formulations to avoid disruption from a shortage of Group III base oils, a key input in modern motor oil. The story points to supply strain in an important industrial input with potential implications for vehicle maintenance supply chains and auto-related manufacturing.",
+      "entities": [
+        "global carmakers",
+        "lubricants industry",
+        "Group III base oil market"
+      ],
+      "source": "FT Economy",
+      "url": "https://www.ft.com/content/161ee092-d2b6-4375-a853-e7a6fbee60e2?syn-25a6b1a6=1"
+    },
+    {
+      "temp_id": "E013",
+      "title": "World’s largest carmakers seek to avert motor oil crisis",
+      "summary": "Major carmakers are trying to avoid a motor oil supply crunch as shortages of Group III base oils force the industry to consider alternative lubricant blends. The development points to a potential supply-chain risk for the auto sector and related industrial markets.",
+      "entities": [
+        "global carmakers",
+        "lubricants industry",
+        "Group III base oil market"
+      ],
+      "source": "FT Markets",
+      "url": "https://www.ft.com/content/161ee092-d2b6-4375-a853-e7a6fbee60e2?syn-25a6b1a6=1"
+    },
+    {
+      "temp_id": "E014",
+      "title": "Rescue teams search for survivors in Indonesia after powerful earthquake",
+      "summary": "Rescue teams in eastern Indonesia are searching collapsed buildings and landslide debris after a 7.7-magnitude earthquake struck Flores island, killing at least 51 people, injuring more than 100, and displacing thousands. The dead were reported across multiple regencies, and authorities continue looking for people believed trapped under quake-triggered landslides.",
+      "entities": [
+        "Indonesia",
+        "National Disaster Management Agency",
+        "Flores"
+      ],
+      "source": "The Guardian 卫报",
+      "url": "https://www.theguardian.com/world/2026/aug/16/rescue-teams-search-for-survivors-in-indonesia-after-powerful-earthquake"
+    },
+    {
+      "temp_id": "E015",
+      "title": "China Revises Timing of July Economic Data Release, Briefing",
+      "summary": "Bloomberg reports China changed the release time for its July economic data to 3 p.m. Monday, departing from recent practice, and will hold the related briefing after the official data release.",
+      "entities": [
+        "China"
+      ],
+      "source": "Bloomberg Markets",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-16/china-to-hold-july-economic-briefing-after-official-data-release"
+    },
+    {
+      "temp_id": "E016",
+      "title": "Malaysia profits from data centre boom",
+      "summary": "Malaysia is benefiting from a surge in data centre investment as it positions itself as a regional AI and cloud infrastructure hub. The development is giving a boost to the economy and highlights how Southeast Asian markets are attracting capital tied to rising computing demand.",
+      "entities": [
+        "Malaysia",
+        "Johor",
+        "Singapore"
+      ],
+      "source": "FT Company",
+      "url": "https://www.ft.com/content/f063b38e-61c0-449b-aca3-968b903091a1?syn-25a6b1a6=1"
+    },
+    {
+      "temp_id": "E017",
+      "title": "Malaysia profits from data centre boom",
+      "summary": "Malaysia is benefiting from the global data centre boom as it emerges as a growing AI hub, providing an economic boost to the country.",
+      "entities": [
+        "Malaysia"
+      ],
+      "source": "FT Markets emergingmarkets",
+      "url": "https://www.ft.com/content/f063b38e-61c0-449b-aca3-968b903091a1?syn-25a6b1a6=1"
+    },
+    {
+      "temp_id": "E018",
+      "title": "Rescuers dig through rubble and landslides after Indonesia quake kills 47",
+      "summary": "Rescuers in eastern Indonesia continued searching collapsed buildings and landslide debris after a magnitude 7.7 earthquake killed at least 47 people, injured more than 100, and displaced thousands on Flores island. The quake destroyed homes, damaged public facilities, blocked roads, and left remote villages struggling with power and communications outages.",
+      "entities": [
+        "Indonesia",
+        "USGS",
+        "National Disaster Management Agency"
+      ],
+      "source": "Associated Press (AP 美联社)",
+      "url": "https://apnews.com/article/indonesia-flores-earthquake-landslide-bf1d024bdec7727094f8dc73d7dd5e34"
+    },
+    {
+      "temp_id": "E019",
+      "title": "Ukraine war briefing: Kyiv faces missile barrage after Zelenskyy targets Russian satellite network",
+      "summary": "Russia launched a missile attack on Kyiv, causing fires and injuries, while Ukraine said it struck a Russian airfield and a rocket facility tied to Russia’s emerging satellite internet network. The briefing also notes Russia’s warning over reports of possible US weapons transfers from Turkey to Ukraine and highlights deepening Russia-North Korea ties.",
+      "entities": [
+        "Ukraine",
+        "Russia",
+        "Volodymyr Zelenskyy"
+      ],
+      "source": "The Guardian 卫报",
+      "url": "https://www.theguardian.com/world/2026/aug/16/ukraine-war-briefing-kyiv-faces-missile-barrage-after-zelenskyy-targets-russian-satellite-network"
+    },
+    {
+      "temp_id": "E020",
+      "title": "Central banks may be accidentally subsidizing government borrowing through their efforts to prevent a repeat of past market blowups, and policymakers are starting to worry, writes WSJ’s @jmackin2",
+      "summary": "The article argues that central banks, by acting as market makers of last resort to prevent financial market blowups, may be unintentionally encouraging leverage and risk-taking. It says this dynamic can effectively subsidize government borrowing and is becoming a growing concern for policymakers.",
+      "entities": [
+        "Central banks",
+        "Governments",
+        "Policymakers"
+      ],
+      "source": "WSJ: Economy",
+      "url": "https://www.wsj.com/economy/central-banking/central-banks-are-stuck-in-a-rinse-and-repeat-cycle-of-crises-47da47e9?mod=rss_socialeconomyfeed"
+    },
+    {
+      "temp_id": "E021",
+      "title": "This Sprawling Chinese Refinery Is Bankrolling Tehran",
+      "summary": "The article examines U.S. allegations that Chinese petrochemical giant Hengli has been a major importer of illicit Iranian crude, helping provide revenue to Tehran despite sanctions. Hengli denies trading with Iran, making the story a significant development at the intersection of sanctions enforcement, China-Iran energy ties, and geopolitical risk.",
+      "entities": [
+        "Hengli Group",
+        "Iran",
+        "United States"
+      ],
+      "source": "WSJ: World News",
+      "url": "https://www.wsj.com/world/china/hengli-china-oil-company-iran-c802475a?mod=rss_worldnews"
+    },
+    {
+      "temp_id": "E022",
+      "title": "US to Ramp Up Iran Economic Pressure, Hurricane Lala Targets HI",
+      "summary": "Bloomberg audio briefing says the US is set to increase economic pressure on Iran, while Hurricane Lala is tracking toward Hawaii. The item points to both a geopolitical sanctions development and a natural-disaster risk event.",
+      "entities": [
+        "United States",
+        "Iran",
+        "Hawaii"
+      ],
+      "source": "Bloomberg",
+      "url": "https://www.bloomberg.com/news/audio/2026-08-15/us-to-ramp-up-iran-economic-pressure-hurricane-lala-targets-hi"
+    },
+    {
+      "temp_id": "E023",
+      "title": "Iran War Commander Visits the USS Abraham Lincoln",
+      "summary": "Adm. Brad Cooper visited the USS Abraham Lincoln during a deployment he described as one of the most operationally intense and consequential of the modern era. The visit comes amid reports of poor living conditions aboard the carrier and against the backdrop of heightened tensions involving Iran.",
+      "entities": [
+        "USS Abraham Lincoln",
+        "Brad Cooper",
+        "Iran"
+      ],
+      "source": "WSJ: World News",
+      "url": "https://www.wsj.com/world/middle-east/iran-war-commander-visits-the-uss-abraham-lincoln-ece7a4da?mod=rss_worldnews"
+    },
+    {
+      "temp_id": "E024",
+      "title": "A Millennial Furniture Designer Is Behind the Drones Battering Russia",
+      "summary": "The article profiles Iryna Terekh, a 34-year-old former furniture designer who now leads Fire Point, described as Ukraine’s largest private defense company. It highlights how the company has become a key player in producing drones used in strikes against Russia, illustrating the rapid expansion and adaptation of Ukraine’s private defense industry during the war.",
+      "entities": [
+        "Fire Point",
+        "Iryna Terekh",
+        "Ukraine"
+      ],
+      "source": "WSJ: World News",
+      "url": "https://www.wsj.com/world/ukraine-fire-point-ceo-iryna-terekh-drones-d93ec97b?mod=rss_worldnews"
+    },
+    {
+      "temp_id": "E025",
+      "title": "Australian state to launch gun buyback after Bondi Beach attack",
+      "summary": "New South Wales said it will launch a gun buyback program, offering cash to owners who surrender firearms, after the Bondi Beach attack. The move signals a policy response aimed at reducing gun availability following the violent incident.",
+      "entities": [
+        "New South Wales",
+        "Bondi Beach",
+        "Australia"
+      ],
+      "source": "BBC: World",
+      "url": "https://www.bbc.co.uk/news/articles/cgjee21eenvo?at_medium=RSS&at_campaign=rss"
+    },
+    {
+      "temp_id": "E026",
+      "title": "Democratic Party officials seek to move past squabbles on fundraising and socialism",
+      "summary": "At a Texas meeting to approve a new 2028 presidential primary calendar, Democratic Party officials are trying to move past internal disputes over fundraising and socialism.",
+      "entities": [
+        "Democratic Party",
+        "Texas",
+        "2028 presidential primary calendar"
+      ],
+      "source": "WSJ: Politics",
+      "url": "https://www.wsj.com/politics/elections/democrats-turn-focus-to-winning-after-months-of-internal-fights-29c49635?mod=rss_socialpoliticsfeed"
+    },
+    {
+      "temp_id": "E027",
+      "title": "Qatar denies capturing three Iranian pilots after downing fighter jets",
+      "summary": "Qatar denied Iran’s claim that it captured three Iranian pilots after allegedly downing two fighter jets at the start of the US-Iran war. The report centers on conflicting accounts between Doha and Tehran over a potentially significant military incident tied to the broader conflict.",
+      "entities": [
+        "Qatar",
+        "Iran"
+      ],
+      "source": "BBC: World",
+      "url": "https://www.bbc.co.uk/news/articles/cj4kk8kz271o?at_medium=RSS&at_campaign=rss"
+    },
+    {
+      "temp_id": "E028",
+      "title": "Morocco detains dozens of migrants trying to cross into Ceuta, reports say",
+      "summary": "Moroccan authorities reportedly detained dozens of migrants attempting to cross into Ceuta, the Spanish enclave in North Africa. Security was increased after social media posts suggested a second mass crossing attempt on Saturday.",
+      "entities": [
+        "Morocco",
+        "Ceuta",
+        "Spain"
+      ],
+      "source": "BBC: World",
+      "url": "https://www.bbc.co.uk/news/articles/ckg44x2ey1ro?at_medium=RSS&at_campaign=rss"
+    },
+    {
+      "temp_id": "E029",
+      "title": "Iran rebuffs Trump's claim over Strait of Hormuz amid report of another ship being struck",
+      "summary": "Iran rejected former President Donald Trump's claim that the Strait of Hormuz would soon become U.S. territory, with a senior Iranian official saying the waterway will remain Iranian. The report also cites another ship being struck, pointing to renewed tensions and potential risks around a critical global energy chokepoint.",
+      "entities": [
+        "Iran",
+        "United States",
+        "Strait of Hormuz"
+      ],
+      "source": "CNBC: World Top News & Analysis",
+      "url": "https://www.cnbc.com/2026/08/15/iran-rebuffs-trumps-claim-over-hormuz-amid-report-of-ship-strike.html"
+    },
+    {
+      "temp_id": "E030",
+      "title": "US to Ramp Up Iran Economic Pressure, USS Lincoln Concerns, More",
+      "summary": "Bloomberg audio reports on plans for the US to intensify economic pressure on Iran and discusses concerns related to the USS Lincoln, pointing to a geopolitical and policy-focused development involving US-Iran tensions.",
+      "entities": [
+        "United States",
+        "Iran",
+        "USS Abraham Lincoln"
+      ],
+      "source": "Bloomberg",
+      "url": "https://www.bloomberg.com/news/audio/2026-08-15/us-to-ramp-up-iran-economic-pressure-uss-lincoln-concerns-more"
+    },
+    {
+      "temp_id": "E031",
+      "title": "Eleven killed in Israeli strikes on southern Lebanon, authorities say",
+      "summary": "Lebanese authorities said 11 people were killed in Israeli strikes in southern Lebanon. Israel's military said it targeted Hezbollah infrastructure in response to earlier action against its soldiers, pointing to renewed cross-border security tensions.",
+      "entities": [
+        "Israel",
+        "Lebanon",
+        "Hezbollah"
+      ],
+      "source": "BBC: World",
+      "url": "https://www.bbc.co.uk/news/articles/c4gjygx4gjeo?at_medium=RSS&at_campaign=rss"
+    },
+    {
+      "temp_id": "E032",
+      "title": "AI ‘Chipflation’ Washes Ashore in the UK Economy",
+      "summary": "Bloomberg reports that upcoming UK inflation data may show continued price pressure from an AI-driven memory-chip shortage and higher energy costs, factors that could keep the Bank of England cautious on policy.",
+      "entities": [
+        "Bank of England",
+        "United Kingdom"
+      ],
+      "source": "Bloomberg Economics",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-15/ai-chipflation-washes-ashore-in-the-uk-economy"
+    },
+    {
+      "temp_id": "E033",
+      "title": "Zimbabwe boat accident death toll hits 68 as 22 more bodies recovered",
+      "summary": "Police in Zimbabwe said 22 more bodies were recovered after a ferry capsized on Lake Kariba, raising the death toll to 68. The boat overturned on Tuesday on the Zimbabwe-Zambia border, and investigators suspect it was overloaded and hit by heavy winds.",
+      "entities": [
+        "Zimbabwe Police",
+        "Lake Kariba",
+        "Zimbabwe"
+      ],
+      "source": "The Guardian 卫报",
+      "url": "https://www.theguardian.com/world/2026/aug/15/more-bodies-recovered-after-zimbabwe-boat-accident"
+    },
+    {
+      "temp_id": "E034",
+      "title": "Bond Traders Agonize Over AI Companies’ $70 Billion of Shadow Credit Backstops",
+      "summary": "Bloomberg reports growing concern in credit markets over roughly $70 billion of off-balance-sheet or contingent financing backstops tied to major AI companies. The worries intensified after Nvidia’s new $500 billion financing partnership, with investors focusing on how these shadow liabilities could surface during stress and affect bond risk.",
+      "entities": [
+        "Nvidia Corp.",
+        "AI companies",
+        "bond traders"
+      ],
+      "source": "Bloomberg Markets",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-15/bond-traders-agonize-over-ai-companies-70-billion-of-shadow-credit-backstops"
+    },
+    {
+      "temp_id": "E035",
+      "title": "Big Manufacturers Find New Demand in Equipping AI Data Centers",
+      "summary": "Large industrial manufacturers such as Caterpillar and Cummins are finding new growth by supplying equipment for the rapid buildout of AI data centers. The article highlights how demand for power and infrastructure gear once seen as mundane is rising as AI investment accelerates.",
+      "entities": [
+        "Caterpillar",
+        "Cummins",
+        "AI data centers"
+      ],
+      "source": "WSJ: Technology",
+      "url": "https://www.wsj.com/business/big-manufacturers-find-new-demand-in-equipping-ai-data-centers-14e869ee?mod=rss_Technology"
+    },
+    {
+      "temp_id": "E036",
+      "title": "Big Manufacturers Find New Demand in Equipping AI Data Centers",
+      "summary": "Large industrial manufacturers including Caterpillar and Cummins are finding new growth by supplying equipment to AI data centers, reflecting how the AI boom is increasing demand for heavy machinery and power-related infrastructure that had previously been seen as low-profile products.",
+      "entities": [
+        "Caterpillar",
+        "Cummins",
+        "AI data centers"
+      ],
+      "source": "WSJ: US Business",
+      "url": "https://www.wsj.com/business/big-manufacturers-find-new-demand-in-equipping-ai-data-centers-14e869ee?mod=pls_whats_news_us_business_f"
+    },
+    {
+      "temp_id": "E037",
+      "title": "Moroccan police arrest more than 100 people as they attempt to enter Ceuta",
+      "summary": "Moroccan police arrested 111 people attempting to enter Spain’s North African enclave of Ceuta after social media posts called for another mass crossing. The incident follows a much larger surge two weeks earlier, when more than 72,000 migrants entered Ceuta, fueling EU tensions and anti-immigration rhetoric.",
+      "entities": [
+        "Morocco",
+        "Ceuta",
+        "Spain"
+      ],
+      "source": "The Guardian 卫报",
+      "url": "https://www.theguardian.com/world/2026/aug/15/moroccan-police-arrest-more-than-100-people-as-they-attempt-to-enter-ceuta"
+    },
+    {
+      "temp_id": "E038",
+      "title": "Firefighters battle wildfire tearing through Belgian nature reserve",
+      "summary": "Firefighters are battling a wildfire tearing through a major nature reserve in Belgium. The blaze has been described as the country’s worst in recent years.",
+      "entities": [
+        "Belgium"
+      ],
+      "source": "BBC: Science & Environment",
+      "url": "https://www.bbc.co.uk/news/articles/cp8eex1nmpvo?at_medium=RSS&at_campaign=rss"
+    },
+    {
+      "temp_id": "E039",
+      "title": "Firefighters battle wildfire tearing through Belgian nature reserve",
+      "summary": "Firefighters are battling a major wildfire in a Belgian nature reserve, described as the country's worst in recent years.",
+      "entities": [
+        "Belgium"
+      ],
+      "source": "BBC: World",
+      "url": "https://www.bbc.co.uk/news/articles/cp8eex1nmpvo?at_medium=RSS&at_campaign=rss"
+    },
+    {
+      "temp_id": "E040",
+      "title": "Marijuana reform is emerging as a midterm elections issue on both sides of the aisle",
+      "summary": "CNBC reports that cannabis reform is becoming a midterm election issue on both sides of the aisle, though its impact on election outcomes is still uncertain despite voter popularity.",
+      "entities": [
+        "CNBC",
+        "U.S. midterm elections",
+        "cannabis reform"
+      ],
+      "source": "CNBC: World Top News & Analysis",
+      "url": "https://www.cnbc.com/2026/08/15/cannabis-marijuana-legalization-midterm-elections.html"
+    },
+    {
+      "temp_id": "E041",
+      "title": "Trump Downplays Carrier Concerns, US to Ramp Up Pressure on Iran",
+      "summary": "Bloomberg audio report says President Donald Trump downplayed concerns related to a carrier while signaling the US will increase pressure on Iran, pointing to a potentially firmer US stance in the region.",
+      "entities": [
+        "United States",
+        "Iran",
+        "Donald Trump"
+      ],
+      "source": "Bloomberg",
+      "url": "https://www.bloomberg.com/news/audio/2026-08-15/trump-downplays-carrier-concerns-us-to-ramp-up-pressure-on-iran"
+    },
+    {
+      "temp_id": "E042",
+      "title": "Israeli strikes kill 11 in Lebanon two months into truce",
+      "summary": "Israeli strikes in Lebanon killed 11 people about two months into a truce, according to the report. The Israeli military said the attacks were a response to an action by Hezbollah, signaling renewed tension despite the ceasefire arrangement.",
+      "entities": [
+        "Israel",
+        "Lebanon",
+        "Hezbollah"
+      ],
+      "source": "FT world",
+      "url": "https://www.ft.com/content/1bd69e67-266f-4a4a-9c49-eb3c83bcb295?syn-25a6b1a6=1"
+    },
+    {
+      "temp_id": "E043",
+      "title": "The Risk-Amplifying Strategy That Led to Big Losses at Situational Awareness",
+      "summary": "WSJ explains the 'Texas hedge,' a Wall Street strategy that can amplify risk rather than reduce it, and details how hedge fund Situational Awareness used it to make large artificial-intelligence bets that led to significant losses.",
+      "entities": [
+        "Situational Awareness",
+        "Wall Street",
+        "artificial intelligence"
+      ],
+      "source": "WSJ: Markets & Finance",
+      "url": "https://www.wsj.com/finance/investing/the-risk-amplifying-strategy-that-led-to-big-losses-at-situational-awareness-9e033786?mod=rss_markets_main"
+    },
+    {
+      "temp_id": "E044",
+      "title": "Peru’s Economy Unexpectedly Slows as Fishing, Agriculture Slump",
+      "summary": "Peru’s economy slowed unexpectedly in June as output in fishing and agriculture fell amid unusual weather conditions.",
+      "entities": [
+        "Peru"
+      ],
+      "source": "Bloomberg Economics",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-15/peru-s-economy-unexpectedly-slows-as-fishing-agriculture-slump"
+    },
+    {
+      "temp_id": "E045",
+      "title": "Colombia Quake Tests New President Days Into Term",
+      "summary": "A 7.4-magnitude earthquake in western Colombia has killed at least 287 people, with rescue teams still searching for survivors. The disaster has also disrupted coffee exports and poses an early leadership test for newly sworn-in President Abelardo de la Espriella.",
+      "entities": [
+        "Colombia",
+        "Abelardo de la Espriella"
+      ],
+      "source": "Bloomberg Markets",
+      "url": "https://www.bloomberg.com/news/videos/2026-08-15/colombia-quake-tests-new-president-days-into-term-video"
+    },
+    {
+      "temp_id": "E046",
+      "title": "Drone Swarms Push AI Deeper Into Modern Warfare",
+      "summary": "Bloomberg reports on autonomous drone-swarm technology that lets multiple aircraft coordinate and strike targets even when communications or GPS are disrupted. The Pentagon is testing the capability under its Swarm Forge program, while reported experiments in which AI flagged civilian vehicles as potential targets underscore the risks of increasing battlefield autonomy.",
+      "entities": [
+        "Pentagon",
+        "Swarm Forge",
+        "Bloomberg"
+      ],
+      "source": "Bloomberg Markets",
+      "url": "https://www.bloomberg.com/news/videos/2026-08-15/drone-swarms-push-ai-deeper-into-modern-warfare-video"
+    },
+    {
+      "temp_id": "E047",
+      "title": "Ardagh’s New Owners Arini and Canyon Are Ready to Cash In",
+      "summary": "Ardagh Group, the packaging company founded by Paul Coulson and now controlled by creditors, is preparing to sell its stake in Ardagh Metal Packaging. The move would allow new owners Arini and Canyon to monetize their position after taking control through the restructuring process.",
+      "entities": [
+        "Ardagh Group",
+        "Arini",
+        "Canyon Partners"
+      ],
+      "source": "Bloomberg",
+      "url": "https://www.bloomberg.com/news/newsletters/2026-08-15/ardagh-s-new-owners-arini-and-canyon-are-ready-to-cash-in"
+    },
+    {
+      "temp_id": "E048",
+      "title": "Anthropic revenue reportedly jumps to more than $11.5 billion in second quarter",
+      "summary": "CNBC reports that Anthropic's second-quarter revenue rose to more than $11.5 billion, highlighting the rapid growth of the Claude chatbot maker ahead of a potential IPO.",
+      "entities": [
+        "Anthropic",
+        "Claude"
+      ],
+      "source": "CNBC: Technology",
+      "url": "https://www.cnbc.com/2026/08/15/anthropic-revenue-jumps-to-over-11point5-billion-in-q2-report.html"
+    },
+    {
+      "temp_id": "E049",
+      "title": "Anthropic revenue reportedly jumps to more than $11.5 billion in second quarter",
+      "summary": "CNBC reports that Anthropic’s revenue reportedly jumped to more than $11.5 billion in the second quarter, highlighting the rapid growth of the Claude chatbot maker as it prepares for a potential blockbuster IPO.",
+      "entities": [
+        "Anthropic"
+      ],
+      "source": "CNBC: World Top News & Analysis",
+      "url": "https://www.cnbc.com/2026/08/15/anthropic-revenue-jumps-to-over-11point5-billion-in-q2-report.html"
+    },
+    {
+      "temp_id": "E050",
+      "title": "South Korea proposes talks to officially end war with North",
+      "summary": "South Korean President Lee Jae Myung has proposed talks with North Korea aimed at officially ending the Korean War, which has remained frozen since the 1953 armistice.",
+      "entities": [
+        "South Korea",
+        "North Korea",
+        "Lee Jae Myung"
+      ],
+      "source": "BBC: World",
+      "url": "https://www.bbc.co.uk/news/articles/c8en2z9jp2xo?at_medium=RSS&at_campaign=rss"
+    },
+    {
+      "temp_id": "E051",
+      "title": "Depleted strategic oil reserve nears level that raises concerns about damage to caverns, operations",
+      "summary": "CNBC reports that the rapid drawdown of the U.S. Strategic Petroleum Reserve is approaching levels that experts say could risk damage to the underground caverns used to store oil and impair operations.",
+      "entities": [
+        "U.S. Strategic Petroleum Reserve",
+        "United States"
+      ],
+      "source": "CNBC: World Top News & Analysis",
+      "url": "https://www.cnbc.com/2026/08/15/strategic-petroleum-reserve-spr-oil-iran-war-caverns.html"
+    },
+    {
+      "temp_id": "E052",
+      "title": "‘Strategic change and grasping nettles’: where now for John Lewis as boss exits?",
+      "summary": "The article examines the abrupt departure of John Lewis boss Peter Ruis amid continued pressure on UK department stores. It frames his exit against wider sector weakness, including Harvey Nichols being bought out of administration by Frasers Group, and raises questions about the strategic direction of the UK’s largest department store chain.",
+      "entities": [
+        "John Lewis",
+        "Peter Ruis",
+        "Frasers Group"
+      ],
+      "source": "The Guardian 卫报",
+      "url": "https://www.theguardian.com/business/2026/aug/15/john-lewis-boss-peter-ruis-department-store-chain"
+    },
+    {
+      "temp_id": "E053",
+      "title": "US-Iran War Risks Repeated Cycles of Fighting",
+      "summary": "Bloomberg Economics Defense Lead Becca Wasser says the US-Iran conflict risks turning into a protracted war because shifting US objectives and the inability of either side to achieve a decisive military victory make a lasting resolution difficult. She warns that pauses in fighting could let both sides adapt and rearm, potentially widening the conflict geographically and increasing the need for direct US-Iran talks to reach a durable settlement.",
+      "entities": [
+        "United States",
+        "Iran",
+        "Bloomberg Economics"
+      ],
+      "source": "Bloomberg Markets",
+      "url": "https://www.bloomberg.com/news/videos/2026-08-15/us-iran-war-risks-repeated-cycles-of-fighting-video"
+    },
+    {
+      "temp_id": "E054",
+      "title": "Trump's ‘Golden Age’ Pitch Meets Affordability Frustration",
+      "summary": "Bloomberg reports that President Donald Trump’s message of a US economic “golden age” is being undercut by persistent voter frustration over the cost of gas, food and housing. The report says affordability concerns, along with the economic fallout from the Iran war, are complicating Republican efforts in competitive midterm races.",
+      "entities": [
+        "Donald Trump",
+        "Republican Party",
+        "United States"
+      ],
+      "source": "Bloomberg Markets",
+      "url": "https://www.bloomberg.com/news/videos/2026-08-15/trump-golden-age-pitch-meets-affordability-frustration-video"
+    },
+    {
+      "temp_id": "E055",
+      "title": "‘Outlier’ S&P 500 Earnings Strength Cheers Wall Street’s Bulls",
+      "summary": "Bloomberg reports that US companies are delivering earnings results well above Wall Street expectations, reinforcing bullish sentiment as the S&P 500 trades near record highs. The article frames the strength of the earnings season as an outlier that is helping support the stock market backdrop.",
+      "entities": [
+        "S&P 500",
+        "Wall Street",
+        "Corporate America"
+      ],
+      "source": "Bloomberg Markets",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-15/-outlier-s-p-500-earnings-strength-cheers-wall-street-s-bulls"
+    },
+    {
+      "temp_id": "E056",
+      "title": "Berkshire adds $17 billion to Alphabet stake",
+      "summary": "Berkshire Hathaway increased its stake in Alphabet by $17 billion, making Google’s parent company the third-largest holding in Berkshire’s equity portfolio.",
+      "entities": [
+        "Berkshire Hathaway",
+        "Alphabet"
+      ],
+      "source": "CNBC: World Top News & Analysis",
+      "url": "https://www.cnbc.com/2026/08/15/berkshire-adds-17-billion-to-alphabet-stake.html"
+    },
+    {
+      "temp_id": "E057",
+      "title": "Tributes paid to Jason Arday after former Cambridge professor’s death",
+      "summary": "Tributes were paid after Jason Arday, a former University of Cambridge professor, died at his home in south London. The report says he had resigned the previous week amid plagiarism allegations, which he denied. Andy Burnham called the death a tragedy, and Sadiq Khan’s comments were echoed in the coverage.",
+      "entities": [
+        "Jason Arday",
+        "University of Cambridge",
+        "Andy Burnham"
+      ],
+      "source": "The Guardian 卫报",
+      "url": "https://www.theguardian.com/uk-news/2026/aug/15/jason-arday-tributes-paid-to-former-cambridge-professor"
+    },
+    {
+      "temp_id": "E058",
+      "title": "Modi Puts Chips, Nuclear Power at Heart of India Push",
+      "summary": "Indian Prime Minister Narendra Modi used his Independence Day speech to outline a long-term development agenda aimed at making India a developed economy by 2047, with a focus on self-reliance, semiconductor manufacturing, artificial intelligence and nuclear power.",
+      "entities": [
+        "Narendra Modi",
+        "India"
+      ],
+      "source": "Bloomberg Markets",
+      "url": "https://www.bloomberg.com/news/videos/2026-08-15/modi-puts-chips-nuclear-power-at-heart-of-india-push"
+    },
+    {
+      "temp_id": "E059",
+      "title": "‘Cheap travel is not a defence’: the parents facing court for school absences in England",
+      "summary": "The Guardian reports from a Kent magistrates court where parents are being summoned over their children's school absences, many tied to term-time holidays. The article frames school non-attendance in England as a broader post-pandemic issue, with high absence rates and enforcement now putting hundreds of parents before courts across the country.",
+      "entities": [
+        "England courts",
+        "school attendance",
+        "Kent"
+      ],
+      "source": "The Guardian 卫报",
+      "url": "https://www.theguardian.com/education/2026/aug/15/inside-court-england-parents-face-fines-school-absence"
+    },
+    {
+      "temp_id": "E060",
+      "title": "As Global Waterways Face Squeeze, Mexico Pitches CIIT as Alternative Corridor",
+      "summary": "Bloomberg reports that Mexico is promoting the CIIT land corridor in the country’s south as an alternative trade route as major global waterways including the Panama Canal, the Red Sea and the Strait of Hormuz face growing disruptions and capacity pressure.",
+      "entities": [
+        "Mexico",
+        "CIIT",
+        "Panama Canal"
+      ],
+      "source": "Bloomberg Economics",
+      "url": "https://www.bloomberg.com/news/features/2026-08-15/as-global-waterways-face-squeeze-mexico-pitches-ciit-as-alternative-corridor"
+    },
+    {
+      "temp_id": "E061",
+      "title": "Ukraine left exposed as Patriot launchers run empty",
+      "summary": "FT reports that Ukraine is running low on Patriot interceptor missiles, leaving its air defenses exposed and threatening Kyiv’s military momentum ahead of Russia’s winter campaign.",
+      "entities": [
+        "Ukraine",
+        "Russia",
+        "Patriot missile system"
+      ],
+      "source": "FT Markets emergingmarkets",
+      "url": "https://www.ft.com/content/6448b0af-f2ed-4067-b814-73f41b56fa78?syn-25a6b1a6=1"
+    },
+    {
+      "temp_id": "E062",
+      "title": "US aircraft carrier furore is emblem of growing disquiet over Iran war",
+      "summary": "Reports of poor conditions aboard the USS Abraham Lincoln are being read as a sign of growing unease over a possible Iran war, alongside concerns about dwindling weapons stocks and weakening public support.",
+      "entities": [
+        "USS Abraham Lincoln",
+        "Iran",
+        "United States"
+      ],
+      "source": "FT world",
+      "url": "https://www.ft.com/content/4bd6537f-db17-4013-be3f-c70a1299183c?syn-25a6b1a6=1"
+    },
+    {
+      "temp_id": "E063",
+      "title": "US to Ramp Up Economic Pressure on Iran, Carrier Concerns, More",
+      "summary": "A Bloomberg audio item indicates the US plans to increase economic pressure on Iran, alongside discussion of carrier-related concerns. Based on the available metadata, it appears to touch on geopolitics and potential market implications, but the provided content is too limited to extract more specific details.",
+      "entities": [
+        "United States",
+        "Iran"
+      ],
+      "source": "Bloomberg",
+      "url": "https://www.bloomberg.com/news/audio/2026-08-15/us-to-ramp-up-economic-pressure-on-iran-carrier-concerns-more"
+    },
+    {
+      "temp_id": "E064",
+      "title": "UK’s biggest EV battery gigafactory shelves expansion as Jaguar Land Rover talks stall",
+      "summary": "AESC has shelved expansion plans for its Sunderland EV battery gigafactory after talks to supply Jaguar Land Rover stalled. The delay also reflects weaker-than-expected battery demand from Nissan, signaling a slowdown in the shift from petrol and diesel cars to electric vehicles in the UK auto sector.",
+      "entities": [
+        "AESC",
+        "Jaguar Land Rover",
+        "Nissan"
+      ],
+      "source": "The Guardian 卫报",
+      "url": "https://www.theguardian.com/business/2026/aug/15/uk-ev-battery-gigafactory-aesc-jaguar-land-rover-nissan"
+    },
+    {
+      "temp_id": "E065",
+      "title": "Labour’s rental reforms disrupt student market and lengthen lettings process",
+      "summary": "The FT reports that Labour’s rental reforms are disrupting the student housing market. The Renters’ Rights Act is making landlords more cautious, limiting access for international students and lengthening the lettings process, which can push prospective tenants into paying overlapping rents.",
+      "entities": [
+        "Renters’ Rights Act",
+        "international students",
+        "Labour Party"
+      ],
+      "source": "FT Company",
+      "url": "https://www.ft.com/content/1c5f8995-ee2f-47cf-977b-69e65f0a8ccc"
+    },
+    {
+      "temp_id": "E066",
+      "title": "Beijing is said to move to clarify tax rules stoking confusion among China's ultra-wealthy",
+      "summary": "Beijing is reportedly moving to clarify ambiguities in new tax rules covering offshore trusts after the policy triggered confusion among wealthy Chinese individuals and their advisors.",
+      "entities": [
+        "Beijing",
+        "China"
+      ],
+      "source": "CNBC: World Top News & Analysis",
+      "url": "https://www.cnbc.com/2026/08/15/china-rich-tycoons-tax-overseas-investment-trust-insurance-capital-flows.html"
+    },
+    {
+      "temp_id": "E067",
+      "title": "AI Just Had Another Math Breakthrough—With Help From a High-School Dropout",
+      "summary": "The article reports on a new AI-related math breakthrough connected to work on difficult mathematical problems, highlighting the role of a high-school dropout who contributed not by doing the math but by encouraging the researchers or systems involved. It frames the development as another notable advance in AI’s capability in mathematics, involving leading AI companies including Anthropic and OpenAI.",
+      "entities": [
+        "Anthropic",
+        "OpenAI"
+      ],
+      "source": "WSJ: US Business",
+      "url": "https://www.wsj.com/tech/ai/ai-math-riemann-hypothesis-anthropic-openai-22f98a87?mod=pls_whats_news_us_business_f"
+    },
+    {
+      "temp_id": "E068",
+      "title": "US aircraft carrier on way to relieve USS Lincoln after issues reported aboard",
+      "summary": "The USS George Washington is heading to relieve the USS Abraham Lincoln after reports of serious onboard problems, including food shortages and broken plumbing affecting thousands of sailors. The situation drew attention after reports said some crew members were so distressed they considered jumping overboard.",
+      "entities": [
+        "USS Abraham Lincoln",
+        "US Navy",
+        "USS George Washington"
+      ],
+      "source": "BBC: World",
+      "url": "https://www.bbc.co.uk/news/articles/c171yp5zdrxo?at_medium=RSS&at_campaign=rss"
+    },
+    {
+      "temp_id": "E069",
+      "title": "France's top court blocks social media ban for under-15s",
+      "summary": "France’s top court blocked a proposed ban on social media access for children under 15, ruling that it infringed freedom of expression. President Emmanuel Macron said the government would prepare a new draft, keeping the issue of youth online regulation on the policy agenda.",
+      "entities": [
+        "France Constitutional Council",
+        "Emmanuel Macron",
+        "France"
+      ],
+      "source": "BBC: World",
+      "url": "https://www.bbc.co.uk/news/articles/cx2vj433xqlo?at_medium=RSS&at_campaign=rss"
+    },
+    {
+      "temp_id": "E070",
+      "title": "Engine parts smashed Ryanair window that man's head was sucked out of, report says",
+      "summary": "A preliminary US investigation says an engine fan blade broke on a Ryanair flight from Greece to Germany last month, leading to debris smashing a window and causing a passenger fatality.",
+      "entities": [
+        "Ryanair",
+        "US investigators",
+        "Boeing"
+      ],
+      "source": "BBC: Business",
+      "url": "https://www.bbc.co.uk/news/articles/cr59j4z3vl8o?at_medium=RSS&at_campaign=rss"
+    }
+  ]
+}

@@ -168,7 +168,6 @@ Content Level中每条内容应包括：
 Title
 Summary
 Tags
-Topic
 Importance Score
 Published Date
 Source Type
@@ -251,7 +250,7 @@ Merge when it improves readability.
 
 # Ranking Objectives
 
-Ranking 在 Selection 和 Event Merge 后执行。
+Ranking 在 Selection 和 Merge Events 后执行。
 不同模块考虑不同 Ranking Signals。
 
 ## Event Ranking
