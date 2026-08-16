@@ -70,3 +70,24 @@ routing = Ignore?
   ├─ Yes → enrichment 留空
   └─ No  → tags + entities + summary + translation
 ```
+
+# Stage 2
+```
+Stage 2
+Event Groups
+    ↓
+Stage 3A — Event Ranking
+    ↓
+Code: Top 10 Events
+    ↓
+取得 Top 10 Events 对应的 source items
+    ↓
+从 Digest / Long-form Ranking Input 中排除这些内容
+    ↓
+Digest Exact Dedup
+    ↓
+Science Publication Enrichment
+    ↓
+Stage 3B — Source Digest Ranking by Category
+Stage 3C — Long-form Ranking
+```

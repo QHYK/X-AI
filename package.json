@@ -15,14 +15,14 @@
     "db:seed": "tsx scripts/import-sources.ts",
     "collect:rss": "tsx scripts/collect-rss.ts",
     "complete:content": "tsx scripts/complete-content.ts",
-    "validate:stage1": "tsx scripts/validate-stage1.ts",
-    "validate:stage2": "tsx scripts/validate-stage2.ts",
-    "prepare:stage2-input": "tsx scripts/prepare-stage2-input.ts",
-    "prepare:stage3-validation": "tsx scripts/prepare-stage3-validation.ts",
     "process:stage1": "tsx scripts/process-stage1.ts",
     "process:stage2": "tsx scripts/process-stage2.ts",
-    "test:openai": "tsx scripts/test-openai-call.ts",
-    "spike:rss": "tsx scripts/spike-rss.ts"
+    "process:stage3": "tsx scripts/process-stage3.ts",
+    "process:stage4": "tsx scripts/process-stage4.ts",
+    "test:stage3-persistence": "tsx scripts/test-stage3-persistence-rules.ts",
+    "test:stage4-persistence": "tsx scripts/test-stage4-persistence.ts",
+    "test:stage4-event-date": "tsx scripts/test-stage4-event-date.ts",
+    "test:openai": "tsx scripts/test-openai-call.ts"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

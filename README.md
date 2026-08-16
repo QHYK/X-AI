@@ -14,18 +14,20 @@ X-AI-field 是一个 AI 驱动的信息筛选系统。
 - Source List
 - RSS ingestion spike
 - Project Bootstrap
-- PostgreSQL / Drizzle Schema
+- PostgreSQL / Supabase / Drizzle setup and migrations
 - Source List Import
 - RSS Collector
-- Content Completion
+- Content Completion for sparse RSS items
 - Stage 1 Contract / LLM validation
 - Stage 1 Batch Processing & Persistence
+- Stage 2 — Event Merge, with runtime artifacts
+- Stage 3 — Top N Event selection, exact dedup, Science publication enrichment, and Channel Ranking
+- Stage 4 — Selected Event Enrichment
 
 下一阶段：
-- 扩大运行 Stage 1 pending articles
-- 实现 Stage 2 Event Understanding & Merge
-- 实现 Stage 3 Prioritization
 - 实现 Daily Brief API 和基础页面
+- 实现 Daily Brief composition / Top N presentation rules
+- 增加 Review / feedback workflow
 
 ## Core Features
 
@@ -112,31 +114,43 @@ npm run dev                              # Start the Next.js development server
 npm run lint                             # Run ESLint
 npm run typecheck                        # Run TypeScript type checking
 npm run build                            # Build the Next.js app
+
 npm run db:generate                      # Generate Drizzle migrations from src/db/schema.ts
 npm run db:check                         # Validate Drizzle migration metadata
 npm run db:migrate                       # Apply Drizzle migrations
 npm run db:seed                          # Sync docs/05-source-list.md into the sources table
-npm run collect:rss                      # 1.从 RSS 获取新信息 into raw_articles
-npm run complete:content                 # 2.对 raw_articles 内容不足的文章补充正文 
+
+npm run collect:rss                      # Collect enabled RSS sources into raw_articles
+npm run complete:content                 # 对 raw_articles.content_text 内容不足的文章补充正文
+npm run process:stage1                   # Stage 1: process raw_articles from the last 24 hourspending raw_articles from the last 24 hours
+npm run process:stage2                   # Stage 2: merge Event candidates and write runtime artifacts
+npm run process:stage3                   # Stage 3: rank Events / Digest / Long-form and persist ranks
+npm run process:stage4                   # Stage 4: enrich selected Events and persist events
+
 npm run test:openai                      # Run one minimal model connectivity check
-npm run validate:stage1                  # Run Stage 1 validation dataset without persistence
-npm run process:stage1                   # 3.Stage 1: Process pending raw_articles from the last 24 hours
-npm run spike:rss                        # Run the one-off RSS normalization spike
+npm run test:stage3-persistence          # Validate Stage 3 display_rank protection rules
+npm run test:stage4-event-date           # Validate deterministic event_date derivation
+npm run test:stage4-persistence          # Validate Stage 4 rebuild / rollback persistence rules
 ```
 
-Useful Stage 1 environment controls:
+Useful workflow environment controls:
 ```bash
 STAGE1_LIMIT=20 npm run process:stage1
 STAGE1_CONCURRENCY=2 npm run process:stage1
 STAGE1_COLLECTED_WITHIN_HOURS=24 npm run process:stage1
+
+STAGE3_EVENT_TOP_N=10 npm run process:stage3
+STAGE4_CONCURRENCY=3 npm run process:stage4
 ```
+
+Runtime/debug artifacts are written under `runtime/`, which is gitignored. The latest successful `runtime/stage4/<timestamp>/persistence.json` is used as the rebuild boundary for Stage 4 derived Events, so do not delete the latest successful Stage 4 runtime directory unless you intentionally want to reset that boundary.
 
 ### Updating Sources
 
 1. 更新 `docs/05-source-list.md` 中的 CSV。
 2. Run `npm run db:seed` to sync the `sources` table.
 3. Run `npm run collect:rss` to collect RSS sources.
-4. For manual retry audits, retry failed URLs one at a time with at least a 3-second delay between requests.
+4. Run the workflow commands as needed: `collect:rss` → `complete:content` → `process:stage1` → `process:stage2` → `process:stage3` → `process:stage4`.
 
 The source sync uses `Source + Collection Method` as the source identity, so URL changes update existing records.
 

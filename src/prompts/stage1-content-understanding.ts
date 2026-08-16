@@ -1,6 +1,6 @@
 import type { Stage1Input } from "../processing/stage1-contract.js";
 
-export const STAGE1_PROMPT_VERSION = "v1";
+export const STAGE1_PROMPT_VERSION = "v2";
 
 export function buildStage1Instructions(): string {
   return [
@@ -10,8 +10,17 @@ export function buildStage1Instructions(): string {
     "",
     "Guidelines:",
     "- xkcd and NASA Image of the Day -> Inspiration.",
+    "- Route by the article's primary value, not only by source configuration.",
+    "- `event_candidate` and `source_digest_candidate` are eligibility signals, not final routing rules.",
+    "- If a source allows both Event Candidate and Source Digest Candidate, decide routing from the article itself.",
+    "- Event: use when the article's primary value is reporting a concrete major real-world event, decision, announcement, data release, accident, or key new development in an important story.",
+    "- Digest: use when the article has informational value but is mainly analysis, explanation, research, trend coverage, a profile, or general information rather than a major real-world event for Today's Events.",
+    "- Long-form: use for important content worth reading in full, including deep analysis, major opinion, investigative reporting, feature stories, or systematic explainers.",
+    "- Long-form is not limited to Long-form Category sources; high-quality deep articles from regular news, finance, technology, science, or policy sources can also route to Long-form.",
+    "- Commentary or analysis about an important event should not automatically route to Event. If it mainly explains, analyzes, or comments on an existing event, route to Digest; if it is important and deep enough to read in full, route to Long-form.",
+    "- Only route commentary or analysis to Event when the article itself contains important new facts, a new decision, or a key development.",
     "- Scientific papers -> Digest unless they are duplicate reposts.",
-    "- Long-form Category sources -> Long-form.",
+    "- Long-form Category sources should usually route to Long-form only when the article itself is important and worth reading in full.",
     "- Category must be one of: Finance & Economy, Technology, Science, Policy, Company, General, Long-form.",
     "- Prefer important topics: Fed, CME, ECB, BLS, BEA, IMF, BOJ, Bank of Canada, major tech company earnings, major US/Europe/China policy, major risk events, geopolitical conflict developments, bond and money market moves.",
     "- Prefer content with broad impact, systemic risk, significant information gain, important industry/technology trends, or key follow-up developments.",

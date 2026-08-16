@@ -93,12 +93,21 @@ Stage 2 — Merge Events
     └── Event Candidates → Event Groups
     ↓
 Stage 3 — Channel Ranking
-    │
-    ├── Event Groups → Global Ranking
-    ├── Source Digest → Ranking by Category
-    └── Long-form → Global Ranking
+Stage 3 — Channel Ranking
     ↓
-Top N Selection                          ← Code
+Event Groups → Global Ranking
+    ↓
+Top N Event Selection                     ← Code
+    ↓
+Collect selected Event source items       ← Code
+    ↓
+Exclude exact duplicates from
+Digest / Long-form inputs                 ← Code
+    ↓
+Source Digest → Ranking by Category
+Long-form → Global Ranking
+    ↓
+Top N Selection                           ← Code
     │
     ├── Events → Top 8–12
     ├── Source Digest → Top N by Category
@@ -228,7 +237,6 @@ Input:
 - Group 内 Event Candidates 的 title / summary / entities / source / url
 
 Output:
-- event_date
 - event_title / event_title_zh
 - event_tags / event_tags_zh
 - event_entities / event_entities_zh
@@ -239,6 +247,14 @@ Output:
 Stage 4 可以有限并发执行。
 单个 Event 失败不应影响其他 Event 的处理。
 只有 Stage 4 成功完成的 Event 才写入 `events` 表。
+
+`event_date` 不由 LLM 输出。Application Code 从组成该 Event 的
+source articles 的 `raw_articles.published_at` 确定性推导：
+1. 忽略 `published_at IS NULL`；
+2. 将有效 `published_at` 显式转换到 `Asia/Shanghai`；
+3. 取最早的日期部分 `YYYY-MM-DD`；
+4. 如果全部 source article 缺失 `published_at`，使用当前 Daily Workflow
+   run timestamp 转换到 `Asia/Shanghai` 后的日期作为 fallback。
 
 #### Daily Brief Composition
 
@@ -632,14 +648,13 @@ processed_contents.event_id
 | `event_date`              | date        | NOT NULL           |
 | `title`                   | text        | NOT NULL           |
 | `title_zh`                | text        | NOT NULL           |
-| `event_tags`              | text[]      | nullable           |
-| `event_tags_zh`           | text[]      | nullable           |
+| `tags`                    | text[]      | nullable           |
+| `tags_zh`                 | text[]      | nullable           |
 | `entities`                | text[]      | nullable           |
 | `entities_zh`             | text[]      | nullable           |
 | `summary`                 | text        | NOT NULL           |
 | `summary_zh`              | text        | NOT NULL           |
 | `source_perspectives`     | jsonb       | NOT NULL           |
-| `conflicting_information` | text[]      | nullable           |
 | `external_context`        | jsonb       | nullable           |
 | `ai_rank`                 | integer     | nullable           |
 | `display_rank`            | integer     | nullable           |
@@ -984,20 +999,57 @@ Stage 2：
 ### 4.7 Stage 3 Job
 
 Stage 2 完成后主动触发 Stage 3。
+Stage 3 分阶段执行。
+
+#### Step 1 — Event Ranking
 
 输入：
-```text
-当天 Event Groups
+- Stage 2 Event Groups
+- Event Group 对应的必要 Candidate 信息
 
-processed_contents
-WHERE routing = 'digest'
+所有 Event Groups 在当前 Daily Workflow 范围内全局排序。
 
-processed_contents
-WHERE routing = 'long_form'
-```
+输出：
+- rank
+- ranking_reason
 
-三个分支分别排序。
-`routing = 'digest'` 会按 category 分别排序。
+Event Group Ranking 暂作为 Workflow 中间结果保存。
+
+#### Step 2 — Event Top N Selection
+
+由代码根据产品配置选择最终 Today's Events。
+
+MVP 默认选择 Top 10；
+产品目标范围为约 8–12。
+
+Top N 不由 LLM 决定。
+
+#### Step 3 — Cross-channel Exact Dedup
+
+取得 Selected Event Groups 所包含的 Source Items。
+
+在 Source Digest / Long-form Ranking 前，
+排除已经被 Selected Events 覆盖的 exact duplicate。
+
+优先使用稳定的 normalized article URL 判断重复。
+
+规则：
+
+Selected Event > Long-form / Source Digest
+
+只有最终入选 Today's Events 的 Event 才触发排除；
+未进入 Top N 的 Event Group 不影响其他 Channel。
+
+本步骤只处理确定性的 exact duplicate，
+不进行语义相似度去重。
+
+#### Step 4 — Source Digest Ranking
+对剩余 `routing = digest` 内容按 Category 分组并分别排序。
+
+#### Step 5 — Long-form Ranking
+对剩余 `routing = long_form` 内容进行全局排序。
+
+
 Stage 3 完成后：
 - Source Digest / Long-form:
   Stage 3 结果直接写入 `processed_contents.ai_rank`。
@@ -1028,6 +1080,11 @@ Stage 4 完成后：
 2. 将组成该 Event 的 Event Candidates 回写 `processed_contents.event_id`
 3. 保存最终 Event rank / display_rank
 不创建 `event_articles`。
+
+`events.event_date` 由 Application Code 在写入 `events` 前推导：
+使用组成该 Event 的 source articles 中最早的有效 `published_at`
+（转换到 `Asia/Shanghai` 后取日期）。如果全部缺失 `published_at`，
+fallback 到当前 Daily Workflow run 的 `Asia/Shanghai` 日期。
 
 ---
 
@@ -1268,7 +1325,16 @@ identify when external context may be useful
 
 #### External Context Retrieval
 
-Stage 4 may request additional Web Search when existing Event Candidates are insufficient to understand an important event.
+Stage 4 uses the OpenAI Responses API `web_search` tool as an optional built-in tool.
+The request provides:
+```json
+{
+  "tools": [{ "type": "web_search" }],
+  "tool_choice": "auto"
+}
+```
+
+The model may request additional Web Search when existing Event Candidates are insufficient to understand an important event.
 Conceptually:
 ```text
 Event Candidates
@@ -1286,7 +1352,17 @@ merge    Web Search
         continue merge
 ```
 Search 获得的信息作为补充 Context，不替代原始 Source。
-必要的信息保存到 `events.external_context`
+必要的信息保存到 `events.external_context`。
+
+Application Code 不完全信任模型在 Structured Output 中自行声明的
+`external_context.performed` / `external_context.sources`。
+实际是否搜索、以及真实 source URL provenance，来自 Responses API
+response output items 中的 `web_search_call` 和 URL citation metadata。
+
+Persistence:
+- 如果没有真实 Web Search call：`events.external_context = null`
+- 如果发生真实 Web Search call：
+  `events.external_context = { sources: [...real source urls], summary: "..." }`
 
 ---
 
@@ -1327,7 +1403,7 @@ Prompt 文件随项目代码通过 Git 进行版本管理。
 Stage 1 → v2
 Stage 2 → v1
 Stage 3 → v3
-Stage 4 → v3
+Stage 4 → v5
 
 每次 Daily Workflow 执行时，在运行日志中记录：
 date

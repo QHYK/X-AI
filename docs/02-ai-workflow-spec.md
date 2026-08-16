@@ -113,6 +113,13 @@ Definition of Done:
 
 Responsibility: 根据不同 Daily Brief 分支的目标，对候选内容进行相对重要性排序。
 
+执行顺序：
+1. Event Groups 全局排序
+2. Code 选择 Top N Events
+3. 根据 Top N Events 对应的 Source Items，从 Source Digest / Long-form Candidates 中排除已被 Today's Events 覆盖的重复内容
+4. Source Digest 按 Category 分组并分别排序
+5. Long-form 全局排序
+
 不同 Channel 使用不同的 Ranking 范围：
 ```xml
 Today's Events
