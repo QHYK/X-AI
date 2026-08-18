@@ -478,7 +478,7 @@ FT: Fed ...
 
 只处理最近 workflow window 内 `stage1_status = pending` 的 Raw Articles。
 
-每个 Raw Article 独立执行：
+Stage 1 对普通文章使用小型 micro-batch，但每篇 Raw Article 仍独立判断；较大的 input 可以单独处理。
 ```text
 Raw Article → LLM → Ignore / Event / Digest / Long-form / Inspiration
 ```

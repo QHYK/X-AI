@@ -9,32 +9,47 @@
 ### Input Schema
 ```json
 {
-  "title": "",
-  "url": "",
-  "author": "",
-  "content": "",
-  "source_name": "",
-  "source_tags": [],
-  "source_metadata": {}
+  "articles": [
+    {
+      "temp_id": "A001",
+      "title": "",
+      "url": "",
+      "author": "",
+      "content": "",
+      "source_name": "",
+      "source_tags": [],
+      "source_metadata": {}
+    }
+  ]
 }
 ```
 
 ### Output Schema
 ```json
 {
-  "category": "",
-  "tags": [],
-  "entities": [],
-  "entities_zh": [],
-  "routing": "Event|Digest|Long-form|Inspiration|Ignore",
-  "generated_content": {
-    "summary": "",
-    "summary_zh": "",
-    "title_zh": ""
-  }
+  "results": [
+    {
+      "temp_id": "A001",
+      "category": "",
+      "tags": [],
+      "entities": [],
+      "entities_zh": [],
+      "routing": "Event|Digest|Long-form|Inspiration|Ignore",
+      "generated_content": {
+        "summary": "",
+        "summary_zh": "",
+        "title_zh": ""
+      }
+    }
+  ]
 }
 ```
 
+Each article is evaluated independently, and every input `temp_id` must appear exactly once in the output.
+    <!-- "Process every provided article independently.",
+    "Do not let one article influence another article's routing or summary.",
+    "Return one result for every exact `temp_id`.",
+    "Do not invent, omit, duplicate, or modify `temp_id`.", -->
 ### Guidelines
 - Routing 时根据文章本身的**primary value**判断，而不是仅根据 Source 的候选配置判断。
 - `event_candidate` / `source_digest_candidate` are eligibility signals, not final routing rules.

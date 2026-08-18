@@ -20,6 +20,7 @@
     "process:stage3": "tsx scripts/process-stage3.ts",
     "process:stage4": "tsx scripts/process-stage4.ts",
     "daily": "tsx scripts/run-daily-workflow.ts",
+    "validate:stage1-batch": "tsx scripts/validate-stage1-batch.ts",
     "test:stage3-persistence": "tsx scripts/test-stage3-persistence-rules.ts",
     "test:stage4-persistence": "tsx scripts/test-stage4-persistence.ts",
     "test:stage4-event-date": "tsx scripts/test-stage4-event-date.ts",

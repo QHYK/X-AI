@@ -17,6 +17,14 @@ export type Stage1Input = {
   };
 };
 
+export type Stage1BatchInputArticle = Stage1Input & {
+  temp_id: string;
+};
+
+export type Stage1BatchInput = {
+  articles: Stage1BatchInputArticle[];
+};
+
 export type Stage1Output = {
   category: Stage1Category;
   tags: string[];
@@ -28,6 +36,14 @@ export type Stage1Output = {
     summary_zh: string;
     title_zh: string;
   };
+};
+
+export type Stage1BatchOutputResult = Stage1Output & {
+  temp_id: string;
+};
+
+export type Stage1BatchOutput = {
+  results: Stage1BatchOutputResult[];
 };
 
 export type Stage1Category =
@@ -68,6 +84,24 @@ export type Stage1ValidationResult =
       success: false;
       errors: string[];
     };
+
+export type Stage1BatchValidationResult =
+  | {
+      success: true;
+      output: Stage1BatchOutput;
+    }
+  | {
+      success: false;
+      errors: string[];
+    };
+
+export type Stage1AssignmentValidation = {
+  passed: boolean;
+  missingTempIds: string[];
+  duplicateTempIds: string[];
+  inventedTempIds: string[];
+  errors: string[];
+};
 
 const STAGE1_CATEGORIES = new Set<Stage1Category>([
   "Finance & Economy",
@@ -131,6 +165,26 @@ export const stage1OutputJsonSchema = {
   },
 } as const;
 
+export const stage1BatchOutputJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["results"],
+  properties: {
+    results: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["temp_id", ...stage1OutputJsonSchema.required],
+        properties: {
+          temp_id: { type: "string" },
+          ...stage1OutputJsonSchema.properties,
+        },
+      },
+    },
+  },
+} as const;
+
 export function buildStage1Input(row: Stage1ArticleRow): Stage1Input {
   return {
     title: row.title,
@@ -149,6 +203,15 @@ export function buildStage1Input(row: Stage1ArticleRow): Stage1Input {
       language: row.sourceLanguage,
       published_at: row.publishedAt?.toISOString() ?? null,
     },
+  };
+}
+
+export function buildStage1BatchInput(rows: Stage1ArticleRow[]): Stage1BatchInput {
+  return {
+    articles: rows.map((row, index) => ({
+      temp_id: `A${String(index + 1).padStart(3, "0")}`,
+      ...buildStage1Input(row),
+    })),
   };
 }
 
@@ -203,6 +266,94 @@ export function validateStage1Output(value: unknown): Stage1ValidationResult {
   return {
     success: true,
     output: value as Stage1Output,
+  };
+}
+
+export function parseAndValidateStage1BatchOutput(rawText: string): Stage1BatchValidationResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (error) {
+    return {
+      success: false,
+      errors: [`Invalid JSON: ${error instanceof Error ? error.message : String(error)}`],
+    };
+  }
+
+  return validateStage1BatchOutput(parsed);
+}
+
+export function validateStage1BatchOutput(value: unknown): Stage1BatchValidationResult {
+  if (!isRecord(value)) {
+    return { success: false, errors: ["Output must be an object."] };
+  }
+
+  if (!Array.isArray(value.results)) {
+    return { success: false, errors: ["results must be an array."] };
+  }
+
+  const errors: string[] = [];
+  value.results.forEach((result, index) => {
+    if (!isRecord(result)) {
+      errors.push(`results[${index}] must be an object.`);
+      return;
+    }
+
+    if (typeof result.temp_id !== "string") {
+      errors.push(`results[${index}].temp_id must be a string.`);
+    }
+
+    const businessValidation = validateStage1Output(result);
+    if (!businessValidation.success) {
+      errors.push(
+        ...businessValidation.errors.map((error) => `results[${index}].${error}`),
+      );
+    }
+  });
+
+  if (errors.length > 0) {
+    return { success: false, errors };
+  }
+
+  return {
+    success: true,
+    output: value as Stage1BatchOutput,
+  };
+}
+
+export function validateStage1Assignments(
+  output: Stage1BatchOutput,
+  input: Stage1BatchInput,
+): Stage1AssignmentValidation {
+  const expected = new Set(input.articles.map((article) => article.temp_id));
+  const seen = new Map<string, number>();
+  const inventedTempIds = new Set<string>();
+
+  for (const result of output.results) {
+    if (!expected.has(result.temp_id)) {
+      inventedTempIds.add(result.temp_id);
+      continue;
+    }
+
+    seen.set(result.temp_id, (seen.get(result.temp_id) ?? 0) + 1);
+  }
+
+  const missingTempIds = [...expected].filter((tempId) => !seen.has(tempId));
+  const duplicateTempIds = [...seen.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([tempId]) => tempId);
+  const errors = [
+    ...missingTempIds.map((tempId) => `Missing temp_id ${tempId}.`),
+    ...duplicateTempIds.map((tempId) => `Duplicate assignment for temp_id ${tempId}.`),
+    ...[...inventedTempIds].map((tempId) => `Invented or modified temp_id ${tempId}.`),
+  ];
+
+  return {
+    passed: errors.length === 0,
+    missingTempIds,
+    duplicateTempIds,
+    inventedTempIds: [...inventedTempIds],
+    errors,
   };
 }
 

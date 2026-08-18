@@ -30,6 +30,13 @@ async function main() {
       limit: optionalPositiveInteger(process.env.STAGE1_LIMIT),
       concurrency: optionalPositiveInteger(process.env.STAGE1_CONCURRENCY),
       collectedWithinHours: optionalPositiveInteger(process.env.STAGE1_COLLECTED_WITHIN_HOURS),
+      batchSize: optionalPositiveInteger(process.env.STAGE1_BATCH_SIZE),
+      batchMaxContentChars: optionalPositiveInteger(
+        process.env.STAGE1_BATCH_MAX_CONTENT_CHARS,
+      ),
+      batchMaxTotalChars: optionalPositiveInteger(
+        process.env.STAGE1_BATCH_MAX_TOTAL_CHARS,
+      ),
       model: process.env.OPENAI_MODEL,
     });
 

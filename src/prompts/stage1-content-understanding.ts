@@ -1,43 +1,39 @@
-import type { Stage1Input } from "../processing/stage1-contract.js";
+import type { Stage1BatchInput } from "../processing/stage1-contract.js";
 
-export const STAGE1_PROMPT_VERSION = "v2";
+export const STAGE1_PROMPT_VERSION = "v4";
 
 export function buildStage1Instructions(): string {
   return [
     "You are Stage 1 of X-AI-field: Content Understanding & Selection.",
-    "Understand one article and decide whether it should be included in today's Daily Brief.",
+    "Understand every provided article and decide whether it should be included in today's Daily Brief.",
     "Follow the provided structured output schema exactly.",
+    "Process every provided article independently.",
+    "Do not let one article influence another article's routing or summary.",
+    "Return one result for every exact `temp_id`.",
+    "Do not invent, omit, duplicate, or modify `temp_id`.",
     "",
     "Guidelines:",
-    "- xkcd and NASA Image of the Day -> Inspiration.",
-    "- Route by the article's primary value, not only by source configuration.",
+    "- Route by the article's primary value, not only by its source configuration.",
     "- `event_candidate` and `source_digest_candidate` are eligibility signals, not final routing rules.",
-    "- If a source allows both Event Candidate and Source Digest Candidate, decide routing from the article itself.",
-    "- Event: use when the article's primary value is reporting a concrete major real-world event, decision, announcement, data release, accident, or key new development in an important story.",
-    "- Digest: use when the article has informational value but is mainly analysis, explanation, research, trend coverage, a profile, or general information rather than a major real-world event for Today's Events.",
-    "- Long-form: use for important content worth reading in full, including deep analysis, major opinion, investigative reporting, feature stories, or systematic explainers.",
-    "- Long-form is not limited to Long-form Category sources; high-quality deep articles from regular news, finance, technology, science, or policy sources can also route to Long-form.",
-    "- Commentary or analysis about an important event should not automatically route to Event. If it mainly explains, analyzes, or comments on an existing event, route to Digest; if it is important and deep enough to read in full, route to Long-form.",
-    "- Only route commentary or analysis to Event when the article itself contains important new facts, a new decision, or a key development.",
+    "- Event: a concrete major event, decision, announcement, data release, accident, or key new development.",
+    "- Digest: useful analysis, explanation, research, trend coverage, profile, or general information that is not centered on a major real-world event for Today's Events.",
+    "- Long-form: important content worth reading in full, such as deep analysis, major opinion, investigative reporting, or a feature article. It may come from any source or category.",
+    "- Inspiration: xkcd or NASA Image of the Day.",
+    "- Ignore: content that does not meet the Daily Brief content standard.",
+    "- Commentary about an important event is not automatically Event; route deep, high-value analysis to Long-form when appropriate.",
     "- Scientific papers -> Digest unless they are duplicate reposts.",
-    "- Long-form Category sources should usually route to Long-form only when the article itself is important and worth reading in full.",
     "- Category must be one of: Finance & Economy, Technology, Science, Policy, Company, General, Long-form.",
-    "- Prefer important topics: Fed, CME, ECB, BLS, BEA, IMF, BOJ, Bank of Canada, major tech company earnings, major US/Europe/China policy, major risk events, geopolitical conflict developments, bond and money market moves.",
-    "- Prefer content with broad impact, systemic risk, significant information gain, important industry/technology trends, or key follow-up developments.",
-    "- Treat Tier-1 media exclusives carefully; they should usually be prioritized.",
-    "- Ignore pure marketing, duplicate reposts, follow-ups without new information, entertainment gossip, clickbait, unsupported rumors, sports, entertainment, lifestyle, and consumer device items.",
-    "- Digest should still have meaningful informational value. Interesting but low-priority general-interest, lifestyle, historical trivia, or evergreen explainer content may be ignored.",
-    "- For routing = Ignore, return empty `tags`, `entities`, `entities_zh`, `summary`, `summary_zh`, and `title_zh`; only `category` and `routing` are required.",
-    "- For routing != Ignore, generate `tags`, `entities`, `entities_zh`, `summary`, `summary_zh`, and `title_zh`.",
-    "- `tags`: Up to 5 concise tags that best describe the article beyond its category. Prefer specific and useful concepts over generic labels.",
-    "- `entities`: Up to 3 major entities central to the article's main event. Include only entities useful for identifying or merging the event, such as major organizations, companies, governments, institutions, countries, or key persons. Do not extract every mentioned entity, metrics, products, media sources, or incidental names.",
-    "- `summary` must be in English.",
-    "- `entities_zh`, `summary_zh` and `title_zh` must be in Chinese.",
-    "- Long-form summaries may be more detailed, but keep them under roughly 400 Chinese characters.",
-    "- Summaries must be faithful to the original article. Do not add facts not present in the input.",
+    "- Prefer high-impact, systemic-risk, high-information-gain content and important policy, market, or technology developments.",
+    "- Review Tier-1 media exclusives carefully; they should usually be prioritized.",
+    "- By default, ignore marketing, duplicate reposts, follow-ups without new information, gossip, clickbait, unsupported rumors, sports, entertainment, lifestyle, and consumer device content.",
+    "- Use at most 5 specific tags that supplement and refine the category.",
+    "- Use at most 3 major entities useful for identifying the article's core event.",
+    "- For routing other than Ignore, generate an English summary and a Chinese title and summary.",
+    "- Long-form summaries may be longer, but keep the Chinese summary roughly within 400 characters.",
+    "- Summaries must be faithful to the source.",
   ].join("\n");
 }
 
-export function buildStage1UserPrompt(input: Stage1Input): string {
+export function buildStage1UserPrompt(input: Stage1BatchInput): string {
   return JSON.stringify(input, null, 2);
 }

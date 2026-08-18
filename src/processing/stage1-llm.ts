@@ -1,10 +1,11 @@
 import {
-  buildStage1Input,
-  parseAndValidateStage1Output,
-  stage1OutputJsonSchema,
+  buildStage1BatchInput,
+  parseAndValidateStage1BatchOutput,
+  stage1BatchOutputJsonSchema,
+  validateStage1Assignments,
   type Stage1ArticleRow,
-  type Stage1Input,
-  type Stage1Output,
+  type Stage1BatchInput,
+  type Stage1BatchOutput,
 } from "./stage1-contract.js";
 import {
   buildStage1Instructions,
@@ -21,41 +22,63 @@ export type Stage1LlmOptions = {
 
 export type Stage1LlmSuccess = {
   success: true;
-  input: Stage1Input;
-  output: Stage1Output;
+  input: Stage1BatchInput;
+  output: Stage1BatchOutput;
   model: string;
   promptVersion: string;
   responseId: string;
   attempts: number;
+  elapsedMs: number;
+  tokenUsage: Stage1TokenUsage | null;
   rawOutputText: string;
 };
 
 export type Stage1LlmFailure = {
   success: false;
-  input: Stage1Input;
+  input: Stage1BatchInput;
   model: string;
   promptVersion: string;
   attempts: number;
+  elapsedMs: number;
+  tokenUsage: Stage1TokenUsage | null;
   error: string;
   rawOutputText: string | null;
 };
 
 export type Stage1LlmResult = Stage1LlmSuccess | Stage1LlmFailure;
 
+export type Stage1TokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
 const DEFAULT_MODEL = "gpt-5.4-mini";
 const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE1_LLM_TIMEOUT_MS ?? 45_000);
 const DEFAULT_MAX_RETRIES = Number(process.env.STAGE1_LLM_MAX_RETRIES ?? 2);
 const RETRY_DELAY_MS = Number(process.env.STAGE1_LLM_RETRY_DELAY_MS ?? 1_000);
+const MAX_OUTPUT_TOKENS_PER_ARTICLE = 1_200;
 
-export async function runStage1Llm(
-  article: Stage1ArticleRow,
+export async function runStage1BatchLlm(
+  articles: Stage1ArticleRow[],
   options: Stage1LlmOptions = {},
 ): Promise<Stage1LlmResult> {
-  const input = buildStage1Input(article);
+  if (articles.length === 0) {
+    throw new Error("Stage 1 LLM batch must contain at least one article.");
+  }
+
+  const input = buildStage1BatchInput(articles);
   const model = options.model ?? process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   const client = createOpenAiClient({ timeoutMs, maxRetries: 0 });
+  const startedAt = Date.now();
+  const tokenUsage: Stage1TokenUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+  };
+  let hasTokenUsage = false;
 
   let rawOutputText: string | null = null;
   let lastError = "Unknown Stage 1 LLM failure.";
@@ -79,14 +102,14 @@ export async function runStage1Llm(
               ],
             },
           ],
-          max_output_tokens: 1_200,
+          max_output_tokens: MAX_OUTPUT_TOKENS_PER_ARTICLE * articles.length,
           store: false,
           text: {
             format: {
               type: "json_schema",
-              name: "stage1_content_understanding",
-              description: "Structured Stage 1 content understanding and selection output.",
-              schema: stage1OutputJsonSchema,
+              name: "stage1_content_understanding_batch",
+              description: "Independent Stage 1 results for a batch of articles.",
+              schema: stage1BatchOutputJsonSchema,
               strict: true,
             },
           },
@@ -96,10 +119,27 @@ export async function runStage1Llm(
         },
       );
 
+      if (response.usage) {
+        tokenUsage.inputTokens += response.usage.input_tokens;
+        tokenUsage.outputTokens += response.usage.output_tokens;
+        tokenUsage.totalTokens += response.usage.total_tokens;
+        hasTokenUsage = true;
+      }
       rawOutputText = response.output_text;
-      const validation = parseAndValidateStage1Output(rawOutputText);
+      const validation = parseAndValidateStage1BatchOutput(rawOutputText);
       if (!validation.success) {
         lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
+        if (attempt <= maxRetries) {
+          await sleep(RETRY_DELAY_MS * attempt);
+          continue;
+        }
+
+        break;
+      }
+
+      const assignment = validateStage1Assignments(validation.output, input);
+      if (!assignment.passed) {
+        lastError = `Assignment integrity validation failed: ${assignment.errors.join("; ")}`;
         if (attempt <= maxRetries) {
           await sleep(RETRY_DELAY_MS * attempt);
           continue;
@@ -116,6 +156,8 @@ export async function runStage1Llm(
         promptVersion: STAGE1_PROMPT_VERSION,
         responseId: response.id,
         attempts: attempt,
+        elapsedMs: Date.now() - startedAt,
+        tokenUsage: hasTokenUsage ? tokenUsage : null,
         rawOutputText,
       };
     } catch (error) {
@@ -137,12 +179,12 @@ export async function runStage1Llm(
     model,
     promptVersion: STAGE1_PROMPT_VERSION,
     attempts: attemptsUsed,
+    elapsedMs: Date.now() - startedAt,
+    tokenUsage: hasTokenUsage ? tokenUsage : null,
     error: lastError,
     rawOutputText,
   };
 }
-
-export const runStage1LlmValidation = runStage1Llm;
 
 function isNonRetryableLlmError(errorMessage: string): boolean {
   return (

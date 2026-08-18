@@ -1,6 +1,15 @@
 import type { Pool, PoolClient, QueryResult } from "pg";
-import { runStage1Llm, type Stage1LlmOptions } from "./stage1-llm.js";
-import type { Stage1ArticleRow, Stage1Output, Stage1Routing } from "./stage1-contract.js";
+import {
+  runStage1BatchLlm,
+  type Stage1LlmOptions,
+  type Stage1TokenUsage,
+} from "./stage1-llm.js";
+import type {
+  Stage1ArticleRow,
+  Stage1BatchOutputResult,
+  Stage1Output,
+  Stage1Routing,
+} from "./stage1-contract.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
 
@@ -8,6 +17,9 @@ export type Stage1JobOptions = Stage1LlmOptions & {
   limit?: number;
   concurrency?: number;
   collectedWithinHours?: number;
+  batchSize?: number;
+  batchMaxContentChars?: number;
+  batchMaxTotalChars?: number;
 };
 
 export type Stage1JobArticleResult = {
@@ -32,12 +44,35 @@ export type Stage1JobSummary = {
   ignoredCount: number;
   failedCount: number;
   processedContentInsertedCount: number;
+  batchCount: number;
+  fallbackBatchCount: number;
+  llmCallCount: number;
   retryCount: number;
+  llmDurationMs: number;
+  tokenUsage: Stage1TokenUsage | null;
   results: Stage1JobArticleResult[];
+};
+
+export type Stage1BatchConfig = {
+  batchSize: number;
+  batchMaxContentChars: number;
+  batchMaxTotalChars: number;
+};
+
+type Stage1MicroBatchResult = {
+  results: Stage1JobArticleResult[];
+  fallbackUsed: boolean;
+  llmCallCount: number;
+  retryCount: number;
+  llmDurationMs: number;
+  tokenUsage: Stage1TokenUsage | null;
 };
 
 const DEFAULT_STAGE1_CONCURRENCY = 3;
 const DEFAULT_STAGE1_LOOKBACK_HOURS = 24;
+export const DEFAULT_STAGE1_BATCH_SIZE = 5;
+export const DEFAULT_STAGE1_BATCH_MAX_CONTENT_CHARS = 12_000;
+export const DEFAULT_STAGE1_BATCH_MAX_TOTAL_CHARS = 40_000;
 
 export async function processStage1Batch(
   pool: Pool,
@@ -46,14 +81,18 @@ export async function processStage1Batch(
   const startedAt = new Date();
   const collectedWithinHours = options.collectedWithinHours ?? DEFAULT_STAGE1_LOOKBACK_HOURS;
   const concurrency = Math.max(1, options.concurrency ?? DEFAULT_STAGE1_CONCURRENCY);
+  const batchConfig = resolveStage1BatchConfig(options);
   const articles = await loadPendingStage1Articles(pool, {
     limit: options.limit,
     collectedWithinHours,
   });
+  const batches = createStage1MicroBatches(articles, batchConfig);
 
-  const results = await runWithConcurrency(articles, concurrency, async (article) =>
-    processStage1Article(pool, article, options),
+  const batchResults = await runWithConcurrency(batches, concurrency, async (batch) =>
+    processStage1MicroBatch(pool, batch, options),
   );
+  const results = batchResults.flatMap((result) => result.results);
+  const tokenUsage = sumTokenUsage(batchResults.map((result) => result.tokenUsage));
 
   return {
     startedAt: startedAt.toISOString(),
@@ -67,9 +106,97 @@ export async function processStage1Batch(
     failedCount: results.filter((result) => result.status === "failed").length,
     processedContentInsertedCount: results.filter((result) => result.processedContentInserted)
       .length,
-    retryCount: results.reduce((sum, result) => sum + Math.max(0, result.attempts - 1), 0),
+    batchCount: batches.length,
+    fallbackBatchCount: batchResults.filter((result) => result.fallbackUsed).length,
+    llmCallCount: batchResults.reduce((sum, result) => sum + result.llmCallCount, 0),
+    retryCount: batchResults.reduce((sum, result) => sum + result.retryCount, 0),
+    llmDurationMs: batchResults.reduce((sum, result) => sum + result.llmDurationMs, 0),
+    tokenUsage,
     results,
   };
+}
+
+export function resolveStage1BatchConfig(
+  options: Pick<
+    Stage1JobOptions,
+    "batchSize" | "batchMaxContentChars" | "batchMaxTotalChars"
+  > = {},
+): Stage1BatchConfig {
+  return {
+    batchSize:
+      options.batchSize ??
+      readPositiveInteger(
+        process.env.STAGE1_BATCH_SIZE,
+        DEFAULT_STAGE1_BATCH_SIZE,
+        "STAGE1_BATCH_SIZE",
+      ),
+    batchMaxContentChars:
+      options.batchMaxContentChars ??
+      readPositiveInteger(
+        process.env.STAGE1_BATCH_MAX_CONTENT_CHARS,
+        DEFAULT_STAGE1_BATCH_MAX_CONTENT_CHARS,
+        "STAGE1_BATCH_MAX_CONTENT_CHARS",
+      ),
+    batchMaxTotalChars:
+      options.batchMaxTotalChars ??
+      readPositiveInteger(
+        process.env.STAGE1_BATCH_MAX_TOTAL_CHARS,
+        DEFAULT_STAGE1_BATCH_MAX_TOTAL_CHARS,
+        "STAGE1_BATCH_MAX_TOTAL_CHARS",
+      ),
+  };
+}
+
+export function createStage1MicroBatches(
+  articles: Stage1ArticleRow[],
+  config: Stage1BatchConfig,
+): Stage1ArticleRow[][] {
+  const batches: Stage1ArticleRow[][] = [];
+  let currentBatch: Stage1ArticleRow[] = [];
+  let currentContentChars = 0;
+
+  const flushCurrentBatch = () => {
+    if (currentBatch.length > 0) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentContentChars = 0;
+    }
+  };
+
+  for (const article of articles) {
+    const contentChars = stage1ArticleContentLength(article);
+    const shouldProcessAlone =
+      contentChars >= config.batchMaxContentChars || article.sourceCategory === "Long-form";
+
+    if (shouldProcessAlone) {
+      flushCurrentBatch();
+      batches.push([article]);
+      continue;
+    }
+
+    const wouldExceedCount = currentBatch.length >= config.batchSize;
+    const wouldExceedTotal =
+      currentBatch.length > 0 &&
+      currentContentChars + contentChars > config.batchMaxTotalChars;
+    if (wouldExceedCount || wouldExceedTotal) {
+      flushCurrentBatch();
+    }
+
+    if (contentChars > config.batchMaxTotalChars) {
+      batches.push([article]);
+      continue;
+    }
+
+    currentBatch.push(article);
+    currentContentChars += contentChars;
+  }
+
+  flushCurrentBatch();
+  return batches;
+}
+
+export function stage1ArticleContentLength(article: Stage1ArticleRow): number {
+  return article.contentText?.trim().length ?? 0;
 }
 
 export async function loadPendingStage1Articles(
@@ -120,51 +247,136 @@ export async function loadPendingStage1Articles(
   return result.rows;
 }
 
-export async function processStage1Article(
+async function processStage1MicroBatch(
+  pool: Pool,
+  articles: Stage1ArticleRow[],
+  options: Stage1LlmOptions = {},
+): Promise<Stage1MicroBatchResult> {
+  const llmResult = await runStage1BatchLlm(articles, options);
+  const metrics = createBatchMetrics(llmResult);
+
+  if (llmResult.success) {
+    return {
+      ...metrics,
+      fallbackUsed: false,
+      results: await persistSuccessfulBatch(pool, articles, llmResult.output.results, {
+        attempts: llmResult.attempts,
+      }),
+    };
+  }
+
+  if (articles.length === 1) {
+    return {
+      ...metrics,
+      fallbackUsed: false,
+      results: [
+        await persistFailedArticle(pool, articles[0], llmResult.error, llmResult.attempts),
+      ],
+    };
+  }
+
+  const results: Stage1JobArticleResult[] = [];
+  let fallbackMetrics = metrics;
+  for (const article of articles) {
+    const singleResult = await runStage1BatchLlm([article], options);
+    fallbackMetrics = mergeBatchMetrics(fallbackMetrics, createBatchMetrics(singleResult));
+
+    if (!singleResult.success) {
+      results.push(
+        await persistFailedArticle(
+          pool,
+          article,
+          singleResult.error,
+          llmResult.attempts + singleResult.attempts,
+        ),
+      );
+      continue;
+    }
+
+    results.push(
+      ...(await persistSuccessfulBatch(pool, [article], singleResult.output.results, {
+        attempts: llmResult.attempts + singleResult.attempts,
+      })),
+    );
+  }
+
+  return {
+    ...fallbackMetrics,
+    fallbackUsed: true,
+    results,
+  };
+}
+
+async function persistSuccessfulBatch(
+  pool: Pool,
+  articles: Stage1ArticleRow[],
+  outputResults: Stage1BatchOutputResult[],
+  options: { attempts: number },
+): Promise<Stage1JobArticleResult[]> {
+  const outputByTempId = new Map(outputResults.map((result) => [result.temp_id, result]));
+
+  return Promise.all(
+    articles.map((article, index) => {
+      const tempId = `A${String(index + 1).padStart(3, "0")}`;
+      const outputResult = outputByTempId.get(tempId);
+      if (!outputResult) {
+        throw new Error(`Validated Stage 1 output is missing ${tempId}.`);
+      }
+
+      return persistStage1Output(pool, article, toStage1Output(outputResult), options.attempts);
+    }),
+  );
+}
+
+async function persistFailedArticle(
   pool: Pool,
   article: Stage1ArticleRow,
-  options: Stage1LlmOptions = {},
+  error: string,
+  attempts: number,
 ): Promise<Stage1JobArticleResult> {
-  const llmResult = await runStage1Llm(article, options);
+  await persistStage1Failure(pool, article.id, error);
+  return {
+    rawArticleId: article.id,
+    sourceName: article.sourceName,
+    title: article.title,
+    status: "failed",
+    routing: null,
+    processedContentInserted: false,
+    attempts,
+    error,
+  };
+}
 
-  if (!llmResult.success) {
-    await persistStage1Failure(pool, article.id, llmResult.error);
-    return {
-      rawArticleId: article.id,
-      sourceName: article.sourceName,
-      title: article.title,
-      status: "failed",
-      routing: null,
-      processedContentInserted: false,
-      attempts: llmResult.attempts,
-      error: llmResult.error,
-    };
-  }
-
-  if (llmResult.output.routing === "Ignore") {
-    await persistStage1Ignored(pool, article.id);
-    return {
-      rawArticleId: article.id,
-      sourceName: article.sourceName,
-      title: article.title,
-      status: "ignored",
-      routing: llmResult.output.routing,
-      processedContentInserted: false,
-      attempts: llmResult.attempts,
-      error: null,
-    };
-  }
-
+async function persistStage1Output(
+  pool: Pool,
+  article: Stage1ArticleRow,
+  output: Stage1Output,
+  attempts: number,
+): Promise<Stage1JobArticleResult> {
   try {
-    const processedContentInserted = await persistStage1Selected(pool, article.id, llmResult.output);
+    if (output.routing === "Ignore") {
+      await persistStage1Ignored(pool, article.id);
+      return {
+        rawArticleId: article.id,
+        sourceName: article.sourceName,
+        title: article.title,
+        status: "ignored",
+        routing: output.routing,
+        processedContentInserted: false,
+        attempts,
+        error: null,
+      };
+    }
+
+    const processedContentInserted = await persistStage1Selected(pool, article.id, output);
     return {
       rawArticleId: article.id,
       sourceName: article.sourceName,
       title: article.title,
       status: "selected",
-      routing: llmResult.output.routing,
+      routing: output.routing,
       processedContentInserted,
-      attempts: llmResult.attempts,
+      attempts,
       error: null,
     };
   } catch (error) {
@@ -175,12 +387,81 @@ export async function processStage1Article(
       sourceName: article.sourceName,
       title: article.title,
       status: "failed",
-      routing: llmResult.output.routing,
+      routing: output.routing,
       processedContentInserted: false,
-      attempts: llmResult.attempts,
+      attempts,
       error: errorMessage,
     };
   }
+}
+
+function toStage1Output(result: Stage1BatchOutputResult): Stage1Output {
+  return {
+    category: result.category,
+    tags: result.tags,
+    entities: result.entities,
+    entities_zh: result.entities_zh,
+    routing: result.routing,
+    generated_content: result.generated_content,
+  };
+}
+
+function createBatchMetrics(result: {
+  attempts: number;
+  elapsedMs: number;
+  tokenUsage: Stage1TokenUsage | null;
+}): Omit<Stage1MicroBatchResult, "results" | "fallbackUsed"> {
+  return {
+    llmCallCount: result.attempts,
+    retryCount: Math.max(0, result.attempts - 1),
+    llmDurationMs: result.elapsedMs,
+    tokenUsage: result.tokenUsage,
+  };
+}
+
+function mergeBatchMetrics(
+  left: Omit<Stage1MicroBatchResult, "results" | "fallbackUsed">,
+  right: Omit<Stage1MicroBatchResult, "results" | "fallbackUsed">,
+): Omit<Stage1MicroBatchResult, "results" | "fallbackUsed"> {
+  return {
+    llmCallCount: left.llmCallCount + right.llmCallCount,
+    retryCount: left.retryCount + right.retryCount,
+    llmDurationMs: left.llmDurationMs + right.llmDurationMs,
+    tokenUsage: sumTokenUsage([left.tokenUsage, right.tokenUsage]),
+  };
+}
+
+function sumTokenUsage(usages: Array<Stage1TokenUsage | null>): Stage1TokenUsage | null {
+  const available = usages.filter((usage): usage is Stage1TokenUsage => usage !== null);
+  if (available.length === 0) {
+    return null;
+  }
+
+  return available.reduce(
+    (sum, usage) => ({
+      inputTokens: sum.inputTokens + usage.inputTokens,
+      outputTokens: sum.outputTokens + usage.outputTokens,
+      totalTokens: sum.totalTokens + usage.totalTokens,
+    }),
+    { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+  );
+}
+
+function readPositiveInteger(
+  value: string | undefined,
+  fallback: number,
+  name: string,
+): number {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer, got "${value}".`);
+  }
+
+  return parsed;
 }
 
 export async function persistStage1Selected(
