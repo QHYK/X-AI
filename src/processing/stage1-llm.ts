@@ -12,7 +12,11 @@ import {
   buildStage1UserPrompt,
   STAGE1_PROMPT_VERSION,
 } from "../prompts/stage1-content-understanding.js";
-import { createOpenAiClient } from "./openai-client.js";
+import {
+  createLlmClient,
+  resolveStageLlmModel,
+  resolveStageLlmProvider,
+} from "./llm-client.js";
 
 export type Stage1LlmOptions = {
   model?: string;
@@ -53,7 +57,6 @@ export type Stage1TokenUsage = {
   totalTokens: number;
 };
 
-const DEFAULT_MODEL = "gpt-5.4-mini";
 const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE1_LLM_TIMEOUT_MS ?? 45_000);
 const DEFAULT_MAX_RETRIES = Number(process.env.STAGE1_LLM_MAX_RETRIES ?? 2);
 const RETRY_DELAY_MS = Number(process.env.STAGE1_LLM_RETRY_DELAY_MS ?? 1_000);
@@ -68,10 +71,11 @@ export async function runStage1BatchLlm(
   }
 
   const input = buildStage1BatchInput(articles);
-  const model = options.model ?? process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
+  const provider = resolveStageLlmProvider("stage1");
+  const model = resolveStageLlmModel("stage1", options.model);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
-  const client = createOpenAiClient({ timeoutMs, maxRetries: 0 });
+  const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const tokenUsage: Stage1TokenUsage = {
     inputTokens: 0,

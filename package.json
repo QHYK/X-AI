@@ -21,10 +21,13 @@
     "process:stage4": "tsx scripts/process-stage4.ts",
     "daily": "tsx scripts/run-daily-workflow.ts",
     "validate:stage1-batch": "tsx scripts/validate-stage1-batch.ts",
+    "debug:stage3-events": "tsx scripts/debug-stage3-events.ts",
     "test:stage3-persistence": "tsx scripts/test-stage3-persistence-rules.ts",
     "test:stage4-persistence": "tsx scripts/test-stage4-persistence.ts",
     "test:stage4-event-date": "tsx scripts/test-stage4-event-date.ts",
-    "test:openai": "tsx scripts/test-openai-call.ts"
+    "test:openai": "tsx scripts/test-openai-call.ts openai",
+    "test:deepseek": "tsx scripts/test-openai-call.ts deepseek",
+    "test:kimi": "tsx scripts/test-openai-call.ts kimi"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

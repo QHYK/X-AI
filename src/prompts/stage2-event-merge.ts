@@ -6,8 +6,8 @@ export function buildStage2Instructions(): string {
   return [
     "You are Stage 2 of X-AI-field: Merge Events.",
     "Group Event Candidates that describe the same real-world event.",
-    "You are performing a local first-pass merge.",
-    "Groups may be reconciled with groups from other batches later.",
+    // "You are performing a local first-pass merge.",
+    // "Groups may be reconciled with groups from other batches later.",
     "Return exactly one structured JSON object, then stop. Do not write prose outside the schema.",
     "",
     "- Merge reports describing the same real-world event when they share the same primary entity, core action or issue, and event context.",

@@ -1,5 +1,6 @@
 import { config } from "dotenv";
 import { Pool } from "pg";
+import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
 import { processStage3 } from "../src/processing/stage3-job.js";
 
 config({ path: ".env" });
@@ -10,6 +11,7 @@ async function main() {
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required for Stage 3 processing.");
   }
+  assertStageLlmConfiguration("stage3");
 
   const pool = new Pool({
     connectionString: databaseUrl,
@@ -28,7 +30,6 @@ async function main() {
         process.env.STAGE3_COLLECTED_WITHIN_HOURS,
       ),
       eventTopN: parseOptionalPositiveInt(process.env.STAGE3_EVENT_TOP_N),
-      model: process.env.OPENAI_MODEL,
     });
 
     console.log(JSON.stringify(result, null, 2));

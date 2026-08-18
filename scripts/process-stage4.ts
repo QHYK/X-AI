@@ -1,5 +1,6 @@
 import { config } from "dotenv";
 import { Pool } from "pg";
+import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
 import { processStage4 } from "../src/processing/stage4-job.js";
 
 config({ path: ".env" });
@@ -10,6 +11,7 @@ async function main() {
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required for Stage 4 processing.");
   }
+  assertStageLlmConfiguration("stage4");
 
   const pool = new Pool({
     connectionString: databaseUrl,
@@ -25,7 +27,6 @@ async function main() {
     const result = await processStage4(pool, {
       stage3RunDir: process.env.STAGE4_STAGE3_RUN_DIR,
       concurrency: parseOptionalPositiveInt(process.env.STAGE4_CONCURRENCY),
-      model: process.env.OPENAI_MODEL,
     });
     console.log(JSON.stringify(result, null, 2));
     if (!result.success) {

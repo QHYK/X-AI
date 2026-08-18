@@ -17,6 +17,7 @@ import {
   runStage1BatchLlm,
   type Stage1TokenUsage,
 } from "../src/processing/stage1-llm.js";
+import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
 import { STAGE1_PROMPT_VERSION } from "../src/prompts/stage1-content-understanding.js";
 
 config({ path: ".env" });
@@ -65,9 +66,7 @@ async function main() {
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required to validate Stage 1 batching.");
   }
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is required to validate Stage 1 batching.");
-  }
+  assertStageLlmConfiguration("stage1");
 
   const pool = new Pool({
     connectionString: databaseUrl,
@@ -90,9 +89,7 @@ async function main() {
     const comparisons: RoutingComparison[] = [];
 
     for (const [batchIndex, batch] of batches.entries()) {
-      const result = await runStage1BatchLlm(batch, {
-        model: process.env.OPENAI_MODEL,
-      });
+      const result = await runStage1BatchLlm(batch);
       if (!result.success) {
         console.log(
           JSON.stringify(

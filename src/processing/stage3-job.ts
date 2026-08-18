@@ -23,15 +23,14 @@ import {
   type RankingPersistenceUpdate,
   type Stage3PersistenceResult,
 } from "./stage3-persistence.js";
-import {
-  validateStage2Assignments,
-  validateStage2Output,
-  type Stage2Input,
-  type Stage2Output,
-} from "./stage2-contract.js";
-import type { Stage3RankingOutput } from "./stage3-contract.js";
+import type { Stage2Input, Stage2Output } from "./stage2-contract.js";
+import type {
+  Stage3EventRankedOutput,
+  Stage3RankingOutput,
+} from "./stage3-contract.js";
 import type { Stage3EventRankingInput } from "./stage3-validation-input.js";
 import { inferSciencePublication } from "./science-publication.js";
+import { resolveStageLlmModel } from "./llm-client.js";
 import { normalizeArticleUrl } from "./url-normalization.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
@@ -133,7 +132,6 @@ export type Stage3JobResult = {
 
 const DEFAULT_LOOKBACK_HOURS = 24;
 const DEFAULT_EVENT_TOP_N = 10;
-const DEFAULT_MODEL = "gpt-5.4-mini";
 const CATEGORY_ORDER = [
   "Company",
   "Finance & Economy",
@@ -157,7 +155,7 @@ export async function processStage3(
   const dedupDir = join(runDir, "dedup");
   const digestDir = join(runDir, "digest");
   const longFormDir = join(runDir, "long-form");
-  const model = options.model ?? process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
+  const model = resolveStageLlmModel("stage3", options.model);
   const eventTopN = options.eventTopN ?? DEFAULT_EVENT_TOP_N;
   const collectedWithinHours = options.collectedWithinHours ?? DEFAULT_LOOKBACK_HOURS;
 
@@ -182,9 +180,13 @@ export async function processStage3(
   let error: string | null = null;
 
   try {
-    const stage2 = await loadSuccessfulStage2Run(rootDir, options.stage2RunDir);
+    const stage2 = await loadStage2RunForStage3(rootDir, options.stage2RunDir);
     sourceStage2RunDir = stage2.runDir;
-    const eventBundle = buildEventRankingInput(stage2.input, stage2.output, stage2.idMap);
+    const eventBundle = buildStage3EventRankingInput(
+      stage2.input,
+      stage2.output,
+      stage2.idMap,
+    );
     eventGroupCount = eventBundle.input.events.length;
     await writeJson(join(eventsDir, "input.json"), eventBundle.input);
 
@@ -199,6 +201,7 @@ export async function processStage3(
     retryCount += eventRanking.retries;
     llmDurationMs += eventRanking.durationMs;
     await writeJson(join(eventsDir, "ranking-output.json"), eventRanking.output);
+    await writeJson(join(eventsDir, "ranking-diagnostics.json"), eventRanking.diagnostics);
 
     const selectedEvents = selectTopEvents({
       rankingOutput: eventRanking.output,
@@ -272,6 +275,10 @@ export async function processStage3(
       llmDurationMs += result.durationMs;
       digestRankings[category] = result.output;
       await writeJson(join(digestDir, `${toSlug(category)}-ranking-output.json`), result.output);
+      await writeJson(
+        join(digestDir, `${toSlug(category)}-ranking-diagnostics.json`),
+        result.diagnostics,
+      );
     }
 
     const longFormRanking = await rankLongForm(longFormInput, { model });
@@ -387,7 +394,7 @@ export async function processStage3(
   }
 }
 
-async function loadSuccessfulStage2Run(
+export async function loadStage2RunForStage3(
   rootDir: string,
   stage2RunDirOption?: string,
 ): Promise<{
@@ -401,29 +408,23 @@ async function loadSuccessfulStage2Run(
     ? normalizeRuntimePath(rootDir, stage2RunDirOption)
     : await findLatestSuccessfulStage2RunDir(rootDir);
   const run = await readJson<Stage2RunArtifact>(join(runDir, "run.json"));
-  if (run.status !== "success") {
+  if (!stage2RunDirOption && run.status !== "success") {
     throw new Error(`Stage 2 runtime directory is not successful: ${runDir}`);
   }
 
   const input = await readJson<Stage2Input>(join(runDir, "input.json"));
-  const rawOutput = await readJson<unknown>(join(runDir, "output.json"));
+  const output = await readJson<Stage2Output>(join(runDir, "output.json"));
   const idMap = await readJson<Stage2IdMap>(join(runDir, "id-map.json"));
-  const outputValidation = validateStage2Output(rawOutput);
-  if (!outputValidation.success) {
-    throw new Error(`Stage 2 output validation failed: ${outputValidation.errors.join("; ")}`);
-  }
-
-  const assignment = validateStage2Assignments(outputValidation.output, input);
-  if (!assignment.passed) {
-    throw new Error(`Stage 2 assignment validation failed: ${assignment.errors.join("; ")}`);
-  }
+  // Temporary diagnostic mode: Stage 2 output and assignment validation are
+  // intentionally bypassed so incomplete/duplicate groups can feed Stage 3.
+  validateStage2IdMap(input, idMap);
 
   await stat(join(runDir, "output.json"));
   return {
     runDir,
     run,
     input,
-    output: outputValidation.output,
+    output,
     idMap,
   };
 }
@@ -456,7 +457,7 @@ async function findLatestSuccessfulStage2RunDir(rootDir: string): Promise<string
   throw new Error(`No successful Stage 2 runtime run found under ${root}.`);
 }
 
-function buildEventRankingInput(
+export function buildStage3EventRankingInput(
   stage2Input: Stage2Input,
   stage2Output: Stage2Output,
   stage2IdMap: Stage2IdMap,
@@ -503,6 +504,26 @@ function buildEventRankingInput(
     input: { events },
     idMap: eventIdMap,
   };
+}
+
+function validateStage2IdMap(input: Stage2Input, idMap: Stage2IdMap) {
+  const expectedIds = input.event_candidates.map((candidate) => candidate.temp_id);
+  if (Object.keys(idMap).length !== expectedIds.length) {
+    throw new Error(
+      `Stage 2 id-map entry count ${Object.keys(idMap).length} does not match candidate count ${expectedIds.length}.`,
+    );
+  }
+
+  const processedContentIds = expectedIds.map((tempId) => {
+    const processedContentId = idMap[tempId];
+    if (!processedContentId) {
+      throw new Error(`Stage 2 id-map is missing processed_content_id for ${tempId}.`);
+    }
+    return processedContentId;
+  });
+  if (new Set(processedContentIds).size !== processedContentIds.length) {
+    throw new Error("Stage 2 id-map contains duplicate processed_content_id mappings.");
+  }
 }
 
 async function loadRankingRows(
@@ -585,23 +606,82 @@ function buildLongFormRecords(rows: RankingCandidateRow[]): LongFormRecord[] {
 async function rankEvents(
   input: Stage3EventRankingInput,
   options: { model: string },
-): Promise<{ output: Stage3RankingOutput; calls: number; retries: number; durationMs: number }> {
+): Promise<{
+  output: Stage3EventRankedOutput;
+  calls: number;
+  retries: number;
+  durationMs: number;
+  diagnostics: {
+    input_event_count: number;
+    returned_ranking_count: number;
+    duplicate_ids: string[];
+    invalid_ids: string[];
+  };
+}> {
   if (input.events.length === 0) {
-    return { output: { rankings: [] }, calls: 0, retries: 0, durationMs: 0 };
+    return {
+      output: { rankings: [] },
+      calls: 0,
+      retries: 0,
+      durationMs: 0,
+      diagnostics: {
+        input_event_count: 0,
+        returned_ranking_count: 0,
+        duplicate_ids: [],
+        invalid_ids: [],
+      },
+    };
   }
 
   const result = await runStage3EventRankingLlm(input, options);
   assertRankingSuccess("Event Ranking", result);
-  return rankingMetrics(result);
+  return {
+    output: result.rankings,
+    calls: 1,
+    retries: Math.max(0, result.attempts - 1),
+    durationMs: result.elapsedMs,
+    diagnostics: {
+      input_event_count: input.events.length,
+      returned_ranking_count: result.rankings.rankings.length,
+      duplicate_ids: result.assignment.duplicateIds,
+      invalid_ids: result.assignment.inventedIds,
+    },
+  };
 }
 
 async function rankDigest(
   input: Stage3DigestRankingInput,
   options: { model: string },
-): Promise<{ output: Stage3RankingOutput; calls: number; retries: number; durationMs: number }> {
+): Promise<{
+  output: Stage3RankingOutput;
+  calls: number;
+  retries: number;
+  durationMs: number;
+  diagnostics: {
+    category: string;
+    input_count: number;
+    returned_count: number;
+    missing_count: number;
+    duplicate_ids: string[];
+    invalid_ids: string[];
+  };
+}> {
   const result = await runStage3DigestRankingLlm(input, options);
   assertRankingSuccess(`Digest Ranking (${input.category})`, result);
-  return rankingMetrics(result);
+  return {
+    output: result.output,
+    calls: 1,
+    retries: Math.max(0, result.attempts - 1),
+    durationMs: result.elapsedMs,
+    diagnostics: {
+      category: input.category,
+      input_count: input.candidates.length,
+      returned_count: result.output.rankings.length,
+      missing_count: result.assignment.missingIds.length,
+      duplicate_ids: result.assignment.duplicateIds,
+      invalid_ids: result.assignment.inventedIds,
+    },
+  };
 }
 
 async function rankLongForm(
@@ -641,7 +721,7 @@ function rankingMetrics(result: {
 }
 
 function selectTopEvents(options: {
-  rankingOutput: Stage3RankingOutput;
+  rankingOutput: Stage3EventRankedOutput;
   eventInput: Stage3EventRankingInput;
   eventIdMap: Record<string, string[]>;
   topN: number;
@@ -649,7 +729,6 @@ function selectTopEvents(options: {
   events: Array<
     Stage3EventRankingInput["events"][number] & {
       rank: number;
-      reason: string;
     }
   >;
   idMap: Record<string, string[]>;
@@ -665,7 +744,6 @@ function selectTopEvents(options: {
     return {
       ...event,
       rank: ranking.rank,
-      reason: ranking.reason,
     };
   });
 

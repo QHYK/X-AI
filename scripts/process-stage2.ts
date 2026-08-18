@@ -1,5 +1,6 @@
 import { config } from "dotenv";
 import { Pool } from "pg";
+import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
 import { processStage2Merge, summarizeStage2Result } from "../src/processing/stage2-job.js";
 import { writeStage2RuntimeArtifacts } from "../src/processing/stage2-runtime-artifacts.js";
 
@@ -12,9 +13,7 @@ async function main() {
     throw new Error("DATABASE_URL is required to process Stage 2.");
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is required to process Stage 2.");
-  }
+  assertStageLlmConfiguration("stage2");
 
   const pool = new Pool({
     connectionString: databaseUrl,
@@ -30,9 +29,6 @@ async function main() {
     const startedAt = new Date();
     const result = await processStage2Merge(pool, {
       collectedWithinHours: optionalPositiveInteger(process.env.STAGE2_COLLECTED_WITHIN_HOURS),
-      batchSize: optionalPositiveInteger(process.env.STAGE2_BATCH_SIZE),
-      concurrency: optionalPositiveInteger(process.env.STAGE2_CONCURRENCY),
-      model: process.env.OPENAI_MODEL,
     });
     const summary = summarizeStage2Result(result);
     const artifacts = await writeStage2RuntimeArtifacts(result, {

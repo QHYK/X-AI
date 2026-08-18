@@ -63,7 +63,8 @@ Event Groups 作为当前 workflow 的中间结果，不直接写入 `events` �
 Stage 2 不生成完整 Event 内容，不执行 Ranking。
 
 #### Stage 3 — Channel Ranking
-对不同 Channel 独立执行 Ranking，不决定最终展示数量。
+对不同 Channel 独立执行 Ranking；Event Ranking 只返回最重要的最多 50 个 Event Groups，
+最终展示 Top N 仍由 Code 决定。
 **Event Ranking**：Input 只须 Event Group 对应的 Candidate title / summary / source 等必要信息
 **Output**：排序结果直接写入对应记录。保留：`ai_rank`, `display_rank`。默认：`display_rank = ai_rank`
 
@@ -119,8 +120,8 @@ Today's Events + Source Digests contents + Long-form contents + Inspiration cont
 - Runtime: Next.js + TypeScript
 - Database: PostgreSQL / Supabase
 - ORM: Drizzle ORM
-- AI: OpenAI Responses API + Structured Output
-- External Retrieval: optional `web_search` in Stage 4
+- AI: static per-stage LLM provider configuration + Structured Output
+- External Retrieval: optional OpenAI `web_search` in Stage 4
 - Scheduling: Cron / Scheduled Job
 - Architecture Principle: KISS, YAGNI, LLM-first, Rules only when necessary
 
@@ -498,12 +499,18 @@ Stage 1 全部可处理内容完成后触发 Stage 2。
 默认时间窗口与 Stage 1 一致，为最近 24 小时 collected 内容。
 
 ```text
-Event Candidates → Local Merge → Cross-batch Reconciliation → Event Groups
+Event Candidates
+  → 构造完整 Stage2Input
+  → 单次 DeepSeek V4 Pro long-context 调用
+  → Stage2Output
+  → Event Groups
 ```
 
-大型候选集采用两阶段合并：先进行本地合并，然后进行跨批次协调。
+Stage 2 不进行 batch merge 或 reconciliation，也不写 `events`。
+Input / Output、temp ID mapping 和 run metadata 保存到 `runtime/stage2/`。
 
-Stage 2 不写 `events`。Input / Output 和 temp ID mapping 保存到 `runtime/stage2/`。
+当前为验证 Stage 3 / Stage 4 数据链路，Stage 2 assignment validation 会记录 missing /
+duplicate / invented IDs，但暂时不阻断 runtime output；恢复正式 Daily Workflow 前必须恢复严格校验。
 
 ### 4.7 Stage 3
 
@@ -627,12 +634,31 @@ Prompt 发生影响行为的变化时更新版本号，并在 runtime log 中记
 Prompt 文件随项目代码通过 Git 进行版本管理。
 当前版本以 runtime prompt 文件为准。
 
-### Model Selection: 
+正式 Daily Workflow 使用静态 per-stage provider 配置：
+```text
+Stage 1 → OpenAI
+Stage 2 → DeepSeek
+Stage 3 → OpenAI
+Stage 4 → OpenAI
+```
+对应环境变量为 `STAGE1_LLM_PROVIDER` 至 `STAGE4_LLM_PROVIDER`。这不是根据输入动态选择模型。
+`LLM_PROVIDER` / `LLM_MODEL` 只保留给 standalone provider diagnostics 或显式通用调用；
+正式 Stage 1–4 commands 不依赖它们。
+Shared compatibility layer 支持 OpenAI / DeepSeek / Kimi；Kimi 当前不用于正式 Daily Workflow。
+
+OpenAI 继续使用 Responses API；DeepSeek / Kimi 使用各自的 OpenAI-compatible Chat Completions API。
+所有 provider 输出原则上都必须经过相同的 Application Schema Validation 后才能使用或持久化。
+Stage 2 当前为生成 Stage 3 / Stage 4 验证数据而临时旁路严格 output / assignment 拒绝逻辑，
+该例外不代表正式长期 contract。
+OpenAI / Kimi 请求 provider-side JSON Schema Structured Output；
+DeepSeek 当前使用官方 JSON Object mode 并在 instruction 中提供 schema，返回结果仍须通过相同的严格 Application validation。
+
+### Model Selection:
 先使用一个能力足够的通用模型。
+除非能力不足：
+* 根据任务上下文长度和输出质量选择模型
 暂不做：
-* 多模型 Routing；
 * Cheap / Expensive Model 分层；
-* 根据任务动态选择模型。
 模型调用应与业务逻辑解耦，未来可以替换模型而不修改 Workflow。
 
 ### External Context Retrieval
@@ -667,7 +693,7 @@ Search 获得的信息作为补充 Context，不替代原始 Source。
 
 Application Code 不完全信任模型在 Structured Output 中自行声明的
 `external_context.performed` / `external_context.sources`。
-实际是否搜索、以及真实 source URL provenance，来自 Responses API
+实际是否搜索、以及真实 source URL provenance，来自 OpenAI Responses API
 response output items 中的 `web_search_call` 和 URL citation metadata。
 
 Persistence:
@@ -699,7 +725,8 @@ X-AI-field/
 │   ├── processing/
 │   │   ├── content-completion.ts       # Stage 0: Sparse content completion
 │   │   ├── event-date.ts               # Deterministic event_date
-│   │   ├── openai-client.ts            # Shared LLM client
+│   │   ├── llm-client.ts               # Shared provider selection / LLM client
+│   │   ├── openai-client.ts            # OpenAI-only file-input spike client
 │   │   ├── science-publication.ts      # Science publication enrichment
 │   │   ├── stage1-*.ts                 # Stage 1 contract / LLM / job
 │   │   ├── stage2-*.ts                 # Stage 2 candidates / contract / LLM / job / runtime

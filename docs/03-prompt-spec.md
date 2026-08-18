@@ -108,38 +108,6 @@ Each article is evaluated independently, and every input `temp_id` must appear e
 - Every `temp_id` appears exactly once; never invent or modify IDs.
 - `event_hint` is a short description of the real-world event.
 
-### Stage 2B — Cross-batch Reconciliation
-
-Stage 2B receives compact preliminary Event Groups and returns a complete grouping:
-```json
-{
-  "groups": [
-    {
-      "group_id": "G001",
-      "event_hint": "",
-      "candidate_ids": [],
-      "representative_titles": [],
-      "entities": [],
-      "tags": [],
-      "categories": []
-    }
-  ]
-}
-```
-```json
-{
-  "merged_groups": [
-    {
-      "event_hint": "",
-      "group_ids": ["G001", "G014"]
-    }
-  ],
-  "single_group_ids": ["G002"]
-}
-```
-
-Different categories do not prevent merging. Every `group_id` appears exactly once across `merged_groups` and `single_group_ids`; groups merge only when they clearly describe the same real-world event.
-
 ---
 
 ## Stage 3 — Channel Ranking
@@ -159,14 +127,16 @@ Different categories do not prevent merging. Every `group_id` appears exactly on
   "rankings": [
     {
       "id": "",
-      "rank": 1,
-      "reason": ""
+      "rank": 1
+      // "reason": ""
     }
   ]
 }
 ```
 
 ### Event Ranking
+Return only the 50 most important Event Groups. If fewer than 50 are provided, return all.
+
 Prioritize:
 - Systemic Risk
 - Important Topics
@@ -192,9 +162,12 @@ Rank by:
 - Understanding that a normal news summary cannot replace
 
 ### Common Rules
-- Rank all provided IDs exactly once, `1..N` with no duplicates.
-- Do not decide Top N; Code handles selection.
+- Event Ranking returns at most 50 IDs; Code handles final Top N selection.
+- Digest Ranking may omit lower-value candidates; missing IDs are diagnostic, not failure.
+- Long-form Ranking ranks all provided IDs exactly once.
+- Returned IDs must come from the corresponding input; ranks start at 1 and remain consecutive.
 - Do not rank only by publish time, breaking-news tone, or source diversity.
+- Keep Digest / Long-form `reason` concise for review/debug.
 - Keep `reason` concise; it is currently used for review/debug.
 
 ---

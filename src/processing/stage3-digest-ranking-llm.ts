@@ -1,8 +1,13 @@
-import { createOpenAiClient } from "./openai-client.js";
 import {
+  createLlmClient,
+  resolveStageLlmModel,
+  resolveStageLlmProvider,
+} from "./llm-client.js";
+import {
+  deduplicateStage3DigestRankingOutput,
   parseAndValidateStage3RankingOutput,
   stage3RankingOutputJsonSchema,
-  validateStage3RankingIntegrity,
+  validateStage3DigestRankingIntegrity,
   type Stage3RankingIntegrity,
   type Stage3RankingOutput,
 } from "./stage3-contract.js";
@@ -48,7 +53,6 @@ export type Stage3DigestRankingResult =
   | Stage3DigestRankingSuccess
   | Stage3DigestRankingFailure;
 
-const DEFAULT_MODEL = "gpt-5.4-mini";
 const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE3_LLM_TIMEOUT_MS ?? 240_000);
 const DEFAULT_MAX_RETRIES = Number(process.env.STAGE3_LLM_MAX_RETRIES ?? 2);
 const RETRY_DELAY_MS = Number(process.env.STAGE3_LLM_RETRY_DELAY_MS ?? 1_000);
@@ -57,10 +61,11 @@ export async function runStage3DigestRankingLlm(
   input: Stage3DigestRankingInput,
   options: Stage3DigestRankingLlmOptions = {},
 ): Promise<Stage3DigestRankingResult> {
-  const model = options.model ?? process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
+  const provider = resolveStageLlmProvider("stage3");
+  const model = resolveStageLlmModel("stage3", options.model);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
-  const client = createOpenAiClient({ timeoutMs, maxRetries: 0 });
+  const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const expectedIds = input.candidates.map((candidate) => candidate.id);
 
@@ -117,7 +122,7 @@ export async function runStage3DigestRankingLlm(
         break;
       }
 
-      const assignment = validateStage3RankingIntegrity(validation.output, expectedIds);
+      const assignment = validateStage3DigestRankingIntegrity(validation.output, expectedIds);
       lastAssignment = assignment;
       if (!assignment.passed) {
         lastError = `Ranking integrity validation failed: ${assignment.errors.join("; ")}`;
@@ -132,7 +137,7 @@ export async function runStage3DigestRankingLlm(
       return {
         success: true,
         input,
-        output: validation.output,
+        output: deduplicateStage3DigestRankingOutput(validation.output),
         assignment,
         model,
         promptVersion: STAGE3_DIGEST_RANKING_PROMPT_VERSION,

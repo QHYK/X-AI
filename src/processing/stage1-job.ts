@@ -10,6 +10,7 @@ import type {
   Stage1Output,
   Stage1Routing,
 } from "./stage1-contract.js";
+import { resolveStageLlmModel } from "./llm-client.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
 
@@ -97,7 +98,7 @@ export async function processStage1Batch(
   return {
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
-    model: options.model ?? process.env.OPENAI_MODEL ?? "gpt-5.4-mini",
+    model: resolveStageLlmModel("stage1", options.model),
     collectedWithinHours,
     requestedLimit: options.limit ?? null,
     loadedCount: articles.length,

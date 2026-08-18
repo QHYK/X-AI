@@ -1,4 +1,8 @@
-import { createOpenAiClient } from "./openai-client.js";
+import {
+  createLlmClient,
+  resolveStageLlmModel,
+  resolveStageLlmProvider,
+} from "./llm-client.js";
 import {
   parseAndValidateStage3RankingOutput,
   stage3RankingOutputJsonSchema,
@@ -48,7 +52,6 @@ export type Stage3LongFormRankingResult =
   | Stage3LongFormRankingSuccess
   | Stage3LongFormRankingFailure;
 
-const DEFAULT_MODEL = "gpt-5.4-mini";
 const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE3_LLM_TIMEOUT_MS ?? 240_000);
 const DEFAULT_MAX_RETRIES = Number(process.env.STAGE3_LLM_MAX_RETRIES ?? 2);
 const RETRY_DELAY_MS = Number(process.env.STAGE3_LLM_RETRY_DELAY_MS ?? 1_000);
@@ -57,10 +60,11 @@ export async function runStage3LongFormRankingLlm(
   input: Stage3LongFormRankingInput,
   options: Stage3LongFormRankingLlmOptions = {},
 ): Promise<Stage3LongFormRankingResult> {
-  const model = options.model ?? process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
+  const provider = resolveStageLlmProvider("stage3");
+  const model = resolveStageLlmModel("stage3", options.model);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
-  const client = createOpenAiClient({ timeoutMs, maxRetries: 0 });
+  const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const expectedIds = input.candidates.map((candidate) => candidate.id);
 

@@ -86,9 +86,17 @@ npm run dev
 ```bash
 DATABASE_URL="postgresql://..."
 DATABASE_SSL="true"
+STAGE1_LLM_PROVIDER="openai"
+STAGE2_LLM_PROVIDER="deepseek"
+STAGE3_LLM_PROVIDER="openai"
+STAGE4_LLM_PROVIDER="openai"
 OPENAI_API_KEY="..."
 OPENAI_BASE_URL="..."
 OPENAI_MODEL="gpt-5.4"
+# DEEPSEEK_API_KEY="..."
+# DEEPSEEK_MODEL="deepseek-v4-pro"
+# KIMI_API_KEY="..."
+# KIMI_MODEL="kimi-k3"
 ```
 
 ### Main Commands
@@ -110,6 +118,10 @@ npm run process:stage2                   # Stage 2: Merge Event and write runtim
 npm run process:stage3                   # Stage 3: Channel rank and persist
 npm run process:stage4                   # Stage 4: enrich Events and persist events
 npm run daily                            # Run the complete daily pipeline.
+
+npm run test:openai                      # Structured-output provider smoke test
+npm run test:deepseek
+npm run test:kimi
 
 # npm run test:stage3-persistence          # Validate Stage 3 display_rank protection rules
 # npm run test:stage4-event-date           # Validate deterministic event_date derivation

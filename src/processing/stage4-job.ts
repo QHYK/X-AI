@@ -7,6 +7,7 @@ import {
 } from "../prompts/stage4-event-enrichment.js";
 import type { Stage4EventEnrichmentOutput } from "./stage4-contract.js";
 import { deriveEventDate, type EventDateDerivation } from "./event-date.js";
+import { resolveStageLlmModel } from "./llm-client.js";
 import {
   runStage4EventEnrichmentLlm,
   type Stage4WebSearchToolUsage,
@@ -92,7 +93,6 @@ export type Stage4JobResult = {
   error: string | null;
 };
 
-const DEFAULT_MODEL = "gpt-5.4-mini";
 const DEFAULT_STAGE4_CONCURRENCY = 3;
 
 export async function processStage4(
@@ -105,7 +105,7 @@ export async function processStage4(
   const runDir = join(rootDir, "runtime/stage4", runId);
   const eventsDir = join(runDir, "events");
   const runPath = join(runDir, "run.json");
-  const model = options.model ?? process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
+  const model = resolveStageLlmModel("stage4", options.model);
   const concurrency = options.concurrency ?? DEFAULT_STAGE4_CONCURRENCY;
 
   await mkdir(eventsDir, { recursive: true });

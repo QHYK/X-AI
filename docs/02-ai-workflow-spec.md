@@ -90,7 +90,7 @@ Event Candidates
 根据不同 Channel 的目标，对候选内容进行相对重要性排序。
 
 **Execution**
-1. Event Groups 全局排序
+1. Event Groups 全局筛选并返回最重要的 Top 50 排序
 2. Code 选择 Top N Events
 3. Code 排除已被 Selected Events 覆盖的 exact duplicates
 4. Digest 全局 exact dedup 后，按 Category 分别排序

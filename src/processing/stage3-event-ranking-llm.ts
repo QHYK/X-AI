@@ -1,10 +1,17 @@
-import { createOpenAiClient } from "./openai-client.js";
 import {
-  parseAndValidateStage3RankingOutput,
-  stage3RankingOutputJsonSchema,
-  validateStage3RankingIntegrity,
-  type Stage3RankingIntegrity,
-  type Stage3RankingOutput,
+  createLlmClient,
+  resolveStageLlmModel,
+  resolveStageLlmProvider,
+} from "./llm-client.js";
+import {
+  deduplicateStage3EventRankingOutput,
+  deriveStage3EventRankings,
+  parseAndValidateStage3EventRankingOutput,
+  stage3EventRankingOutputJsonSchema,
+  validateStage3EventRankingIntegrity,
+  type Stage3EventRankedOutput,
+  type Stage3EventRankingIntegrity,
+  type Stage3EventRankingOutput,
 } from "./stage3-contract.js";
 import type { Stage3EventRankingInput } from "./stage3-validation-input.js";
 import {
@@ -19,27 +26,36 @@ export type Stage3EventRankingLlmOptions = {
   maxRetries?: number;
 };
 
+export type Stage3EventRankingTokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
 export type Stage3EventRankingSuccess = {
   success: true;
   input: Stage3EventRankingInput;
-  output: Stage3RankingOutput;
-  assignment: Stage3RankingIntegrity;
+  output: Stage3EventRankingOutput;
+  rankings: Stage3EventRankedOutput;
+  assignment: Stage3EventRankingIntegrity;
   model: string;
   promptVersion: string;
   responseId: string;
   attempts: number;
   elapsedMs: number;
+  tokenUsage: Stage3EventRankingTokenUsage | null;
   rawOutputText: string;
 };
 
 export type Stage3EventRankingFailure = {
   success: false;
   input: Stage3EventRankingInput;
-  assignment: Stage3RankingIntegrity | null;
+  assignment: Stage3EventRankingIntegrity | null;
   model: string;
   promptVersion: string;
   attempts: number;
   elapsedMs: number;
+  tokenUsage: Stage3EventRankingTokenUsage | null;
   error: string;
   rawOutputText: string | null;
 };
@@ -48,7 +64,6 @@ export type Stage3EventRankingResult =
   | Stage3EventRankingSuccess
   | Stage3EventRankingFailure;
 
-const DEFAULT_MODEL = "gpt-5.4-mini";
 const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE3_LLM_TIMEOUT_MS ?? 240_000);
 const DEFAULT_MAX_RETRIES = Number(process.env.STAGE3_LLM_MAX_RETRIES ?? 2);
 const RETRY_DELAY_MS = Number(process.env.STAGE3_LLM_RETRY_DELAY_MS ?? 1_000);
@@ -57,16 +72,23 @@ export async function runStage3EventRankingLlm(
   input: Stage3EventRankingInput,
   options: Stage3EventRankingLlmOptions = {},
 ): Promise<Stage3EventRankingResult> {
-  const model = options.model ?? process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
+  const provider = resolveStageLlmProvider("stage3");
+  const model = resolveStageLlmModel("stage3", options.model);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
-  const client = createOpenAiClient({ timeoutMs, maxRetries: 0 });
+  const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const expectedIds = input.events.map((event) => event.id);
+  const tokenUsage: Stage3EventRankingTokenUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+  };
+  let hasTokenUsage = false;
 
   let rawOutputText: string | null = null;
   let lastError = "Unknown Stage 3 Event Ranking LLM failure.";
-  let lastAssignment: Stage3RankingIntegrity | null = null;
+  let lastAssignment: Stage3EventRankingIntegrity | null = null;
   let attemptsUsed = 0;
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
@@ -87,14 +109,14 @@ export async function runStage3EventRankingLlm(
               ],
             },
           ],
-          max_output_tokens: 6_000,
+          max_output_tokens: 8_000,
           store: false,
           text: {
             format: {
               type: "json_schema",
               name: "stage3_event_ranking",
-              description: "Structured Stage 3 event ranking output.",
-              schema: stage3RankingOutputJsonSchema,
+              description: "Up to 50 most important Stage 3 Event IDs in ranked order.",
+              schema: stage3EventRankingOutputJsonSchema,
               strict: true,
             },
           },
@@ -104,8 +126,14 @@ export async function runStage3EventRankingLlm(
         },
       );
 
+      if (response.usage) {
+        tokenUsage.inputTokens += response.usage.input_tokens;
+        tokenUsage.outputTokens += response.usage.output_tokens;
+        tokenUsage.totalTokens += response.usage.total_tokens;
+        hasTokenUsage = true;
+      }
       rawOutputText = response.output_text;
-      const validation = parseAndValidateStage3RankingOutput(rawOutputText);
+      const validation = parseAndValidateStage3EventRankingOutput(rawOutputText);
       if (!validation.success) {
         lastAssignment = null;
         lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
@@ -117,7 +145,10 @@ export async function runStage3EventRankingLlm(
         break;
       }
 
-      const assignment = validateStage3RankingIntegrity(validation.output, expectedIds);
+      const assignment = validateStage3EventRankingIntegrity(
+        validation.output,
+        expectedIds,
+      );
       lastAssignment = assignment;
       if (!assignment.passed) {
         lastError = `Ranking integrity validation failed: ${assignment.errors.join("; ")}`;
@@ -129,16 +160,19 @@ export async function runStage3EventRankingLlm(
         break;
       }
 
+      const deduplicatedOutput = deduplicateStage3EventRankingOutput(validation.output);
       return {
         success: true,
         input,
-        output: validation.output,
+        output: deduplicatedOutput,
+        rankings: deriveStage3EventRankings(deduplicatedOutput),
         assignment,
         model,
         promptVersion: STAGE3_EVENT_RANKING_PROMPT_VERSION,
         responseId: response.id,
         attempts: attempt,
         elapsedMs: Date.now() - startedAt,
+        tokenUsage: hasTokenUsage ? tokenUsage : null,
         rawOutputText,
       };
     } catch (error) {
@@ -162,6 +196,7 @@ export async function runStage3EventRankingLlm(
     promptVersion: STAGE3_EVENT_RANKING_PROMPT_VERSION,
     attempts: attemptsUsed,
     elapsedMs: Date.now() - startedAt,
+    tokenUsage: hasTokenUsage ? tokenUsage : null,
     error: lastError,
     rawOutputText,
   };

@@ -4,7 +4,11 @@ import {
   STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
   type Stage4EventEnrichmentInput,
 } from "../prompts/stage4-event-enrichment.js";
-import { createOpenAiClient } from "./openai-client.js";
+import {
+  createLlmClient,
+  resolveStageLlmModel,
+  resolveStageLlmProvider,
+} from "./llm-client.js";
 import {
   parseAndValidateStage4EventEnrichmentOutput,
   stage4EventEnrichmentOutputJsonSchema,
@@ -56,7 +60,6 @@ export type Stage4LlmFailure = {
 
 export type Stage4LlmResult = Stage4LlmSuccess | Stage4LlmFailure;
 
-const DEFAULT_MODEL = "gpt-5.4-mini";
 const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE4_LLM_TIMEOUT_MS ?? 240_000);
 const DEFAULT_MAX_RETRIES = Number(process.env.STAGE4_LLM_MAX_RETRIES ?? 2);
 const RETRY_DELAY_MS = Number(process.env.STAGE4_LLM_RETRY_DELAY_MS ?? 1_000);
@@ -65,10 +68,11 @@ export async function runStage4EventEnrichmentLlm(
   input: Stage4EventEnrichmentInput,
   options: Stage4LlmOptions = {},
 ): Promise<Stage4LlmResult> {
-  const model = options.model ?? process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
+  const provider = resolveStageLlmProvider("stage4");
+  const model = resolveStageLlmModel("stage4", options.model);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
-  const client = createOpenAiClient({ timeoutMs, maxRetries: 0 });
+  const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
 
   let rawOutputText: string | null = null;

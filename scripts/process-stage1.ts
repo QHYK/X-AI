@@ -1,5 +1,6 @@
 import { config } from "dotenv";
 import { Pool } from "pg";
+import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
 import { processStage1Batch } from "../src/processing/stage1-job.js";
 
 config({ path: ".env" });
@@ -11,9 +12,7 @@ async function main() {
     throw new Error("DATABASE_URL is required to process Stage 1.");
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is required to process Stage 1.");
-  }
+  assertStageLlmConfiguration("stage1");
 
   const pool = new Pool({
     connectionString: databaseUrl,
@@ -37,7 +36,6 @@ async function main() {
       batchMaxTotalChars: optionalPositiveInteger(
         process.env.STAGE1_BATCH_MAX_TOTAL_CHARS,
       ),
-      model: process.env.OPENAI_MODEL,
     });
 
     console.log(JSON.stringify(summary, null, 2));

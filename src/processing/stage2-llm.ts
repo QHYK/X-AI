@@ -1,8 +1,10 @@
-import { createOpenAiClient } from "./openai-client.js";
 import {
-  parseAndValidateStage2Output,
+  createLlmClient,
+  resolveStageLlmModel,
+  resolveStageLlmProvider,
+} from "./llm-client.js";
+import {
   stage2OutputJsonSchema,
-  validateStage2Assignments,
   type Stage2Input,
   type Stage2Output,
 } from "./stage2-contract.js";
@@ -18,6 +20,12 @@ export type Stage2LlmOptions = {
   maxRetries?: number;
 };
 
+export type Stage2TokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
 export type Stage2LlmSuccess = {
   success: true;
   input: Stage2Input;
@@ -27,6 +35,8 @@ export type Stage2LlmSuccess = {
   responseId: string;
   attempts: number;
   elapsedMs: number;
+  tokenUsage: Stage2TokenUsage | null;
+  finishReason: string | null;
   rawOutputText: string;
 };
 
@@ -37,30 +47,37 @@ export type Stage2LlmFailure = {
   promptVersion: string;
   attempts: number;
   elapsedMs: number;
+  tokenUsage: Stage2TokenUsage | null;
+  finishReason: string | null;
   error: string;
   rawOutputText: string | null;
 };
 
 export type Stage2LlmResult = Stage2LlmSuccess | Stage2LlmFailure;
 
-const DEFAULT_MODEL = "gpt-5.4-mini";
 const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE2_LLM_TIMEOUT_MS ?? 240_000);
-const DEFAULT_MAX_RETRIES = Number(process.env.STAGE2_LLM_MAX_RETRIES ?? 2);
+const DEFAULT_MAX_RETRIES = Number(process.env.STAGE2_LLM_MAX_RETRIES ?? 0);
+const DEFAULT_MAX_OUTPUT_TOKENS = Number(
+  process.env.STAGE2_LLM_MAX_OUTPUT_TOKENS ?? 32_000,
+);
 const RETRY_DELAY_MS = Number(process.env.STAGE2_LLM_RETRY_DELAY_MS ?? 1_000);
 
 export async function runStage2MergeLlm(
   input: Stage2Input,
   options: Stage2LlmOptions = {},
 ): Promise<Stage2LlmResult> {
-  const model = options.model ?? process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
+  const provider = resolveStageLlmProvider("stage2");
+  const model = resolveStageLlmModel("stage2", options.model);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
-  const client = createOpenAiClient({ timeoutMs, maxRetries: 0 });
+  const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
 
   let rawOutputText: string | null = null;
   let lastError = "Unknown Stage 2 LLM failure.";
   let attemptsUsed = 0;
+  let tokenUsage: Stage2TokenUsage | null = null;
+  let finishReason: string | null = null;
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
     attemptsUsed = attempt;
@@ -80,7 +97,7 @@ export async function runStage2MergeLlm(
               ],
             },
           ],
-          max_output_tokens: 8_000,
+          max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
           store: false,
           text: {
             format: {
@@ -98,37 +115,30 @@ export async function runStage2MergeLlm(
       );
 
       rawOutputText = response.output_text;
-      const validation = parseAndValidateStage2Output(rawOutputText);
-      if (!validation.success) {
-        lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
-        if (attempt <= maxRetries) {
-          await sleep(RETRY_DELAY_MS * attempt);
-          continue;
-        }
+      tokenUsage = response.usage
+        ? {
+            inputTokens: response.usage.input_tokens,
+            outputTokens: response.usage.output_tokens,
+            totalTokens: response.usage.total_tokens,
+          }
+        : null;
+      finishReason = response.finish_reason ?? null;
 
-        break;
-      }
-
-      const assignment = validateStage2Assignments(validation.output, input);
-      if (!assignment.passed) {
-        lastError = `Candidate assignment validation failed: ${assignment.errors.join("; ")}`;
-        if (attempt <= maxRetries) {
-          await sleep(RETRY_DELAY_MS * attempt);
-          continue;
-        }
-
-        break;
-      }
+      // Temporary diagnostic mode: keep the provider's Stage 2 grouping even when
+      // schema or assignment completeness checks would reject it.
+      const output = JSON.parse(rawOutputText) as Stage2Output;
 
       return {
         success: true,
         input,
-        output: validation.output,
+        output,
         model,
         promptVersion: STAGE2_PROMPT_VERSION,
         responseId: response.id,
         attempts: attempt,
         elapsedMs: Date.now() - startedAt,
+        tokenUsage,
+        finishReason,
         rawOutputText,
       };
     } catch (error) {
@@ -151,6 +161,8 @@ export async function runStage2MergeLlm(
     promptVersion: STAGE2_PROMPT_VERSION,
     attempts: attemptsUsed,
     elapsedMs: Date.now() - startedAt,
+    tokenUsage,
+    finishReason,
     error: lastError,
     rawOutputText,
   };

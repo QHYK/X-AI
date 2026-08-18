@@ -11,7 +11,7 @@ export type Stage3DigestRankingInput = {
   candidates: Stage3DigestRankingCandidate[];
 };
 
-export const STAGE3_DIGEST_RANKING_PROMPT_VERSION = "v1";
+export const STAGE3_DIGEST_RANKING_PROMPT_VERSION = "v2";
 
 export function buildStage3DigestRankingInstructions(category: string): string {
   return [
@@ -21,7 +21,7 @@ export function buildStage3DigestRankingInstructions(category: string): string {
     "",
     "Goal:",
     "- Answer: within this category, which Source Digest items are most worth paying attention to today?",
-    "- Produce a complete relative ranking from 1 to N.",
+    "- Produce a relative ranking of the candidates you return.",
     "- Do not decide how many items should be displayed. Code handles Top N selection later.",
     "",
     "Prioritize by:",
@@ -54,9 +54,9 @@ export function buildStage3DigestRankingInstructions(category: string): string {
     "- Distribute ranks for source diversity.",
     "",
     "Output rules:",
-    "- Every input candidate must appear exactly once in `rankings` using its exact `id`.",
-    "- Do not invent, omit, duplicate, or modify IDs.",
-    "- Ranks must be consecutive integers from 1 to N with no duplicates.",
+    "- Use exact input candidate IDs; do not invent or modify IDs.",
+    "- Do not duplicate IDs.",
+    "- Ranks must start at 1 and be consecutive for the returned candidates.",
     "- Keep `reason` concise for human review and ranking debug.",
   ].join("\n");
 }
