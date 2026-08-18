@@ -14,7 +14,8 @@ Do not treat this file as a replacement for the Specs.
 3. 如果任务影响 AI Workflow，阅读 `02-ai-workflow-spec.md`。
 4. 如果任务涉及 LLM 行为或 Prompt，阅读 `03-prompt-spec.md`。
 5. 如果任务涉及架构、数据库、Workflow 或项目结构，阅读 `04-technical-spec.md`。
-6. 只读取实现当前任务范围内的内容。
+6. 如果任务涉及项目工作流程，阅读`06-workflow-overview.md`.
+7. 只读取实现当前任务范围内的内容。
 
 如果实现需求与现有 Spec 冲突，不要自行修改架构或绕过 Spec，应先明确指出冲突。
 
@@ -25,6 +26,7 @@ Do not treat this file as a replacement for the Specs.
 - `docs/02-ai-workflow-spec.md`
 - `docs/03-prompt-spec.md`
 - `docs/04-technical-spec.md`
+- `docs/06-workflow-overview.md`
 
 Source 配置维护在：
 - `docs/05-source-list.md`
@@ -51,6 +53,7 @@ processing → Stage 1–4 Workflow
 prompts → LLM Prompts
 db → Database Schema 和数据访问
 app → API 和 UI
+lib → API composition / shared application helpers
 ```
 
 避免不必要地混合：

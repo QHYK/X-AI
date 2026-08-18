@@ -3,25 +3,24 @@
 ## 1. System Architecture
 
 MVP 采用简单的三层架构：
+
 ```text
-Data Layer
-↓
-Processing Layer
-↓
-Presentation Layer
+Data Layer → Processing Layer → Presentation Layer
 ```
-优先保持架构简单，不引入微服务、消息队列、复杂 Agent Framework 等当前没有明确需求的基础设施。
+
+MVP 保持单一 Next.js + PostgreSQL 应用，不引入微服务、Queue、Workflow Engine 或复杂 Agent Framework。
 
 ### 1.1 Data Layer
-所有核心数据统一存储在 PostgreSQL。
-核心数据对象：
+
+核心表：
+
 ```text
 sources
-    ↓
+  ↓
 raw_articles
-    ↓
+  ↓
 processed_contents
-    ├── Event Candidate ──→ events
+    ├── Event Candidate (routing=event)──→ events
     ├── Source Digest
     ├── Long-form
     └── Inspiration
@@ -29,112 +28,24 @@ processed_contents
 feedback
 ```
 
-#### `sources`
-保存所有已配置的信息来源及采集配置。
-
-#### `raw_articles`
-保存 Collector 获取的原始数据。
-
-#### `processed_contents`
-保存经过 Stage 1 `Content Understanding & Selection` 后保留的内容。
-
-Routing 包括：
-```text
-Event
-Digest
-Long-form
-Inspiration
-```
-Ignore 内容不创建 `processed_contents` 记录。
-
-Event Candidate 在经过 Stage 4 合并后，通过 `event_id` 关联至对应 Event。
-
-#### `events`
-保存 Stage 4 `Selected Event Enrichment` 产生的 Event。
-一个 Event 可以关联多篇 Event Candidate。
-
-MVP 假设：
-> 一篇 Event Candidate 只属于一个主要 Event。
-
-#### `feedback`
-保存人工对 AI 结果的修改，例如：
-
-* False Positive
-* False Negative
-* Ranking Error
-* Classification Error
-
-AI 原始结果应保留，人工修改后的展示结果单独记录，以便后续 Eval 和 Prompt 优化。
-
----
+- `sources`：Source List 与采集配置
+- `raw_articles`：Collector 标准化后的原始内容
+- `processed_contents`：Stage 1 保留的内容；Ignore 不入库
+- `events`：Stage 4 生成的最终 Event，一个 Event 可以关联多篇 Event Candidate。
+- `feedback`：未来人工修正记录｜False Positive｜False Negative｜Ranking Error｜Classification Error
 
 ### 1.2 Processing Layer
 
-每日 Workflow：
-
 ```text
-09:00 Cron
-    ↓
-RSS Collection                           ← Code
-    ↓
-Content Completion
-    ↓
-Stage 1 — Content Understanding & Selection
-    ↓
-┌─────────────────────────────┐
-│ Event Candidates            │
-│ Source Digest               │
-│ Long-form                   │
-│ Inspiration                 │
-└─────────────────────────────┘
-    ↓
-Stage 2 — Merge Events
-    │
-    └── Event Candidates → Event Groups
-    ↓
-Stage 3 — Channel Ranking
-Stage 3 — Channel Ranking
-    ↓
-Event Groups → Global Ranking
-    ↓
-Top N Event Selection                     ← Code
-    ↓
-Collect selected Event source items       ← Code
-    ↓
-Exclude exact duplicates from
-Digest / Long-form inputs                 ← Code
-    ↓
-Source Digest → Ranking by Category
-Long-form → Global Ranking
-    ↓
-Top N Selection                           ← Code
-    │
-    ├── Events → Top 8–12
-    ├── Source Digest → Top N by Category
-    └── Long-form → Top N
-    ↓
-Stage 4 — Selected Event Enrichment
-    │
-    └── Selected Event Groups → Complete Events
-    ↓
-Persist Results
-    ↓
-Daily Brief API / Page
+Source Collection → Content Completion → Stage 1 → Stage 2 → Stage 3 → Exact Dedup → Stage 3 → Stage 4
 ```
+
+详细 LLM 逻辑见 `02-ai-workflow-spec.md`，`03-prompt-spec.md`，完整项目流程见 `06-workflow-overview.md`。
+
+其他补充：
 
 #### Source Collection
-主要由代码完成。
-
-Collection Method：
-
-```text
-RSS
-Email / Newsletter
-Web（仅必要来源）
-```
-
-Collector 负责：
-
+主要由代码完成，负责：
 * 获取当天新增内容；
 * 保存 Source Metadata（包括 Category）；
 * 尽可能保存原始正文与原始 Metadata；
@@ -142,109 +53,33 @@ Collector 负责：
 * 写入 `raw_articles`。
 
 #### Stage 1: Content Understanding & Selection
-
-调用 LLM 完成：
-
-* Content Understanding；
-* Selection；
-* Routing；
-* Tagging；
-* Entity；
-* Summary；
-* 中文标题及摘要。
-
-结果写入 `processed_contents`。
+LLM完成，负责：Understanding, Selection, Routing, Tagging, Entity, Summary, translation
+结果写入 `processed_contents`
 
 #### Stage 2 — Merge Events
-
-读取当天 Stage 1 生成的 Event Candidates，一次性提交给 LLM 进行 Merge Events。
-
-Input:
-- 当天 `processed_contents.routing = event`
-- 使用 Stage 1 已生成的 title / summary / entities
-- 从关联数据获取 source / url
-- 为本次执行生成临时 `temp_id`
-
-Output:
-- Event Groups
-- 每个 Group 仅包含 `event_hint` 和对应 Candidate `temp_id`
-
+LLM完成，负责：读取当天 `processed_contents.routing = event` ，并获取对应 title / summary / entities / source / url，一次性提交给 LLM 进行 Merge Events。
+本次执行生成临时 `temp_id`
 Event Groups 作为当前 workflow 的中间结果，不直接写入 `events` 表。
-优先单次处理当天全部 Event Candidates，不预先按 batch 拆分。
 Stage 2 不生成完整 Event 内容，不执行 Ranking。
 
 #### Stage 3 — Channel Ranking
-Stage 3 对不同 Channel 独立执行 Ranking，不决定最终展示数量。
-
-##### Event Ranking
-Input:
-- Stage 2 Event Groups
-- Event Group 对应的 Candidate title / summary / source 等必要信息
-
-所有 Event Groups 在当天范围内进行全局 Ranking。
-
-##### Source Digest Ranking
-按 Category 分组后分别 Ranking。
-
-例如：
-- Finance & Economy
-- Technology
-- Science
-- Policy
-- Company
-- General
-
-只处理当天对应 Category 的 Source Digest Contents。
-
-##### Long-form Ranking
-当天 Long-form Contents 全局 Ranking。
-
-##### Output
-每个候选得到：
-- rank
-- ranking_reason
-
-排序结果直接写入对应记录。
-保留：
-```text
-ai_rank
-display_rank
-```
-
-默认：
-```text
-display_rank = ai_rank
-```
+对不同 Channel 独立执行 Ranking，不决定最终展示数量。
+**Event Ranking**：Input 只须 Event Group 对应的 Candidate title / summary / source 等必要信息
+**Output**：排序结果直接写入对应记录。保留：`ai_rank`, `display_rank`。默认：`display_rank = ai_rank`
 
 人工调整只修改 `display_rank`，不覆盖 AI 原始排序。
 Inspiration 不需要 AI 排序。
 
 #### Top N Selection
-
-由代码根据产品配置选择最终展示内容。
+由代码根据产品配置选择最终展示内容，不由 LLM 决定。
 - Events: Top 8–12
 - Source Digest: Top N by Category
 - Long-form: Top N
-Top N 不由 LLM 决定。
 
 #### Stage 4 — Selected Event Enrichment
-
 只处理经过 Stage 3 Ranking 和 Top N Selection 后入选的 Event Groups。
-每个 Selected Event Group 独立调用 LLM。
+每个 Selected Event Group 独立调用 LLM，可以有限并发执行。
 
-Input:
-- event_hint
-- Group 内 Event Candidates 的 title / summary / entities / source / url
-
-Output:
-- event_title / event_title_zh
-- event_tags / event_tags_zh
-- event_entities / event_entities_zh
-- event_summary / event_summary_zh
-- source_perspectives
-- external_context
-
-Stage 4 可以有限并发执行。
 单个 Event 失败不应影响其他 Event 的处理。
 只有 Stage 4 成功完成的 Event 才写入 `events` 表。
 
@@ -256,44 +91,19 @@ source articles 的 `raw_articles.published_at` 确定性推导：
 4. 如果全部 source article 缺失 `published_at`，使用当前 Daily Workflow
    run timestamp 转换到 `Asia/Shanghai` 后的日期作为 fallback。
 
-#### Daily Brief Composition
-
-Daily Brief 不单独持久化为 `daily_briefs` 或 `brief_items`。
-
-API 根据日期实时组合：
-
-```text
-events
-+
-Digest contents
-+
-Long-form contents
-+
-Inspiration contents
-```
-
-并按照 `display_rank` 返回。
-
-如果未来出现以下需求，再增加 Brief Snapshot 模型：
-
-* Draft / Published 版本；
-* 同日多次重新生成；
-* Daily / Weekly Brief；
-* 不同用户的不同排序；
-* 历史发布版本回滚。
-
----
-
 ### 1.3 Presentation Layer
 
-MVP 使用 Web 页面展示 Daily Brief。
-页面通过 API 获取：
+Daily Brief 不单独持久化为 `daily_briefs` 或 `brief_items`。
+X-AI-field 当前只提供 Daily Brief API；Daily Brief 页面放在独立的 X-field 项目中。
 ```text
-Today's Events
-Source Digests
-Long-form Reads
-Daily Inspiration
+X-field → HTTP → X-AI-field /api/brief → PostgreSQL
 ```
+
+API 根据日期实时组合：
+```text
+Today's Events + Source Digests contents + Long-form contents + Inspiration contents
+```
+并按照 `display_rank` 返回
 
 后台人工操作包括：
 * 删除 / 恢复内容；
@@ -306,163 +116,26 @@ Daily Inspiration
 
 ## 2. Tech Stack
 
-### Web / Application Runtime
-
-**Next.js**
-用于：
-* Daily Brief Web 页面；
-* Review 页面；
-* API；
-* Daily Workflow application code。
-MVP 不拆独立 Backend Service。
-
----
-
-### Database
-
-**PostgreSQL via Supabase**
-<!-- 选择原因：
-* Raw Article、Processed Content、Event 等数据都适合关系型数据库；
-* 支持 JSONB，适合存储 AI Structured Output 和原始 Metadata；
-* Supabase 提供 PostgreSQL 管理界面；
-* 可以支持简单 Cron / Scheduled Job；
-* 当前规模无需额外数据库。
-MVP 不同时使用 MySQL。 -->
-
-所有：
-```text
-Raw Data
-Processed Data
-Events
-Ranking
-Feedback
-```
-统一存储在 PostgreSQL。
-
----
-
-### ORM
-
-**Drizzle ORM**
-<!-- 选择原因：
-* TypeScript 类型安全；
-* 接近 SQL，抽象层较薄；
-* 适合数据 Pipeline 中常见的 JOIN、批处理和复杂查询；
-* 更容易直接利用 PostgreSQL / JSONB 能力；
-* 避免为 MVP 引入更重的 ORM abstraction。 -->
-如特殊查询使用 Drizzle 不方便，可以直接使用 SQL。
-
----
-
-### Scheduling
-
-使用：
-```text
-Cron / Scheduled Job
-```
-Cron 只负责触发 Daily Workflow。
-
-例如：
-```text
-daily-job
-    ↓
-collect
-    ↓
-process-stage-1
-    ↓
-process-stage-2
-    ↓
-process-stage-3
-    ↓
-process-stage-4
-```
-
-Workflow 的实际业务逻辑由 Application Code 执行，而不是写入数据库 Cron。
-
-暂不引入：
-* Kafka
-* RabbitMQ
-* Temporal
-* Workflow Engine
-* Distributed Queue
-
-只有实际出现可靠性或规模问题后再评估。
-
----
-
-### AI Integration
-
-Stage 1–4 调用 LLM。
-
-AI 调用遵循 `03-prompt-spec.md` 定义的：
-* Input Schema；
-* Output Schema；
-* Prompt Guidelines。
-
-应用代码依赖 Structured Output，而不依赖 Prompt 的具体文本。
-
----
-
-### External Retrieval
-
-Stage 4 在必要情况下允许 External Context Retrieval。
-
-外部信息主要用于：
-* 补充缺失事实；
-* 验证冲突信息；
-* 获取必要背景。
-
-Search 不是每个 Event 的固定步骤，只在模型判断确有需要时执行。
-
----
-
-### Architecture Principle
-
-MVP 优先遵循：
-```text
-KISS
-YAGNI
-LLM-first
-Rules only when necessary
-```
-
-只有实际 Failure 出现后，再增加：
-* 新规则；
-* 新 Collector；
-* 评分系统；
-* Queue；
-* Workflow Engine；
-* 其他基础设施。
+- Runtime: Next.js + TypeScript
+- Database: PostgreSQL / Supabase
+- ORM: Drizzle ORM
+- AI: OpenAI Responses API + Structured Output
+- External Retrieval: optional `web_search` in Stage 4
+- Scheduling: Cron / Scheduled Job
+- Architecture Principle: KISS, YAGNI, LLM-first, Rules only when necessary
 
 ---
 
 ## 3. Data Model
 
-MVP 使用单一 PostgreSQL 数据库。
-
-核心表：
+### 3.1 `sources`
+保存 Source List 配置。核心字段：
 
 ```text
-sources
-    ↓
-raw_articles
-    ↓
-processed_contents
-        └── routing = event → events
-
-feedback
+id, name, category, source_type, url, collection_method,
+priority, enabled, event_candidate, source_digest_candidate,
+language, availability, notes, created_at, updated_at
 ```
-
-MVP 暂不建立：
-* `event_articles`
-* `daily_briefs`
-* `brief_items`
-
----
-
-### 3.1 sources
-
-保存 Source List 中配置的信息源。
 
 | Field                     | Type        | Constraint / Notes |
 | ------------------------- | ----------- | ------------------ |
@@ -482,36 +155,18 @@ MVP 暂不建立：
 | `created_at`              | timestamptz | NOT NULL           |
 | `updated_at`              | timestamptz | NOT NULL           |
 
-#### Category normalization
+**Category normalization**
+Source List 导入时将旧的 Economics / Business / Financial / Market 归一为 `Finance & Economy`，AI 归入 `Technology`。
 
-导入 Source List 时统一：
-```text
-Economics
-Business
-Financial
-Market
-```
-→
-```text
-Finance & Economy
-```
+### 3.2 `raw_articles`
+保存标准化原始内容：
 
 ```text
-AI
-Technology
+id, source_id, source_item_origin_id,
+title, url, author, published_at, collected_at,
+content_text, image_url, source_tags, metadata,
+stage1_status, stage1_processed_at, processing_error
 ```
-→
-```text
-Technology
-```
-
-`category`、`source_type` 暂时使用普通 `text`，不增加数据库 CHECK，以方便运行后继续调整分类体系。
-
----
-
-### 3.2 raw_articles
-
-保存 Collector 获取并规范化后的原始信息。
 
 | Field                   | Type        | Constraint / Notes          |
 | ----------------------- | ----------- | --------------------------- |
@@ -531,6 +186,15 @@ Technology
 | `stage1_processed_at`   | timestamptz | nullable                    |
 | `processing_error`      | text        | nullable                    |
 
+正文不足的处理逻辑属于 `Processing Workflow`：
+```text
+RSS item
+→ normalize
+→ content insufficient?
+→ fetch article page if possible
+→ Stage 1
+```
+
 #### source_item_origin_id
 保存来源提供的 item identifier，例如：
 ```text
@@ -540,18 +204,7 @@ Gmail Message ID
 ```
 系统内部关联始终使用 `raw_articles.id`。
 
-#### content_text
-允许为空。
-部分 RSS，例如 Nature Chemistry，可能只提供标题和链接而不提供正文或摘要。
-
-正文不足的处理逻辑属于 `Processing Workflow`：
-```text
-RSS item
-→ normalize
-→ content insufficient?
-→ fetch article page if possible
-→ Stage 1
-```
+基础去重优先使用来源 item ID；无稳定 ID 时使用 URL。
 
 #### metadata
 用于保存来源特有但暂时不值得升格为正式字段的信息，例如：
@@ -562,8 +215,6 @@ RSS item
   "feed_specific_field": "..."
 }
 ```
-
-稳定、跨来源、被系统逻辑直接依赖的数据应使用正式字段，不应长期全部塞入 `metadata`。
 
 #### stage1_status
 建议值：
@@ -577,10 +228,17 @@ failed
 
 ---
 
-### 3.3 processed_contents
+### 3.3 `processed_contents`
 
-保存 Stage 1 `Content Understanding & Selection` 后被保留的内容。
-Ignore 内容不创建 `processed_contents`。
+保存 Stage 1 保留内容：(Ignore 内容不入此表)
+
+```text
+id, raw_article_id, routing, category,
+tags, entities, entities_zh,
+title_zh, summary, summary_zh,
+event_id, ai_rank, display_rank,
+created_at, updated_at
+```
 
 | Field            | Type        | Constraint / Notes             |
 | ---------------- | ----------- | ------------------------------ |
@@ -600,47 +258,27 @@ Ignore 内容不创建 `processed_contents`。
 | `created_at`     | timestamptz | NOT NULL                       |
 | `updated_at`     | timestamptz | NOT NULL                       |
 
-#### routing
-MVP routing：
+
+**Routing：**
 ```text
-event
-digest
-long_form
-inspiration
+event | digest | long_form | inspiration
 ```
 
-`routing` 决定后续程序流程，不应允许任意字符串,因此使用：
+`ai_rank` 保存 AI 排序；`display_rank` 是页面最终顺序。人工调整只改 `display_rank`。
+
+### 3.4 `events`
+保存 Stage 4 最终 Event：
+
 ```text
-text + CHECK
+id, event_date,
+title, title_zh,
+tags, tags_zh,
+entities, entities_zh,
+summary, summary_zh,
+source_perspectives, external_context,
+ai_rank, display_rank,
+created_at, updated_at
 ```
-
-#### Ranking
-
-`ai_rank`：Stage 3 的原始 AI 排序结果。
-`display_rank`：最终页面展示顺序。
-默认：
-```text
-display_rank = ai_rank
-```
-人工调整只修改 `display_rank`，保留 `ai_rank` 用于后续 Eval。
-
-对于 Source Digest，`ai_rank` / `display_rank` 表示同一 Category 内部的顺序。
-
----
-
-### 3.4 events
-
-保存 Stage 4 `Selected Event Enrichment` 的结果。
-Stage 2 产生的 Event Groups 是 Workflow 中间结果，不直接写入 `events`。
-
-一个 Event 可以对应多篇 Event Candidate。
-MVP 假设：
-> 一篇 Event Candidate 只属于一个主要 Event。
-因此直接通过：
-```text
-processed_contents.event_id
-```
-建立关系，不创建 `event_articles`。
 
 | Field                     | Type        | Constraint / Notes |
 | ------------------------- | ----------- | ------------------ |
@@ -661,42 +299,14 @@ processed_contents.event_id
 | `created_at`              | timestamptz | NOT NULL           |
 | `updated_at`              | timestamptz | NOT NULL           |
 
-#### source_perspectives
+一个 Event 可关联多条 `processed_contents`；MVP 假设一篇 Event Candidate 只属于一个主要 Event，因此使用 `processed_contents.event_id`，不建立 `event_articles`。
 
-使用 JSONB，例如：
+`event_date` 由 Code 从组成 Event 的 source articles 中最早有效 `published_at` 推导（Asia/Shanghai）；全部缺失时 fallback 到 workflow run 日期。
 
-```json
-[
-  {
-    "source": "Reuters",
-    "summary": "..."
-  },
-  {
-    "source": "Bloomberg",
-    "summary": "..."
-  }
-]
-```
+`external_context`：未发生真实 Web Search 时为 `NULL`；发生搜索时保存真实 provenance URLs 和简短 summary。
 
-#### external_context
-没有进行 External Context Retrieval 时：
-```text
-NULL
-```
-执行外部检索后保存：
-```json
-{
-  "sources": [],
-  "summary": ""
-}
-```
-
----
-
-### 3.5 feedback
-
-保存人工对 AI 输出的修改。
-MVP 保持简单，结构未来根据实际 Feedback / Eval 需求再调整。
+### 3.5 `feedback`
+当前保留简单结构，结构未来根据实际 Feedback / Eval 需求再调整。
 
 | Field           | Type        | Constraint / Notes        |
 | --------------- | ----------- | ------------------------- |
@@ -724,38 +334,7 @@ display_rank 更新
 feedback 写入修改记录
 ```
 
----
-
-### 3.6 Main Relationships
-
-```text
-sources
-   1
-   │
-   N
-raw_articles
-   1
-   │
-  0..1
-processed_contents
-   N
-   │
-   0..1
-events
-```
-
-其中 Event 关系实际为：
-```text
-events 1
-   ↑
-   N
-processed_contents
-```
-仅 `routing = event` 的 processed content 会关联 Event。
-
----
-
-### 3.7 Initial Indexes
+### 3.6 Initial Indexes
 
 MVP 只建立明确需要的索引：
 ```text
@@ -780,8 +359,7 @@ source_id + date
 
 ---
 
-## 4. Processing Workflow & Job Design
-描述代码如何调用我们已经定义好的 AI stages。
+## 4. Processing Workflow
 
 ### 4.1 Daily Workflow
 
@@ -799,6 +377,8 @@ Collection
     ↓
 Stage 1: Content Understanding & Selection
     ↓
+Content Completion
+    ↓
 Stage 2: Merge Events
     ↓
 Stage 3: Channel Ranking
@@ -807,34 +387,11 @@ Stage 4: Selected Event Enrichment
     ↓
 Publish-ready data
 ```
-后续 Stage 由前一个 Stage 成功完成后主动触发，不使用固定时间分别调度。
+后续 任务 由前一个 任务 成功完成后主动触发，不使用固定时间分别调度。
 
----
+### 4.2 Collection
 
-### 4.2 Collection Job
-
-Collection Job 根据 `sources.collection_method` 使用不同 Collector Adapter。
-MVP 支持：
-```text
-RSS
-Email
-Web
-```
-
-逻辑：
-```text
-source
-   ↓
-collector adapter
-   ↓
-normalize
-   ↓
-deduplicate
-   ↓
-raw_articles
-```
-
-Collector Adapter：
+根据 `sources.collection_method` 使用不同 Collector Adapter。
 ```js
 collectRSS(source)
 collectEmail(source)
@@ -843,28 +400,10 @@ collectWeb(source)
 不同 Collector 最终统一输出标准化 `Raw Article`。
 
 #### RSS Collector
-
-1. 获取 Feed；
-2. 使用成熟 RSS Parser 解析；
-3. 将 RSS Item 映射为标准字段；
-4. 保存来源特有字段到 `metadata`；
-5. 基础去重；
-6. 写入 `raw_articles`。
-
-已通过 RSS spike 验证：
-* Bloomberg Technology
-* Dow Jones
-* BLS
-* TechCrunch
-* Nature Chemistry
-* SemiAnalysis
-* NASA Image of the Day
-均可解析为统一 Raw Article 结构。
-
-部分 Feed 特殊情况：
-* BLS 需要浏览器式 User-Agent；
-
-不为单个特殊 Feed 增加专用数据库字段。
+当前正式实现
+```text
+Source → RSS fetch → normalize → deduplicate → raw_articles
+```
 
 #### Email Collector
 
@@ -883,11 +422,12 @@ MVP 不建立通用复杂 Newsletter Parser。
 仅用于明确没有 RSS / Email，但仍需要采集的来源。
 Web Collector 应尽量输出与 RSS Collector 相同的标准 Raw Article 结构。
 
----
+### 4.3 Content Completion
+正文不足时执行
+```text
+raw_articles → need completion? → article extraction → update content_text
+```
 
-### 4.3 Raw Content Completion
-
-Collector 优先保存来源直接提供的正文或摘要。
 如果：
 ```text
 content_text is null / empty
@@ -907,10 +447,7 @@ update raw_articles.content_text
 * Stage 1 根据现有 Title / Metadata 判断是否可以继续处理；
 * 必要时记录处理错误或低内容状态。
 
----
-
 ### 4.4 Deduplication
-
 区分两类重复。
 
 #### Exact Duplicate
@@ -929,126 +466,68 @@ source_id + source_item_origin_id
 Exact Duplicate 不再次插入 `raw_articles`。
 
 #### Same Event Across Different Sources
-
 例如：
 ```text
 Reuters: Fed ...
 Bloomberg: Fed ...
 FT: Fed ...
 ```
-这不是重复 Article。
 保留全部内容，并在 Stage 2 进行 Merge Events。
 
----
+### 4.5 Stage 1
 
-### 4.5 Stage 1 Job
+只处理最近 workflow window 内 `stage1_status = pending` 的 Raw Articles。
 
-处理：
-```js
-raw_articles.stage1_status = pending
-```
-
-采用：
-> 单篇 LLM 调用 + 有限并发,例如 5–10。
 每个 Raw Article 独立执行：
 ```text
-1 Raw Article
-    ↓
-1 Stage 1 LLM call
-    ↓
-Selected → processed_contents
-Ignored  → update raw_articles status
-Failed   → update raw_articles status
+Raw Article → LLM → Ignore / Event / Digest / Long-form / Inspiration
 ```
-不使用一个大型 Batch Prompt 处理全部文章。
 
-#### Stage 1 Result
-
-Selected：
-```js
-raw_articles.stage1_status = selected
-```
-并创建对应 `processed_contents`。
-
-Ignored：
-```text
-raw_articles.stage1_status = ignored
-```
-不创建 `processed_contents`。
-
+Ignore: `raw_articles.stage1_status = ignored` 不创建 `processed_contents`
+Selected: `raw_articles.stage1_status = selected` 创建对应 `processed_contents`
 Failed：
-```text
+```js
 raw_articles.stage1_status = failed
 processing_error = ...
 ```
 
----
-
-### 4.6 Stage 2 Job
+### 4.6 Stage 2
 
 Stage 1 全部可处理内容完成后触发 Stage 2。
+读取当前 workflow 的 Event Candidates；生成轻量 Event Groups。
+默认时间窗口与 Stage 1 一致，为最近 24 小时 collected 内容。
 
-Stage 2 使用当前 Daily Workflow 对应时间窗口内产生的 Event Candidates。
-MVP 默认时间窗口与 Stage 1 一致，为最近 24 小时 collected 内容。
-Stage 2：
-* 判断哪些报道属于同一现实事件；
-* 输出Event Group 作为 workflow 中间结果
+```text
+Event Candidates → LLM Merge → Event Groups
+```
 
----
+Stage 2 不写 `events`。Input / Output 和 temp ID mapping 保存到 `runtime/stage2/`。
 
-### 4.7 Stage 3 Job
+### 4.7 Stage 3
 
 Stage 2 完成后主动触发 Stage 3。
 Stage 3 分阶段执行。
 
-#### Step 1 — Event Ranking
+```text
+Event Groups
+  ↓
+Event Ranking
+  ↓
+Code Top N
+  ↓
+Cross-channel exact dedup → 排除已经被 Selected Events 覆盖的 exact duplicate
+  ↓
+Digest global exact dedup
+  ↓
+Science publication enrichment
+  ↓
+Digest Ranking by Category + Long-form Ranking
+```
 
-输入：
-- Stage 2 Event Groups
-- Event Group 对应的必要 Candidate 信息
-
-所有 Event Groups 在当前 Daily Workflow 范围内全局排序。
-
-输出：
-- rank
-- ranking_reason
-
-Event Group Ranking 暂作为 Workflow 中间结果保存。
-
-#### Step 2 — Event Top N Selection
-
-由代码根据产品配置选择最终 Today's Events。
-
-MVP 默认选择 Top 10；
-产品目标范围为约 8–12。
-
-Top N 不由 LLM 决定。
-
-#### Step 3 — Cross-channel Exact Dedup
-
-取得 Selected Event Groups 所包含的 Source Items。
-
-在 Source Digest / Long-form Ranking 前，
-排除已经被 Selected Events 覆盖的 exact duplicate。
-
-优先使用稳定的 normalized article URL 判断重复。
-
-规则：
-
-Selected Event > Long-form / Source Digest
-
-只有最终入选 Today's Events 的 Event 才触发排除；
-未进入 Top N 的 Event Group 不影响其他 Channel。
-
-本步骤只处理确定性的 exact duplicate，
-不进行语义相似度去重。
-
-#### Step 4 — Source Digest Ranking
-对剩余 `routing = digest` 内容按 Category 分组并分别排序。
-
-#### Step 5 — Long-form Ranking
-对剩余 `routing = long_form` 内容进行全局排序。
-
+- Exact dedup 仅处理确定的同一原文，使用 normalized URL，不做语义去重。
+- Digest / Long-form rank 写入 `processed_contents.ai_rank`。
+- `display_rank` 默认跟随 AI；若已人工修改则普通重跑不覆盖。
+- Event rank 保留到 Stage 4 创建最终 Event 时写入 `events`。
 
 Stage 3 完成后：
 - Source Digest / Long-form:
@@ -1063,17 +542,24 @@ Stage 3 完成后：
 人工修改只改变 `display_rank`
 Inspiration 不需要 AI Ranking。
 
----
-
-### 4.8 Stage 4 Job
+### 4.8 Stage 4
 
 Stage 3 完成后主动触发 Stage 4。
+只处理 Selected Event Groups，每个 Event 独立调用 LLM。
 
-对 Event Groups 进行完整事件理解，生成 Daily Brief 展示所需的事件信息，并在必要时补充外部背景。
-* 创建 Events；
-* 保留共同事实；
-* 保留不同来源 Perspective；
-* 必要时执行 External Context Retrieval。
+```text
+Selected Event Group
+  ↓
+Event Enrichment
+  ├─ existing sources sufficient → no search
+  └─ context materially needed → optional Web Search
+  ↓
+Event persistence
+```
+
+- Web Search 使用 Responses API `web_search` + `tool_choice: auto`。
+- 是否真实搜索 由 Application Code 从 tool usage 判断，不完全信任模型自报。
+- 所有 Event enrichment 成功后，再使用单一 transaction rebuild 当前 workflow-derived Events，避免半套新旧数据。
 
 Stage 4 完成后：
 1. 写入 `events`
@@ -1081,182 +567,65 @@ Stage 4 完成后：
 3. 保存最终 Event rank / display_rank
 不创建 `event_articles`。
 
-`events.event_date` 由 Application Code 在写入 `events` 前推导：
-使用组成该 Event 的 source articles 中最早的有效 `published_at`
-（转换到 `Asia/Shanghai` 后取日期）。如果全部缺失 `published_at`，
-fallback 到当前 Daily Workflow run 的 `Asia/Shanghai` 日期。
-
----
-
 ### 4.9 Failure Handling
+只处理明确的常见失败，不建立复杂 Workflow Engine。
 
-MVP 只处理明确的常见失败，不建立复杂 Workflow Engine。
-
-#### Collector Failure
-
-可能原因：
-* network error
-* timeout
-* HTTP 4xx / 5xx
-* RSS parse error
-* source-specific blocking
-
-处理：
-* 当前 Source 独立失败；
-* 记录错误；
-* 允许重试该 Source；
-* 不影响其他 Source Collection。
-
-#### Stage 1 Failure
-
-可能原因：
-* LLM timeout
-* rate limit
-* invalid structured output
-* temporary API error
-
-处理：
-* 当前 Raw Article 标记 `failed`；
-* 可独立重试；
-* 不重跑已成功文章。
-
-#### Stage 2 Failure
-
-失败时：
-→ 整个 Merge Events retry
-
-#### Stage 3 Failure
-
-失败时：
-→ 只重跑失败的 Channel / Category
-
-#### Stage 4 Failure
-
-失败时：
-→ 只重跑失败的 Event
----
++ **Collector**: Source 独立失败, 记录错误, 重试该 Source, 不影响其他 Source Collection
++ **Stage 1**: 当前 Raw Article 标记 `failed`, 可独立重试, 不重跑已成功文章
++ **Stage 2**: 当前 Raw Article 标记 `failed`, 可独立重试, 不重跑已成功文章
++ **Stage 3**: 只重跑失败的 Channel / Category
++ **Stage 4**: 重试当前任务
 
 ### 4.10 Idempotency 幂等性
 
 Daily Workflow 必须可以安全重复执行。
 
-重复运行不应：
-* 重复插入相同 Raw Article；
-* 重复生成同一 Processed Content；
-* 重复调用已经成功完成的 Stage 1；
-* 因重复执行 Stage 2 / Stage 3 / Stage 4 而产生重复持久化数据；
-* 静默覆盖人工调整结果。
-
-#### Collection
-
-通过来源 item ID / URL 等稳定标识去重。
-
-同一来源重复采集相同内容时，不重复插入 `raw_articles`。
-
-#### Stage 1
-
-只处理：
-```text
-stage1_status = pending
-```
-同时：
-```text
-processed_contents.raw_article_id
-```
-保持 UNIQUE。
-
-已经成功完成 Stage 1 的 Raw Article 不应在普通 Workflow 重跑时再次调用 LLM。
-
-#### Stage 2
-Stage 2 只生成当前 Workflow 使用的 Event Groups，不直接持久化 events。
-同一批 Event Candidates 可以安全重新执行 Merge Events。
-Stage 2 重跑时，直接重新生成本次 Workflow 的 Event Groups，不依赖或修改之前运行产生的 Event Groups。
-
-#### Stage 3
-Stage 3 可以安全重新计算当前 Channel / Category 的 AI Ranking。
-重复执行时允许覆盖：`ai_rank`
-首次产生 AI Ranking 时：`display_rank = ai_rank`
-
-如果 `display_rank` 已被人工修改，普通 Stage 3 重跑不得静默覆盖。
-如果需要重新同步 AI 排序，应显式执行。
-
-#### Stage 4
-Stage 4 只处理本次 Top N Selection 后选中的 Event Groups。
-Stage 4 重跑必须避免为同一个 Selected Event Group 创建重复 Event。
-MVP 优先采用简单、可预测的重建策略：
-1. 在重新生成当天 Events 前，清理当天由 Workflow 生成的 Event 关联；
-2. 删除 / 重建当天 AI 生成的 Events；
-3. 重新执行 Selected Event Enrichment；
-4. 将成功生成的 Event Candidates 重新关联到新的 event_id。
+- Collection：item ID / URL 去重
+- Stage 1：只处理 `stage1_status = pending`；`processed_contents.raw_article_id` UNIQUE
+- Stage 2：只生成当前 Workflow 使用的 Event Groups，不直接持久化 events.runtime Event Groups 可安全重算
+- Stage 3：覆盖 `ai_rank`，保护人工 `display_rank`
+- Stage 4：通过最近成功 `runtime/stage4/.../persistence.json` 识别上一轮派生 Events，unlink → delete → rebuild → relink
 
 ---
 
-### 4.11 Publish
-MVP 不建立独立 Publish Job 或 Brief Snapshot。
-Stage 4 完成后：
+## 5. Daily Brief API
+
 ```text
-events
-processed_contents
+GET /api/brief?date=YYYY-MM-DD
 ```
-即为页面可读取的最新 Daily Brief 数据。
-API 根据当天日期、routing 和 `display_rank` 实时组合页面内容。
+
+MVP 使用 `created_at`（Asia/Shanghai）作为 Brief 日期归属依据。
+
+返回：
+- `events` — Top 10
+- `digests` — 按 Category 分组，返回全部 ranked contents
+- `long_form` — Top 10
+- `inspiration`
+- `meta`
+
+Original links：
+- Event → API 通过 `processed_contents → raw_articles` 组装 `sources[]`
+- Digest / Long-form / Inspiration → `url`
+
+API 不创建 `daily_briefs` / `brief_items` snapshot；当前是实时 composition。
+
+CORS 使用环境变量配置允许的 X-field origin。
 
 ---
 
-## 5. LLM Integration
-Prompt 文件怎么管理、Structured Output、Web Search、失败重试、模型选择
+## 6. LLM Integration
 
-### 5.1 Overview
+Runtime Prompt 位于 `src/prompts/`，Prompt contract 位于 `03-prompt-spec.md`。
 
-LLM is used in four processing stages:
 ```text
-Stage 1：Content Understanding & Selection
-Stage 2：Merge Events
-Stage 3：Channel Ranking
-Stage 4：Selected Event Enrichment
+LLM Response → Structured Output → Schema Validation → Application Logic
 ```
-The behavior and output requirements of each stage are defined in `03-prompt-spec.md`.
-Technical implementation should keep model invocation separate from business logic.
 
----
+Prompt 发生影响行为的变化时更新版本号，并在 runtime log 中记录版本。
+Prompt 文件随项目代码通过 Git 进行版本管理。
+当前版本以 runtime prompt 文件为准。
 
-### 5.2 Prompt Organization
-
-Each Stage uses an independent prompt.
-```text
-prompts/
-├── stage1-content-understanding.ts
-├── stage2-merge-event.ts
-├── stage3-ranking.ts
-└── stage4-event-enrichment.ts
-```
-Each prompt should follow the corresponding Stage definition in `03-prompt-spec.md`.
-Prompts should not contain database or workflow implementation details.
-
----
-
-### 5.3 Structured Output
-
-All four Stages should return structured output.
-Use schema validation for model responses.
-```text
-LLM Response
-    ↓
-Structured Output
-    ↓
-Schema Validation
-    ↓
-Application Logic
-    ↓
-Database
-```
-具体 Output Schema 以 `03-prompt-spec.md` 为准。
-Schema Validation 失败时，不直接写入数据库。
-
----
-
-### 5.4 Model Selection
-
+### Model Selection: 
 先使用一个能力足够的通用模型。
 暂不做：
 * 多模型 Routing；
@@ -1264,67 +633,7 @@ Schema Validation 失败时，不直接写入数据库。
 * 根据任务动态选择模型。
 模型调用应与业务逻辑解耦，未来可以替换模型而不修改 Workflow。
 
----
-
-### 5.5 Stage 1 Invocation
-
-```text
-1 Raw Article
-      ↓
-1 LLM Call
-      ↓
-Structured Output
-      ↓
-processed_contents
-```
-采用单篇处理 + 有限并发。
-输入包含理解文章所需的 Raw Article 和 Source 信息。
-
----
-
-### 5.6 Stage 2 Invocation
-
-Stage 2 输入当天全部 Event Candidates，LLM 需要：
-```text
-identify events
-merge related reports
-```
-优先单次处理当天全部 Event Candidates，不预先按 batch 拆分。
-
----
-
-### 5.7 Stage 3 Invocation
-
-Stage 3 ranks the three content groups independently:
-```text
-Events
-Source Digests
-Long-form Reads
-```
-
-模型返回：
-ID + Rank
-
-Application Code 将结果写入对应数据的：
-```text
-ai_rank
-display_rank
-```
-
-首次排序：display_rank = ai_rank
-后续人工调整只修改 `display_rank`。
-
----
-
-### 5.8 Stage 4 Invocation
-
-Stage 4 对 Ranking 后最终入选的 Event Groups 进行处理：
-summarize shared facts
-preserve different source perspectives
-identify when external context may be useful
-
-#### External Context Retrieval
-
+### External Context Retrieval
 Stage 4 uses the OpenAI Responses API `web_search` tool as an optional built-in tool.
 The request provides:
 ```json
@@ -1366,173 +675,118 @@ Persistence:
 
 ---
 
-### 5.9 Validation & Retry
+## 7. Project Structure & Engineering Rules
 
-### Technical Failure
+### 7.1 Project Structure
 
-Examples:
+当前目录保持平铺结构。
+
 ```text
-timeout
-rate limit
-API error
-network error
-```
-Retry the same request with limited retries.
-
-### Invalid Output
-Examples:
-```text
-schema validation failure
-missing required fields
-invalid IDs
-```
-Allow a limited retry.
-If still unsuccessful:
-```text
-mark processing as failed
-record error
-allow later manual/job retry
-```
-Do not silently accept invalid structured output.
-
----
-
-### 5.10 Prompt Versioning
-Prompt 文件随项目代码通过 Git 进行版本管理。
-当 Prompt 发生影响模型行为的修改时，更新对应 Stage 的版本号，例如：
-Stage 1 → v2
-Stage 2 → v1
-Stage 3 → v3
-Stage 4 → v5
-
-每次 Daily Workflow 执行时，在运行日志中记录：
-date
-model
-stage1_prompt_version
-stage2_prompt_version
-stage3_prompt_version
-stage4_prompt_version
-
----
-
-## 6. Project Structure & Engineering Rules
-目录、模块边界、环境变量、日志、测试以及 Codex 应遵守的基本规范。
-
-### 6.1 Project Structure
-
-MVP 采用单一 Next.js 项目，不拆分独立 Backend Service。
-建议目录：
-```text
-x-ai-field/
+X-AI-field/
 ├── src/
-│   ├── app/                 # Next.js pages / API
-│   │
-│   ├── db/
-│   │   ├── schema.ts
-│   │   └── index.ts
-│   │
+│   ├── app/
+│   │   └── api/brief/                 # Daily Brief HTTP API
 │   ├── collectors/
-│   │   ├── rss.ts
-│   │   ├── email.ts
-│   │   └── web.ts
-│   │
+│   │   └── rss.ts                     # RSS collection / normalization
+│   ├── db/
+│   │   ├── index.ts                   # PostgreSQL connection
+│   │   └── schema.ts                  # Drizzle schema
+│   ├── lib/
+│   │   ├── brief-date.ts              # Brief date / timezone helpers
+│   │   └── daily-brief.ts             # API composition queries
 │   ├── processing/
-│   │   ├── stage1.ts
-│   │   ├── stage2.ts
-│   │   ├── stage3.ts
-│   │   └── stage4.ts
-│   │
-│   ├── prompts/
-│   │   ├── stage1.ts
-│   │   ├── stage2.ts
-│   │   ├── stage3.ts
-│   │   └── stage4.ts
-│   │
-│   └── lib/
+│   │   ├── content-completion.ts       # Stage 0: Sparse content completion
+│   │   ├── event-date.ts               # Deterministic event_date
+│   │   ├── openai-client.ts            # Shared LLM client
+│   │   ├── science-publication.ts      # Science publication enrichment
+│   │   ├── stage1-*.ts                 # Stage 1 contract / LLM / job
+│   │   ├── stage2-*.ts                 # Stage 2 candidates / contract / LLM / job / runtime
+│   │   ├── stage3-*.ts                 # Stage 3 ranking / dedup / persistence
+│   │   └── stage4-*.ts                 # Stage 4 contract / LLM / job / persistence
+│   └── prompts/
+│       ├── stage1-content-understanding.ts
+│       ├── stage2-event-merge.ts
+│       ├── stage3-event-ranking.ts
+│       ├── stage3-digest-ranking.ts
+│       ├── stage3-long-form-ranking.ts
+│       └── stage4-event-enrichment.ts
 │
-├── scripts/
-│
+├── scripts/                             # CLI entry points / focused tests
+├── drizzle/                             # Database migrations
+├── runtime/                             # Gitignored operational/debug artifacts
 ├── docs/
 │   ├── 01-product-spec.md
 │   ├── 02-ai-workflow-spec.md
 │   ├── 03-prompt-spec.md
 │   ├── 04-technical-spec.md
-│   └── 05-source-list.md
-│
+│   ├── 05-source-list.md
+│   └── 06-workflow-overview.md
 ├── AGENTS.md
 └── README.md
 ```
 
-### 6.2 Module Boundaries
+### 7.2 Module Boundaries
 
 保持各模块职责单一：
 ```text
-collectors → 获取并规范化外部数据
-
-processing → 控制 Stage 1–4 的 Processing Workflow
-
-prompts → 定义 LLM Prompt
-
-db → Schema 和数据库访问
-
-app → API 和页面
+collectors  → 外部数据采集 / 标准化
+processing  → Stage 1–4 workflow + persistence
+prompts     → Runtime LLM prompts
+db          → Schema / DB connection
+lib         → API composition / shared application helpers
+app.        → HTTP presentation layer
+runtime     → Debug / operational artifacts，不是数据库
 ```
 
-避免把：
-* 数据抓取；
-* Prompt；
-* 数据库操作；
-* 页面逻辑
-混合在同一个模块中。
+### 7.3 Engineering Principles
 
-### 6.3 Engineering Principles
+- KISS / YAGNI / LLM-first
+- Secrets / environment config / Model / Prompt version 不硬编码
+- Structured Output 必须验证后再使用
+- 优先使用成熟 Library，不重复实现基础能力
+- 不静默忽略错误
+- 不为未出现的问题提前引入基础设施或抽象层
+- 保持模块职责清晰
 
-开发优先遵循：
-* KISS
-* YAGNI
-* 保持模块职责清晰
-* 优先使用成熟 Library，不重复实现基础能力
-* 不为尚未出现的问题增加抽象层
-* 新增复杂基础设施前，应有明确的实际需求
-
-MVP 暂不引入：
-* Microservices
-* Message Queue
-* Workflow Engine
-* Agent Framework
-* Repository / Service 等无实际必要的抽象层
-
-### 6.4 Type & Schema
-
-数据库 Schema、Structured Output 和核心数据结构应保持类型明确。
-避免在应用代码中重复定义相同的数据结构。
-LLM 输出必须经过 Schema Validation 后才能进入后续 Workflow。
-
-### 6.5 Configuration
-
-以下配置不得硬编码在业务逻辑中：
-* Database connection
-* LLM API key
-* Model
-* Prompt version
-* Cron configuration
-* External API credentials
-Secrets 通过 Environment Variables 管理。
-
-### 6.6 Error Handling
+### 7.4 Error Handling
 
 * 错误应在最接近发生位置处理和记录。
 * 单个 Source、Article 或 LLM Request 的失败不应导致无关任务的数据丢失。
 * 允许失败任务独立重试。
 * 不要静默忽略错误。
 
-### 6.7 Testing
+### 7.5 Testing
 
-MVP 优先测试真正影响 Pipeline 正确性的部分：
-* Collector normalization
-* Database constraints
-* Structured Output validation
-* Workflow state transitions
-* Ranking / display rank update
+保留影响 Pipeline 正确性的测试：
+- DB constraints / migrations
+- Structured Output validation
+- Ranking / display_rank semantics
+- Stage 4 rebuild / rollback
+- deterministic event_date
 
-Prompt 内容质量主要通过真实 Daily Brief + Human Feedback 评估，不为自然语言判断编写大量脆弱的传统 Unit Tests。
+---
+
+## 8. Daily Workflow Orchestrator
+
+当前已实现统一 Orchestrator，按顺序调用现有命令：
+
+```bash
+npm run daily
+```
+
+完成 Stage 4 后，`/api/brief` 可直接读取 publish-ready 数据。
+
+未来：
+```text
+09:00 Asia/Shanghai Cron → Daily Workflow Orchestrator
+```
+
+---
+
+## 9. Runtime Artifacts
+
+`runtime/` 保存 Stage 2–4 的真实 input / output / mapping / run metadata，用于 Debug、Review、重跑边界。
+
+它不是应用数据库，也不是长期业务 Source of Truth，并保持 Git ignored。
+
+Stage 4 rebuild 当前依赖最近一次成功 run 的 `persistence.json`，因此不要随意删除最新成功的 Stage 4 runtime 目录。

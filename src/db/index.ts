@@ -4,7 +4,7 @@ import * as schema from "./schema.js";
 
 let pool: Pool | null = null;
 
-export function getDatabase() {
+export function getDatabasePool() {
   const connectionString = process.env.DATABASE_URL;
 
   if (!connectionString) {
@@ -21,7 +21,11 @@ export function getDatabase() {
         : undefined,
   });
 
-  return drizzle(pool, { schema });
+  return pool;
+}
+
+export function getDatabase() {
+  return drizzle(getDatabasePool(), { schema });
 }
 
 export type Database = ReturnType<typeof getDatabase>;

@@ -1,68 +1,60 @@
 # X-AI-field
 
-X-AI-field 是一个 AI 驱动的信息筛选系统。
-
-系统从可信信息源持续收集财经、商业、科技和科学内容，通过 AI 完成内容理解、筛选、事件合并、排序、摘要和中文翻译，并生成一份帮助用户了解每天最重要的商业、科技和财经事件的中文 Daily Brief。
+X-AI-field 是一个 AI 驱动的信息筛选系统：持续收集可信信息源，通过 AI 完成理解、筛选、事件合并、排序、摘要和事件补全，并生成一份帮助用户了解每天最重要的财经、商业、科技和科学事件的中文 Daily Brief。
 
 ## Current Status
 
 已完成：
-- Product Spec
-- AI Workflow Spec
-- Prompt Spec
-- Technical Spec
+- Product / AI Workflow / Prompt / Technical Spec
 - Source List
-- RSS ingestion spike
-- Project Bootstrap
-- PostgreSQL / Supabase / Drizzle setup and migrations
-- Source List Import
-- RSS Collector
-- Content Completion for sparse RSS items
-- Stage 1 Contract / LLM validation
-- Stage 1 Batch Processing & Persistence
-- Stage 2 — Event Merge, with runtime artifacts
-- Stage 3 — Top N Event selection, exact dedup, Science publication enrichment, and Channel Ranking
-- Stage 4 — Selected Event Enrichment
+- Project Bootstrap / PostgreSQL / Supabase / Drizzle persistence
+- RSS Collector / Content Completion
+- Stage 1 - Content Understanding & Selection
+- Stage 2 - Event Merge
+- Stage 3 - Channel Ranking + Exact Dedup
+- Stage 4 — Selected Event Enrichment + Optional Web Search
+- Daily Workflow Orchestrator
+- Daily Brief API `GET /api/brief?date=YYYY-MM-DD`
 
-下一阶段：
-- 实现 Daily Brief API 和基础页面
-- 实现 Daily Brief composition / Top N presentation rules
+下一步：
+- X-field Daily Brief 页面
+- 09:00 Asia/Shanghai Cron
 - 增加 Review / feedback workflow
 
-## Core Features
-
-### Daily Brief
+## Daily Brief
 
 Daily Brief 包含四个部分：
 
-- **Today's Events** — 合并不同媒体对同一重大事件的报道，并保留来源差异。
-- **Source Digests** — 按来源整理当天值得关注的科技、商业和科学内容。
-- **Long-form Reads** — 筛选值得投入时间认真阅读的深度内容。
-- **Daily Inspiration** — 展示 xkcd、NASA Image of the Day 等轻量内容。
+- **Today's Events** — 重大事件，多来源合并并保留来源差异
+- **Source Digests** — 按 Category 排序值得关注的科技、商业和科学内容
+- **Long-form Reads** — 值得投入时间完整阅读的深度内容
+- **Daily Inspiration** — xkcd、NASA Image of the Day 等轻量内容
 
-### AI Processing Pipeline
+## AI Processing Pipeline
 
 ```text
-Source Collection
-        ↓
-Raw Articles -> eligible ? complete:content
-        ↓
-Stage 1: Content Understanding & Selection
-        ↓
-Routing
-        ↓
+RSS Sources
+    ↓
+Collection → Content Completion
+    ↓
+Stage 1 - Understand / Select / Route
+    ↓
 Event / Digest / Long-form / Inspiration
-        ↓
-Stage 2: Merge Events
-        ↓
-Stage 3: Channel Ranking
-        ↓
-Stage 4: Selected Event Enrichment
-        ↓
-Daily Brief
+    ↓
+Stage 2 - Merge Event Candidates
+    ↓
+Stage 3 - Channel Ranking + Exact Dedup
+    ↓
+Top Events → Stage 4 - Event Enrichment (+ optional Web Search)
+    ↓
+PostgreSQL
+    ↓
+Daily Brief API
 ```
 
-### Human Feedback
+完整工作流见 `docs/06-workflow-overview.md`。
+
+## Human Feedback
 
 支持人工：
 * 删除 False Positive
@@ -73,99 +65,102 @@ Daily Brief
 人工反馈用于后续 Eval 和 Prompt 优化。
 
 ## Tech Stack
-* Application: Next.js
-* Language: TypeScript
-* Database: PostgreSQL / Supabase
+* App: Next.js + TypeScript
+* DB: PostgreSQL / Supabase
 * ORM: Drizzle ORM
-* AI: LLM + Structured Output
+* AI: OpenAI Responses API + Structured Output + optional Web Search
 * Scheduling: Cron / Scheduled Job
 
 MVP 使用单一 Next.js Application，不引入 Microservices、Message Queue、Workflow Engine 或复杂 Agent Framework。
 
 ## Local Development
 
-### Requirements
-
-* Node.js 20+
-* npm
-* PostgreSQL connection string, for example from Supabase
-
-### Setup
-
 ```bash
 npm install
 cp .env.example .env.local
+npm run dev
 ```
 
-Update `.env.local` with the real database connection:
+核心环境变量：
 
 ```bash
 DATABASE_URL="postgresql://..."
 DATABASE_SSL="true"
 OPENAI_API_KEY="..."
-OPENAI_BASE_URL="openai_url"
+OPENAI_BASE_URL="..."
 OPENAI_MODEL="gpt-5.4"
 ```
 
-### Commands
+### Main Commands
 
 ```bash
-npm run dev                              # Start the Next.js development server
-npm run lint                             # Run ESLint
-npm run typecheck                        # Run TypeScript type checking
+npm run dev                              # Next.js dev server
+npm run lint
+npm run typecheck
 npm run build                            # Build the Next.js app
 
 npm run db:generate                      # Generate Drizzle migrations from src/db/schema.ts
-npm run db:check                         # Validate Drizzle migration metadata
 npm run db:migrate                       # Apply Drizzle migrations
-npm run db:seed                          # Sync docs/05-source-list.md into the sources table
+npm run db:seed                          # Sync docs/05-source-list.md → sources
 
-npm run collect:rss                      # Collect enabled RSS sources into raw_articles
-npm run complete:content                 # 对 raw_articles.content_text 内容不足的文章补充正文
-npm run process:stage1                   # Stage 1: process raw_articles from the last 24 hourspending raw_articles from the last 24 hours
-npm run process:stage2                   # Stage 2: merge Event candidates and write runtime artifacts
-npm run process:stage3                   # Stage 3: rank Events / Digest / Long-form and persist ranks
-npm run process:stage4                   # Stage 4: enrich selected Events and persist events
+npm run collect:rss
+npm run complete:content                 # rss.content_text 内容不足的补充正文
+npm run process:stage1                   # Stage 1: Process the last 24 hours info
+npm run process:stage2                   # Stage 2: Merge Event and write runtime
+npm run process:stage3                   # Stage 3: Channel rank and persist
+npm run process:stage4                   # Stage 4: enrich Events and persist events
+npm run daily                            # Run the complete daily pipeline.
 
-npm run test:openai                      # Run one minimal model connectivity check
-npm run test:stage3-persistence          # Validate Stage 3 display_rank protection rules
-npm run test:stage4-event-date           # Validate deterministic event_date derivation
-npm run test:stage4-persistence          # Validate Stage 4 rebuild / rollback persistence rules
+# npm run test:stage3-persistence          # Validate Stage 3 display_rank protection rules
+# npm run test:stage4-event-date           # Validate deterministic event_date derivation
+# npm run test:stage4-persistence          # Validate Stage 4 rebuild / rollback persistence rules
 ```
 
-Useful workflow environment controls:
+常用运行参数：
+
 ```bash
 STAGE1_LIMIT=20 npm run process:stage1
 STAGE1_CONCURRENCY=2 npm run process:stage1
-STAGE1_COLLECTED_WITHIN_HOURS=24 npm run process:stage1
-
 STAGE3_EVENT_TOP_N=10 npm run process:stage3
 STAGE4_CONCURRENCY=3 npm run process:stage4
 ```
+验证 / Debug 命令保留在 `package.json`，README 不逐一列出。
 
-Runtime/debug artifacts are written under `runtime/`, which is gitignored. The latest successful `runtime/stage4/<timestamp>/persistence.json` is used as the rebuild boundary for Stage 4 derived Events, so do not delete the latest successful Stage 4 runtime directory unless you intentionally want to reset that boundary.
+`runtime/` 保存运行时 input/output/debug artifacts，并被 Git 忽略。
+Stage 4 rebuild 会使用最近一次成功 run 的 `runtime/stage4/<timestamp>/persistence.json`，因此不要随意删除最新成功的 Stage 4 runtime 目录。
 
 ### Updating Sources
 
-1. 更新 `docs/05-source-list.md` 中的 CSV。
-2. Run `npm run db:seed` to sync the `sources` table.
-3. Run `npm run collect:rss` to collect RSS sources.
-4. Run the workflow commands as needed: `collect:rss` → `complete:content` → `process:stage1` → `process:stage2` → `process:stage3` → `process:stage4`.
+1. 更新 `docs/05-source-list.md`。
+2. 执行 `npm run db:seed` sync `sources`.
+3. 需要立即采集RSS时执行 `npm run collect:rss`.
+4. 顺序执行 `collect:rss` → `complete:content` → `process:stage1` → `process:stage2` → `process:stage3` → `process:stage4`.
 
-The source sync uses `Source + Collection Method` as the source identity, so URL changes update existing records.
+Use `Source + Collection Method` as the source identity, so URL changes update existing records.
+
+## Daily Brief API
+
+```text
+GET /api/brief?date=YYYY-MM-DD
+```
+
+返回：
+- `events` — Top 10
+- `digests` — 按 Category 分组，返回全部已排序内容
+- `long_form` — Top 10
+- `inspiration`
+- `meta`
+
+所有可阅读内容都返回原文链接。MVP 使用 `created_at`（Asia/Shanghai）作为 Brief 日期归属依据。
 
 ## Documentation
 
-项目设计以以下文档为准：
-* `docs/01-product-spec.md` — 产品目标、Daily Brief 结构、Selection / Merge / Ranking 原则
-* `docs/02-ai-workflow-spec.md` — AI Processing Stages
-* `docs/03-prompt-spec.md` — LLM Input / Output 和 Prompt Guidelines
-* `docs/04-technical-spec.md` — Architecture、Data Model、Workflow 和工程规范
-* `docs/05-source-list.md` — 信息来源配置
+- `docs/01-product-spec.md` — 产品目标与内容标准
+- `docs/02-ai-workflow-spec.md` — 四个 AI Stage 的职责
+- `docs/03-prompt-spec.md` — LLM Input / Output / Prompt Guidelines
+- `docs/04-technical-spec.md` — 架构、数据、Workflow 与工程约束
+- `docs/05-source-list.md` — Source 配置
+- `docs/06-workflow-overview.md` — 完整项目工作流
 
 ## Engineering Principles
-* KISS
-* YAGNI
-* LLM-first
-* Rules only when necessary
-* 优先解决真实 Failure，不提前设计复杂基础设施
+* KISS · YAGNI · LLM-first · Rules only when necessary
