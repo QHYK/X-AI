@@ -30,6 +30,8 @@ async function main() {
     const startedAt = new Date();
     const result = await processStage2Merge(pool, {
       collectedWithinHours: optionalPositiveInteger(process.env.STAGE2_COLLECTED_WITHIN_HOURS),
+      batchSize: optionalPositiveInteger(process.env.STAGE2_BATCH_SIZE),
+      concurrency: optionalPositiveInteger(process.env.STAGE2_CONCURRENCY),
       model: process.env.OPENAI_MODEL,
     });
     const summary = summarizeStage2Result(result);

@@ -498,8 +498,10 @@ Stage 1 全部可处理内容完成后触发 Stage 2。
 默认时间窗口与 Stage 1 一致，为最近 24 小时 collected 内容。
 
 ```text
-Event Candidates → LLM Merge → Event Groups
+Event Candidates → Local Merge → Cross-batch Reconciliation → Event Groups
 ```
+
+大型候选集采用两阶段合并：先进行本地合并，然后进行跨批次协调。
 
 Stage 2 不写 `events`。Input / Output 和 temp ID mapping 保存到 `runtime/stage2/`。
 

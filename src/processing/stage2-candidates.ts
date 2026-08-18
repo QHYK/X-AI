@@ -7,6 +7,8 @@ export type Stage2CandidateRow = {
   title: string;
   summary: string | null;
   entities: string[] | null;
+  category: string;
+  tags: string[] | null;
   source: string;
   url: string | null;
 };
@@ -47,6 +49,8 @@ export async function loadStage2EventCandidates(
         ra.title,
         pc.summary,
         pc.entities,
+        pc.category,
+        pc.tags,
         s.name as "source",
         ra.url
       from processed_contents pc

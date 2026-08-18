@@ -108,6 +108,38 @@ Each article is evaluated independently, and every input `temp_id` must appear e
 - Every `temp_id` appears exactly once; never invent or modify IDs.
 - `event_hint` is a short description of the real-world event.
 
+### Stage 2B — Cross-batch Reconciliation
+
+Stage 2B receives compact preliminary Event Groups and returns a complete grouping:
+```json
+{
+  "groups": [
+    {
+      "group_id": "G001",
+      "event_hint": "",
+      "candidate_ids": [],
+      "representative_titles": [],
+      "entities": [],
+      "tags": [],
+      "categories": []
+    }
+  ]
+}
+```
+```json
+{
+  "merged_groups": [
+    {
+      "event_hint": "",
+      "group_ids": ["G001", "G014"]
+    }
+  ],
+  "single_group_ids": ["G002"]
+}
+```
+
+Different categories do not prevent merging. Every `group_id` appears exactly once across `merged_groups` and `single_group_ids`; groups merge only when they clearly describe the same real-world event.
+
 ---
 
 ## Stage 3 — Channel Ranking
