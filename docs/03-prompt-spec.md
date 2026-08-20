@@ -163,7 +163,7 @@ Rank by:
 
 ### Common Rules
 - Event Ranking returns at most 50 IDs; Code handles final Top N selection.
-- Digest Ranking may omit lower-value candidates; missing IDs are diagnostic, not failure.
+- Digest Ranking must rank all provided candidates exactly once; missing / duplicate / invalid IDs trigger one repair attempt, and the ranking fails if repair still cannot produce a complete valid ordering.
 - Long-form Ranking ranks all provided IDs exactly once.
 - Returned IDs must come from the corresponding input; ranks start at 1 and remain consecutive.
 - Do not rank only by publish time, breaking-news tone, or source diversity.
