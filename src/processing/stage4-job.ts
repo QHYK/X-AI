@@ -62,6 +62,14 @@ type EnrichedEvent = {
 
 type PreviousStage4PersistenceArtifact = {
   created_event_ids?: string[];
+  event_group_to_event_id?: Record<string, string>;
+};
+
+type PreviousStage4PersistencePlanArtifact = {
+  events?: Array<{
+    event_group_id?: string;
+    event_date?: string;
+  }>;
 };
 
 export type Stage4JobOptions = {
@@ -211,12 +219,20 @@ export async function processStage4(
       (sum, event) => sum + event.toolUsage.webSearchCallCount,
       0,
     );
-    const previousCreatedEventIds = await loadPreviousCreatedEventIds(rootDir, runDir);
+    const rebuildEventDates = uniqueSorted(
+      enriched.map((event) => event.eventDate.eventDate),
+    );
+    const previousCreatedEventIds = await loadPreviousCreatedEventIds(
+      rootDir,
+      runDir,
+      rebuildEventDates,
+    );
     const persistencePlan = {
       previousCreatedEventIds,
       events: enriched.map(toEventToPersist),
     };
     await writeJson(join(runDir, "persistence-plan.json"), {
+      rebuild_event_dates: rebuildEventDates,
       previous_created_event_ids: previousCreatedEventIds,
       events: persistencePlan.events.map((event) => ({
         event_group_id: event.eventGroupId,
@@ -255,6 +271,8 @@ export async function processStage4(
       associations: persistence.associations,
       previous_unlinked_count: persistence.previousUnlinkedCount,
       previous_deleted_count: persistence.previousDeletedCount,
+      cleanup_event_count: persistence.cleanupEventCount,
+      cleanup_event_dates: persistence.cleanupEventDates,
     });
 
     await writeRunJson(runPath, {
@@ -385,7 +403,15 @@ async function assertSuccessfulStage3Run(runDir: string): Promise<void> {
   await stat(join(runDir, "events/selected.json"));
 }
 
-async function loadPreviousCreatedEventIds(rootDir: string, currentRunDir: string): Promise<string[]> {
+async function loadPreviousCreatedEventIds(
+  rootDir: string,
+  currentRunDir: string,
+  rebuildEventDates: string[],
+): Promise<string[]> {
+  if (rebuildEventDates.length === 0) {
+    return [];
+  }
+
   const root = join(rootDir, "runtime/stage4");
   let entries;
   try {
@@ -405,6 +431,7 @@ async function loadPreviousCreatedEventIds(rootDir: string, currentRunDir: strin
     .sort()
     .reverse();
 
+  const eventIds = new Set<string>();
   for (const candidate of candidates) {
     try {
       const run = await readJson<{ status?: string }>(join(candidate, "run.json"));
@@ -412,7 +439,12 @@ async function loadPreviousCreatedEventIds(rootDir: string, currentRunDir: strin
         join(candidate, "persistence.json"),
       );
       if (run.status === "success" && Array.isArray(persistence.created_event_ids)) {
-        return persistence.created_event_ids;
+        const scopedIds = await loadScopedPreviousCreatedEventIds(
+          candidate,
+          persistence,
+          rebuildEventDates,
+        );
+        scopedIds.forEach((id) => eventIds.add(id));
       }
     } catch (caught) {
       if (!isMissingPathError(caught)) {
@@ -421,7 +453,35 @@ async function loadPreviousCreatedEventIds(rootDir: string, currentRunDir: strin
     }
   }
 
-  return [];
+  return [...eventIds];
+}
+
+async function loadScopedPreviousCreatedEventIds(
+  runDir: string,
+  persistence: PreviousStage4PersistenceArtifact,
+  rebuildEventDates: string[],
+): Promise<string[]> {
+  const plan = await readJson<PreviousStage4PersistencePlanArtifact>(
+    join(runDir, "persistence-plan.json"),
+  );
+  const eventGroupToEventId = persistence.event_group_to_event_id ?? {};
+  const ids: string[] = [];
+
+  for (const event of plan.events ?? []) {
+    if (!event.event_group_id || !event.event_date) {
+      continue;
+    }
+    if (!rebuildEventDates.includes(event.event_date)) {
+      continue;
+    }
+
+    const eventId = eventGroupToEventId[event.event_group_id];
+    if (eventId) {
+      ids.push(eventId);
+    }
+  }
+
+  return ids;
 }
 
 async function loadSourceDetails(
@@ -578,6 +638,10 @@ async function writeJson(path: string, value: unknown): Promise<void> {
 
 function toRunTimestamp(date: Date): string {
   return date.toISOString().replaceAll(":", "-").replaceAll(".", "-");
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort();
 }
 
 function isMissingPathError(error: unknown): boolean {

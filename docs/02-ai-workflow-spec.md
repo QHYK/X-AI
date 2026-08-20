@@ -82,6 +82,9 @@ Event Candidates
 - 不因相同主题、国家或公司而误合并
 - 无明确匹配时保持独立 Event Group
 
+当前 runtime 的 assignment validation 处于临时 diagnostic 模式：missing、duplicate 和
+invented ID 会被记录，但暂不阻断输出。这是已知实现限制，不改变上述长期 contract。
+
 ---
 
 ## Stage 3 — Channel Ranking
@@ -110,7 +113,7 @@ Long-form   → 全局排序：什么最值得投入阅读时间？
 
 **Output**
 - Rank
-- Ranking Reason（当前用于 review/debug）
+<!-- - Ranking Reason（当前用于 review/debug） -->
 
 **Definition of Done**
 - Event 排序反映事件相对重要性

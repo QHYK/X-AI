@@ -37,7 +37,7 @@ feedback
 ### 1.2 Processing Layer
 
 ```text
-Source Collection → Content Completion → Stage 1 → Stage 2 → Stage 3 → Exact Dedup → Stage 3 → Stage 4
+Source Collection → Content Completion → Stage 1 → Stage 2 → Stage 3 → Stage 4
 ```
 
 详细 LLM 逻辑见 `02-ai-workflow-spec.md`，`03-prompt-spec.md`，完整项目流程见 `06-workflow-overview.md`。
@@ -376,9 +376,9 @@ Cron 09:00
     ↓
 Collection
     ↓
-Stage 1: Content Understanding & Selection
-    ↓
 Content Completion
+    ↓
+Stage 1: Content Understanding & Selection
     ↓
 Stage 2: Merge Events
     ↓
@@ -509,8 +509,8 @@ Event Candidates
 Stage 2 不进行 batch merge 或 reconciliation，也不写 `events`。
 Input / Output、temp ID mapping 和 run metadata 保存到 `runtime/stage2/`。
 
-当前为验证 Stage 3 / Stage 4 数据链路，Stage 2 assignment validation 会记录 missing /
-duplicate / invented IDs，但暂时不阻断 runtime output；恢复正式 Daily Workflow 前必须恢复严格校验。
+Stage 2 assignment validation 当前处于临时 diagnostic 模式：记录 missing / duplicate /
+invented IDs，但暂时不阻断 runtime output。这是已知限制，后续单独决定何时恢复 blocking validation。
 
 ### 4.7 Stage 3
 
@@ -568,7 +568,9 @@ Event persistence
 
 - Web Search 使用 Responses API `web_search` + `tool_choice: auto`。
 - 是否真实搜索 由 Application Code 从 tool usage 判断，不完全信任模型自报。
-- 所有 Event enrichment 成功后，再使用单一 transaction rebuild 当前 workflow-derived Events，避免半套新旧数据。
+- 所有 Event enrichment 成功后，再使用单一 transaction 持久化当前 workflow-derived Events，避免半套新旧数据。
+- Stage 4 persistence 对不同 `event_date` 采用 append 语义；重跑时只允许 rebuild 当前输出涉及的 `event_date` scope。
+- 删除上一轮派生 Events 前必须校验 cleanup candidates 的 `event_date` 全部属于当前 rebuild scope；如果包含其他日期，应直接失败而不是静默删除。
 
 Stage 4 完成后：
 1. 写入 `events`
@@ -593,7 +595,7 @@ Daily Workflow 必须可以安全重复执行。
 - Stage 1：只处理 `stage1_status = pending`；`processed_contents.raw_article_id` UNIQUE
 - Stage 2：只生成当前 Workflow 使用的 Event Groups，不直接持久化 events.runtime Event Groups 可安全重算
 - Stage 3：覆盖 `ai_rank`，保护人工 `display_rank`
-- Stage 4：通过最近成功 `runtime/stage4/.../persistence.json` 识别上一轮派生 Events，unlink → delete → rebuild → relink
+- Stage 4：根据当前输出的 `event_date` scope，从历史 `runtime/stage4/.../persistence.json` / `persistence-plan.json` 中识别同一日期 scope 的上一轮派生 Events，unlink → delete → rebuild → relink；不同 `event_date` 的历史 Events 必须保留。
 
 ---
 
@@ -632,7 +634,7 @@ LLM Response → Structured Output → Schema Validation → Application Logic
 
 Prompt 发生影响行为的变化时更新版本号，并在 runtime log 中记录版本。
 Prompt 文件随项目代码通过 Git 进行版本管理。
-当前版本以 runtime prompt 文件为准。
+Prompt 行为以 `03-prompt-spec.md` 为 Source of Truth；runtime prompt 与 Structured Output contract 必须保持同步。
 
 正式 Daily Workflow 使用静态 per-stage provider 配置：
 ```text
@@ -648,8 +650,8 @@ Shared compatibility layer 支持 OpenAI / DeepSeek / Kimi；Kimi 当前不用�
 
 OpenAI 继续使用 Responses API；DeepSeek / Kimi 使用各自的 OpenAI-compatible Chat Completions API。
 所有 provider 输出原则上都必须经过相同的 Application Schema Validation 后才能使用或持久化。
-Stage 2 当前为生成 Stage 3 / Stage 4 验证数据而临时旁路严格 output / assignment 拒绝逻辑，
-该例外不代表正式长期 contract。
+Stage 2 当前处于临时 diagnostic 模式，严格 output / assignment 问题会被记录但不阻断 runtime output；
+该例外是已知限制，不改变 Prompt Spec 定义的长期 contract。
 OpenAI / Kimi 请求 provider-side JSON Schema Structured Output；
 DeepSeek 当前使用官方 JSON Object mode 并在 instruction 中提供 schema，返回结果仍须通过相同的严格 Application validation。
 
@@ -726,7 +728,6 @@ X-AI-field/
 │   │   ├── content-completion.ts       # Stage 0: Sparse content completion
 │   │   ├── event-date.ts               # Deterministic event_date
 │   │   ├── llm-client.ts               # Shared provider selection / LLM client
-│   │   ├── openai-client.ts            # OpenAI-only file-input spike client
 │   │   ├── science-publication.ts      # Science publication enrichment
 │   │   ├── stage1-*.ts                 # Stage 1 contract / LLM / job
 │   │   ├── stage2-*.ts                 # Stage 2 candidates / contract / LLM / job / runtime
@@ -818,4 +819,4 @@ npm run daily
 
 它不是应用数据库，也不是长期业务 Source of Truth，并保持 Git ignored。
 
-Stage 4 rebuild 当前依赖最近一次成功 run 的 `persistence.json`，因此不要随意删除最新成功的 Stage 4 runtime 目录。
+Stage 4 rebuild 使用 runtime artifacts 识别同一 `event_date` scope 的上一轮派生 Events。runtime artifacts 也用于 Debug、Review 和必要时的数据恢复分析；不要把它作为 Stage 间传递数据的正式接口。

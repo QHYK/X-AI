@@ -54,6 +54,15 @@ Daily Brief API
 
 完整工作流见 `docs/06-workflow-overview.md`。
 
+当前正式 provider routing：
+
+| Stage | Provider |
+| --- | --- |
+| Stage 1 | OpenAI |
+| Stage 2 | DeepSeek |
+| Stage 3 | OpenAI |
+| Stage 4 | OpenAI |
+
 ## Human Feedback
 
 支持人工：
@@ -68,7 +77,7 @@ Daily Brief API
 * App: Next.js + TypeScript
 * DB: PostgreSQL / Supabase
 * ORM: Drizzle ORM
-* AI: OpenAI Responses API + Structured Output + optional Web Search
+* AI: OpenAI Responses API、DeepSeek OpenAI-compatible API、Structured Output、optional Web Search
 * Scheduling: Cron / Scheduled Job
 
 MVP 使用单一 Next.js Application，不引入 Microservices、Message Queue、Workflow Engine 或复杂 Agent Framework。
@@ -108,25 +117,27 @@ npm run typecheck
 npm run build                            # Build the Next.js app
 
 npm run db:generate                      # Generate Drizzle migrations from src/db/schema.ts
-npm run db:migrate                       # Apply Drizzle migrations
+npm run db:migrate                       # Apply Drizzle
+npm run db:check                         # 检查 Drizzle migration 一致性
 npm run db:seed                          # Sync docs/05-source-list.md → sources
 
-npm run collect:rss
-npm run complete:content                 # rss.content_text 内容不足的补充正文
-npm run process:stage1                   # Stage 1: Process the last 24 hours info
-npm run process:stage2                   # Stage 2: Merge Event and write runtime
-npm run process:stage3                   # Stage 3: Channel rank and persist
-npm run process:stage4                   # Stage 4: enrich Events and persist events
 npm run daily                            # Run the complete daily pipeline.
+npm run collect:rss                      # RSS sources → `raw_articles`
+npm run complete:content                 # rss.content_text 内容不足的补充正文
+npm run process:stage1                   # Stage 1: Process the last 24 hours Raw Articles
+npm run process:stage2                   # Stage 2: Merge Event and write runtime intermediate data
+npm run process:stage3                   # Stage 3: Channel rank, exact dedup and persist
+npm run process:stage4                   # Stage 4: enrich Events and persist events
 
-npm run test:openai                      # Structured-output provider smoke test
+#### Tests and Diagnostics
+# npm run test:stage3-persistence          # Validate Stage 3 display_rank protection rules
+# npm run test:stage4-event-date           # Validate deterministic event_date 推导
+# npm run test:stage4-persistence          # 验证 Stage 4 跨日 append、同日 rebuild 和 rollback
+npm run test:openai                      # Structured-output provider smoke testsmoke test
 npm run test:deepseek
 npm run test:kimi
 
-# npm run test:stage3-persistence          # Validate Stage 3 display_rank protection rules
-# npm run test:stage4-event-date           # Validate deterministic event_date derivation
-# npm run test:stage4-persistence          # Validate Stage 4 rebuild / rollback persistence rules
-```
+npm run recover:stage4-events:dry-run      # 只读分析 Stage 4 runtime 与数据库，输出可恢复候选，不写库
 
 常用运行参数：
 
@@ -136,10 +147,17 @@ STAGE1_CONCURRENCY=2 npm run process:stage1
 STAGE3_EVENT_TOP_N=10 npm run process:stage3
 STAGE4_CONCURRENCY=3 npm run process:stage4
 ```
-验证 / Debug 命令保留在 `package.json`，README 不逐一列出。
-
 `runtime/` 保存运行时 input/output/debug artifacts，并被 Git 忽略。
-Stage 4 rebuild 会使用最近一次成功 run 的 `runtime/stage4/<timestamp>/persistence.json`，因此不要随意删除最新成功的 Stage 4 runtime 目录。
+Stage 4 persistence 会使用最近一次成功 runtime artifacts 识别同一 `event_date` scope 的上一轮输出，因此不要随意删除仍参与 rebuild/recovery 的 Stage 4 runtime 目录。
+
+### Production
+
+```bash
+npm run build
+npm run start
+```
+
+当前不内置 Cron。部署环境可由外部 scheduler 在 `09:00 Asia/Shanghai` 触发 `npm run daily`。
 
 ### Updating Sources
 

@@ -1,23 +1,20 @@
-export type Stage3DigestRankingCandidate = {
-  id: string;
-  title: string;
-  summary: string;
-  source: string;
-  publication?: string | null;
-};
+import type { Stage3DigestRankingCandidate } from "./stage3-digest-ranking.js";
 
-export type Stage3DigestRankingInput = {
+export type Stage3DigestRepairInput = {
   category: string;
-  candidates: Stage3DigestRankingCandidate[];
+  ranked_candidates: Stage3DigestRankingCandidate[];
+  missing_candidates: Stage3DigestRankingCandidate[];
+  duplicate_ids: string[];
 };
 
-export const STAGE3_DIGEST_RANKING_PROMPT_VERSION = "v3";
+export const STAGE3_DIGEST_REPAIR_PROMPT_VERSION = "v2";
 
-export function buildStage3DigestRankingInstructions(category: string): string {
+export function buildStage3DigestRepairInstructions(): string {
   return [
-    "You are Stage 3 of X-AI-field: Source Digest Ranking.",
-    `Rank all provided Source Digest candidates within the "${category}" category.`,
-    "Return only the structured output. Do not write prose outside the JSON schema.",
+    "You are repairing an incomplete Source Digest ranking.",
+    "Use the existing ranking as the baseline.",
+    "Evaluate the missing candidates using the same ranking criteria,",
+    "then insert them into their appropriate positions.",
     "",
     "Goal:",
     "- Answer: within this category, which Source Digest items are most worth paying attention to today?",
@@ -55,14 +52,17 @@ export function buildStage3DigestRankingInstructions(category: string): string {
     "",
     "Output rules:",
     "- Return a single `ordered_ids` array; its order is the final ranking.",
-    "- `ordered_ids[0]` is rank 1, `ordered_ids[1]` is rank 2, and so on.",
     "- Use exact input candidate IDs; do not invent or modify IDs.",
-    "- Include every input candidate ID exactly once.",
-    "- Do not duplicate IDs.",
+    "- Include every ranked and missing candidate ID exactly once.",
+    "- Remove duplicate occurrences.",
+    "- Preserve the existing relative order unless moving an existing item is clearly necessary to produce a coherent ranking after inserting the missing candidates.",
+    "- The primary goal is to repair completeness, not to re-rank the list from scratch.",
+    "- Preserve the existing relative order as much as possible.",
+    "- Insert missing IDs into the most appropriate positions.",
     "- Do not output `reason`, prose, or any field other than `ordered_ids`.",
   ].join("\n");
 }
 
-export function buildStage3DigestRankingUserPrompt(input: Stage3DigestRankingInput): string {
+export function buildStage3DigestRepairUserPrompt(input: Stage3DigestRepairInput): string {
   return JSON.stringify(input, null, 2);
 }

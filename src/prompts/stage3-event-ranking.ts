@@ -1,4 +1,4 @@
-import type { Stage3EventRankingInput } from "../processing/stage3-validation-input.js";
+import type { Stage3EventRankingInput } from "../processing/stage3-contract.js";
 
 export const STAGE3_EVENT_RANKING_PROMPT_VERSION = "v3";
 

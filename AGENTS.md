@@ -14,7 +14,7 @@ Do not treat this file as a replacement for the Specs.
 3. 如果任务影响 AI Workflow，阅读 `02-ai-workflow-spec.md`。
 4. 如果任务涉及 LLM 行为或 Prompt，阅读 `03-prompt-spec.md`。
 5. 如果任务涉及架构、数据库、Workflow 或项目结构，阅读 `04-technical-spec.md`。
-6. 如果任务涉及项目工作流程，阅读`06-workflow-overview.md`.
+6. 如果任务涉及项目工作流程，阅读 `06-workflow-overview.md`。
 7. 只读取实现当前任务范围内的内容。
 
 如果实现需求与现有 Spec 冲突，不要自行修改架构或绕过 Spec，应先明确指出冲突。
@@ -83,6 +83,7 @@ LLM 行为和 Structured Output 遵循：`03-prompt-spec.md`
 * Error 应尽可能在发生位置处理和记录。
 * 不要静默忽略 Error。
 * Workflow 应遵守 Technical Spec 中定义的 Idempotency 要求。
+* Prompt Spec、runtime prompt 和 Structured Output contract 必须保持一致；修改其中一项时同步检查另外两项。
 
 ## Testing
 

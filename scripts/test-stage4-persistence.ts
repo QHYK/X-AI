@@ -15,6 +15,18 @@ type Check = {
   detail?: unknown;
 };
 
+type EventSnapshot = {
+  id: string;
+  event_date: string;
+  title: string;
+  ai_rank: number | null;
+  display_rank: number | null;
+};
+
+const DAY_1 = "2026-08-18";
+const DAY_2 = "2026-08-19";
+const EVENT_COUNT = 10;
+
 async function main() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
@@ -35,72 +47,74 @@ async function main() {
   const checks: Check[] = [];
   try {
     await client.query("begin");
-    const processedContentIds = await loadTwoEventProcessedContentIds(client);
-    const [firstProcessedContentId, secondProcessedContentId] = processedContentIds;
+    const processedContentIds = await loadEventProcessedContentIds(client);
 
-    const firstRun = await persistStage4Events(client, {
+    const day1 = await persistStage4Events(client, {
       previousCreatedEventIds: [],
-      events: [sampleEvent("EV_TEST_A", [firstProcessedContentId], 3)],
+      events: sampleEvents("DAY1", DAY_1, processedContentIds),
     });
-    const firstEventId = firstRun.createdEventIds[0];
-    const firstEvent = await loadEventRow(client, firstEventId);
-    const firstAssociation = await loadProcessedContentEventId(client, firstProcessedContentId);
+    const day1Snapshot = await loadEventSnapshots(client, day1.createdEventIds);
+
+    const day2Old = await persistStage4Events(client, {
+      previousCreatedEventIds: [],
+      events: sampleEvents("DAY2_OLD", DAY_2, processedContentIds),
+    });
 
     checks.push({
-      name: "A. first run creates event and association",
+      name: "Cross-date append keeps Day 1 and creates Day 2",
       passed:
-        firstRun.createdEventIds.length === 1 &&
-        firstRun.associations[0]?.updated_count === 1 &&
-        firstAssociation === firstEventId,
-    });
-    checks.push({
-      name: "D. external_context false persists as null",
-      passed: firstEvent.externalContext === null,
-    });
-    checks.push({
-      name: "E. rank writes ai_rank and display_rank",
-      passed: firstEvent.aiRank === 3 && firstEvent.displayRank === 3,
-      detail: firstEvent,
-    });
-    checks.push({
-      name: "F. event_tags/event_tags_zh map to tags/tags_zh",
-      passed:
-        JSON.stringify(firstEvent.tags) === JSON.stringify(["test-tag"]) &&
-        JSON.stringify(firstEvent.tagsZh) === JSON.stringify(["测试标签"]),
-      detail: firstEvent,
+        day1.createdEventIds.length === EVENT_COUNT &&
+        day2Old.createdEventIds.length === EVENT_COUNT &&
+        day2Old.previousDeletedCount === 0 &&
+        (await countExistingEvents(client, [...day1.createdEventIds, ...day2Old.createdEventIds])) ===
+          EVENT_COUNT * 2,
     });
 
-    const rebuild = await persistStage4Events(client, {
-      previousCreatedEventIds: firstRun.createdEventIds,
-      events: [sampleEvent("EV_TEST_B", [secondProcessedContentId], 2)],
+    const day2New = await persistStage4Events(client, {
+      previousCreatedEventIds: day2Old.createdEventIds,
+      events: sampleEvents("DAY2_NEW", DAY_2, processedContentIds),
     });
-    const rebuiltEventId = rebuild.createdEventIds[0];
+    const day1AfterDay2Rebuild = await loadEventSnapshots(client, day1.createdEventIds);
+
     checks.push({
-      name: "B. rebuild unlinks/deletes previous derived event and relinks current event",
+      name: "Same-date rebuild replaces only Day 2",
       passed:
-        rebuild.previousDeletedCount === 1 &&
-        rebuild.createdEventIds.length === 1 &&
-        (await eventExists(client, firstEventId)) === false &&
-        (await loadProcessedContentEventId(client, firstProcessedContentId)) === null &&
-        (await loadProcessedContentEventId(client, secondProcessedContentId)) === rebuiltEventId,
+        snapshotsEqual(day1Snapshot, day1AfterDay2Rebuild) &&
+        (await countExistingEvents(client, day1.createdEventIds)) === EVENT_COUNT &&
+        (await countExistingEvents(client, day2Old.createdEventIds)) === 0 &&
+        (await countExistingEvents(client, day2New.createdEventIds)) === EVENT_COUNT &&
+        (await countExistingEvents(client, [...day1.createdEventIds, ...day2New.createdEventIds])) ===
+          EVENT_COUNT * 2 &&
+        day2New.previousDeletedCount === EVENT_COUNT &&
+        day2New.cleanupEventCount === EVENT_COUNT &&
+        JSON.stringify(day2New.cleanupEventDates) === JSON.stringify([DAY_2]),
+      detail: {
+        previousDeletedCount: day2New.previousDeletedCount,
+        cleanupEventCount: day2New.cleanupEventCount,
+        cleanupEventDates: day2New.cleanupEventDates,
+      },
     });
 
-    await client.query("savepoint stage4_rollback_case");
+    let guardError: string | null = null;
+    await client.query("savepoint cross_date_guard");
     try {
       await persistStage4Events(client, {
-        previousCreatedEventIds: rebuild.createdEventIds,
-        events: [sampleEvent("EV_TEST_C", [firstProcessedContentId], 1)],
+        previousCreatedEventIds: [...day1.createdEventIds, ...day2New.createdEventIds],
+        events: sampleEvents("DAY2_GUARD", DAY_2, processedContentIds),
       });
-      throw new Error("Simulated failure after Stage 4 persistence.");
-    } catch {
-      await client.query("rollback to savepoint stage4_rollback_case");
+    } catch (error) {
+      guardError = error instanceof Error ? error.message : String(error);
+      await client.query("rollback to savepoint cross_date_guard");
     }
 
     checks.push({
-      name: "C. rollback preserves previous events and associations",
+      name: "Cross-date delete guard fails loudly",
       passed:
-        (await eventExists(client, rebuiltEventId)) === true &&
-        (await loadProcessedContentEventId(client, secondProcessedContentId)) === rebuiltEventId,
+        guardError !== null &&
+        guardError.includes("Refusing to delete Stage 4 Events outside the current rebuild scope") &&
+        (await countExistingEvents(client, day1.createdEventIds)) === EVENT_COUNT &&
+        (await countExistingEvents(client, day2New.createdEventIds)) === EVENT_COUNT,
+      detail: guardError,
     });
 
     await client.query("rollback");
@@ -116,36 +130,37 @@ async function main() {
   }
 }
 
-async function loadTwoEventProcessedContentIds(client: PoolClient): Promise<[string, string]> {
+async function loadEventProcessedContentIds(client: PoolClient): Promise<string[]> {
   const result = await client.query<{ id: string }>(
     `
       select id
       from processed_contents
       where routing = 'event'
       order by id
-      limit 2
+      limit $1
     `,
+    [EVENT_COUNT],
   );
 
-  if (result.rows.length < 2) {
-    throw new Error("Need at least two event processed_contents rows for Stage 4 persistence tests.");
+  if (result.rows.length === 0) {
+    throw new Error("Need at least one event processed_content row for Stage 4 persistence tests.");
   }
 
-  return [result.rows[0].id, result.rows[1].id];
+  return result.rows.map((row) => row.id);
 }
 
-function sampleEvent(
-  eventGroupId: string,
+function sampleEvents(
+  prefix: string,
+  eventDate: string,
   processedContentIds: string[],
-  rank: number,
-): Stage4EventToPersist {
-  return {
-    eventGroupId,
-    processedContentIds,
-    rank,
-    eventDate: "2026-08-16",
-    output: sampleOutput(eventGroupId),
-  };
+): Stage4EventToPersist[] {
+  return Array.from({ length: EVENT_COUNT }, (_, index) => ({
+    eventGroupId: `${prefix}_${index + 1}`,
+    processedContentIds: [processedContentIds[index % processedContentIds.length]],
+    rank: index + 1,
+    eventDate,
+    output: sampleOutput(`${prefix}_${index + 1}`),
+  }));
 }
 
 function sampleOutput(eventGroupId: string): Stage4EventEnrichmentOutput {
@@ -172,69 +187,41 @@ function sampleOutput(eventGroupId: string): Stage4EventEnrichmentOutput {
   };
 }
 
-async function loadEventRow(
+async function loadEventSnapshots(
   client: PoolClient,
-  id: string,
-): Promise<{
-  tags: string[] | null;
-  tagsZh: string[] | null;
-  externalContext: unknown | null;
-  aiRank: number | null;
-  displayRank: number | null;
-}> {
-  const result = await client.query<{
-    tags: string[] | null;
-    tagsZh: string[] | null;
-    externalContext: unknown | null;
-    aiRank: number | null;
-    displayRank: number | null;
-  }>(
+  eventIds: string[],
+): Promise<EventSnapshot[]> {
+  const result = await client.query<EventSnapshot>(
     `
-      select
-        tags,
-        tags_zh as "tagsZh",
-        external_context as "externalContext",
-        ai_rank as "aiRank",
-        display_rank as "displayRank"
+      select id, event_date::text, title, ai_rank, display_rank
       from events
-      where id = $1::uuid
+      where id = any($1::uuid[])
+      order by id
     `,
-    [id],
+    [eventIds],
   );
 
-  const row = result.rows[0];
-  if (!row) {
-    throw new Error(`Missing test event ${id}.`);
-  }
-
-  return row;
+  return result.rows;
 }
 
-async function loadProcessedContentEventId(
+async function countExistingEvents(
   client: PoolClient,
-  processedContentId: string,
-): Promise<string | null> {
-  const result = await client.query<{ eventId: string | null }>(
+  eventIds: string[],
+): Promise<number> {
+  const result = await client.query<{ count: string }>(
     `
-      select event_id as "eventId"
-      from processed_contents
-      where id = $1::uuid
+      select count(*) as count
+      from events
+      where id = any($1::uuid[])
     `,
-    [processedContentId],
+    [eventIds],
   );
 
-  return result.rows[0]?.eventId ?? null;
+  return Number(result.rows[0]?.count ?? 0);
 }
 
-async function eventExists(client: PoolClient, eventId: string): Promise<boolean> {
-  const result = await client.query<{ exists: boolean }>(
-    `
-      select exists(select 1 from events where id = $1::uuid)
-    `,
-    [eventId],
-  );
-
-  return result.rows[0]?.exists === true;
+function snapshotsEqual(left: EventSnapshot[], right: EventSnapshot[]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 main().catch((error) => {

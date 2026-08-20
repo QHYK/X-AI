@@ -1,7 +1,22 @@
 export type Stage3RankingItem = {
   id: string;
   rank: number;
-  reason: string;
+  reason?: string;
+};
+
+export type Stage3EventRankingItem = {
+  id: string;
+  event_hint: string;
+  source_count: number;
+  sources: Array<{
+    source: string;
+    title: string;
+    summary: string;
+  }>;
+};
+
+export type Stage3EventRankingInput = {
+  events: Stage3EventRankingItem[];
 };
 
 export type Stage3RankingOutput = {
@@ -240,7 +255,19 @@ export function validateStage3DigestRankingIntegrity(
     { length: output.rankings.length },
     (_, index) => index + 1,
   ).filter((rank) => !seenRanks.has(rank));
-  const errors = [...inventedIds].map((id) => `Invented id ${id}.`);
+  const errors: string[] = [];
+
+  for (const id of missingIds) {
+    errors.push(`Missing id ${id}.`);
+  }
+
+  for (const id of duplicateIds) {
+    errors.push(`Duplicate ranking for id ${id}.`);
+  }
+
+  for (const id of inventedIds) {
+    errors.push(`Invented id ${id}.`);
+  }
 
   return {
     passed: errors.length === 0,
@@ -253,23 +280,69 @@ export function validateStage3DigestRankingIntegrity(
   };
 }
 
-export function deduplicateStage3DigestRankingOutput(
-  output: Stage3RankingOutput,
-): Stage3RankingOutput {
-  const seen = new Set<string>();
+export type Stage3DigestOrderedIdsOutput = {
+  ordered_ids: string[];
+};
+
+export type Stage3DigestOrderedIdsValidationResult =
+  | {
+      success: true;
+      output: Stage3DigestOrderedIdsOutput;
+    }
+  | {
+      success: false;
+      errors: string[];
+    };
+
+export const stage3DigestOrderedIdsOutputJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["ordered_ids"],
+  properties: {
+    ordered_ids: {
+      type: "array",
+      items: { type: "string" },
+    },
+  },
+} as const;
+
+export function parseAndValidateStage3DigestOrderedIdsOutput(
+  rawText: string,
+): Stage3DigestOrderedIdsValidationResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (error) {
+    return {
+      success: false,
+      errors: [`Invalid JSON: ${error instanceof Error ? error.message : String(error)}`],
+    };
+  }
+
+  if (!isRecord(parsed)) {
+    return { success: false, errors: ["Output must be an object."] };
+  }
+  if (!Array.isArray(parsed.ordered_ids)) {
+    return { success: false, errors: ["ordered_ids must be an array."] };
+  }
+  if (!parsed.ordered_ids.every((id) => typeof id === "string")) {
+    return { success: false, errors: ["ordered_ids must only contain strings."] };
+  }
+
   return {
-    rankings: output.rankings
-      .filter((ranking) => {
-        if (seen.has(ranking.id)) {
-          return false;
-        }
-        seen.add(ranking.id);
-        return true;
-      })
-      .map((ranking, index) => ({
-        ...ranking,
-        rank: index + 1,
-      })),
+    success: true,
+    output: parsed as Stage3DigestOrderedIdsOutput,
+  };
+}
+
+export function rebuildStage3DigestRankingFromOrderedIds(
+  orderedIds: string[],
+): Stage3RankingOutput {
+  return {
+    rankings: orderedIds.map((id, index) => ({
+      id,
+      rank: index + 1,
+    })),
   };
 }
 

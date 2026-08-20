@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { Agent, fetch as undiciFetch } from "undici";
 
 export type LlmProvider = "openai" | "deepseek" | "kimi";
 export type LlmStage = "stage1" | "stage2" | "stage3" | "stage4";
@@ -42,6 +43,8 @@ type ResponseRequest = {
     };
   };
 };
+
+type OpenAiConstructorOptions = NonNullable<ConstructorParameters<typeof OpenAI>[0]>;
 
 type ResponseUsage = {
   input_tokens: number;
@@ -152,16 +155,25 @@ export function assertStageLlmConfiguration(stage: LlmStage): LlmConfig {
 
 export function createLlmClient(options: LlmClientOptions = {}) {
   const config = resolveLlmConfig({ provider: options.provider });
+  const dispatcher = new Agent({
+    keepAliveTimeout: 1,
+    keepAliveMaxTimeout: 1,
+  });
   const client = new OpenAI({
     apiKey: config.apiKey,
     baseURL: config.baseUrl,
     timeout: options.timeoutMs,
     maxRetries: options.maxRetries ?? 0,
+    fetch: undiciFetch as unknown as OpenAiConstructorOptions["fetch"],
+    fetchOptions: {
+      dispatcher,
+    } as OpenAiConstructorOptions["fetchOptions"],
   });
 
   return {
     provider: config.provider,
     baseUrl: config.baseUrl,
+    close: () => dispatcher.close(),
     responses: {
       create: (
         request: ResponseRequest,
@@ -186,10 +198,37 @@ async function createOpenAiResponse(
       request as OpenAI.Responses.ResponseCreateParamsNonStreaming,
       requestOptions,
     );
-    return response as unknown as LlmResponse;
+    const raw = response as unknown as {
+      id: string;
+      output_text: string;
+      output: unknown[];
+      usage?: { input_tokens: number; output_tokens: number; total_tokens: number } | null;
+      status?: string;
+      incomplete_details?: { reason?: string } | null;
+    };
+    return {
+      id: raw.id,
+      output_text: raw.output_text,
+      output: raw.output,
+      usage: raw.usage ?? undefined,
+      finish_reason: resolveResponsesFinishReason(raw.status, raw.incomplete_details?.reason ?? null),
+    };
   } catch (error) {
     throw toDiagnosticError(error, diagnostic);
   }
+}
+
+function resolveResponsesFinishReason(
+  status: string | undefined,
+  incompleteReason: string | null,
+): string | null {
+  if (status === "completed") {
+    return "stop";
+  }
+  if (status === "incomplete") {
+    return incompleteReason ?? "incomplete";
+  }
+  return status ?? null;
 }
 
 async function createChatCompletionResponse(

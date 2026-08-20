@@ -224,7 +224,7 @@ Rank by:
 - `event_summary_zh` ≤ ~200 Chinese characters.
 - Each `source_perspectives[].summary` ≤ ~80 Chinese characters. 
 + Summaries must be faithful to the provided reports.
-<!-- - Do not output `event_date`; Application Code derives it from source timestamps. -->
+<!-- - Do not output `event_at`; Application Code derives it from source timestamps. -->
 - Web Search is available but optional. Use it only when materially needed to fill essential context, clarify meaningful conflicts, or confirm uncertain facts.
 - Do not search merely to add detail or because the topic is important.
 + If Web Search is used, summarize only the context needed to understand the event. And list the source URLs used in summarize in `external_context.sources`.

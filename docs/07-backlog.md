@@ -63,6 +63,5 @@ Source → RSS fetch → normalize → deduplicate → raw_articles
 
 ## Restore strict Stage 2 validation
 
-Stage 2 为生成 Stage 3 / Stage 4 验证数据，暂时只记录 schema / assignment 问题而不阻断
-runtime output。完成下游验证后，恢复严格 schema validation，并重新要求每个 `temp_id`
-exactly once。
+Stage 2 当前只记录 schema / assignment 问题而不阻断 runtime output。后续单独评估并恢复
+blocking validation，重新要求每个 `temp_id` exactly once。

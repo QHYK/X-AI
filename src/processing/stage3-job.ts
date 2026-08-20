@@ -26,9 +26,9 @@ import {
 import type { Stage2Input, Stage2Output } from "./stage2-contract.js";
 import type {
   Stage3EventRankedOutput,
+  Stage3EventRankingInput,
   Stage3RankingOutput,
 } from "./stage3-contract.js";
-import type { Stage3EventRankingInput } from "./stage3-validation-input.js";
 import { inferSciencePublication } from "./science-publication.js";
 import { resolveStageLlmModel } from "./llm-client.js";
 import { normalizeArticleUrl } from "./url-normalization.js";
@@ -664,22 +664,67 @@ async function rankDigest(
     missing_count: number;
     duplicate_ids: string[];
     invalid_ids: string[];
+    repair_attempted: boolean;
+    repair_success: boolean | null;
+    repaired_count: number | null;
+    repair_missing_ids: string[];
+    repair_duplicate_ids: string[];
+    repair_invalid_ids: string[];
+    initial_finish_reason: string | null;
+    initial_input_tokens: number | null;
+    initial_output_tokens: number | null;
+    initial_total_tokens: number | null;
+    initial_returned_count: number | null;
+    initial_unique_valid_ids: number | null;
+    initial_duration_ms: number;
+    repair_finish_reason: string | null;
+    repair_input_tokens: number | null;
+    repair_output_tokens: number | null;
+    repair_total_tokens: number | null;
+    repair_ranked_candidates_count: number | null;
+    repair_missing_candidates_count: number | null;
+    repair_returned_count: number | null;
+    repair_duration_ms: number | null;
   };
 }> {
   const result = await runStage3DigestRankingLlm(input, options);
   assertRankingSuccess(`Digest Ranking (${input.category})`, result);
+  const repaired = result.repair.after;
+  const initialDiag = result.diagnostics.initial;
+  const repairDiag = result.diagnostics.repair;
   return {
     output: result.output,
-    calls: 1,
+    calls: result.attempts,
     retries: Math.max(0, result.attempts - 1),
     durationMs: result.elapsedMs,
     diagnostics: {
       category: input.category,
       input_count: input.candidates.length,
-      returned_count: result.output.rankings.length,
-      missing_count: result.assignment.missingIds.length,
-      duplicate_ids: result.assignment.duplicateIds,
-      invalid_ids: result.assignment.inventedIds,
+      returned_count: result.repair.beforeReturnedCount,
+      missing_count: result.repair.before.missingIds.length,
+      duplicate_ids: result.repair.before.duplicateIds,
+      invalid_ids: result.repair.before.inventedIds,
+      repair_attempted: result.repair.attempted,
+      repair_success: result.repair.success,
+      repaired_count: repaired ? result.output.rankings.length : null,
+      repair_missing_ids: repaired ? repaired.missingIds : [],
+      repair_duplicate_ids: repaired ? repaired.duplicateIds : [],
+      repair_invalid_ids: repaired ? repaired.inventedIds : [],
+      initial_finish_reason: initialDiag.finish_reason,
+      initial_input_tokens: initialDiag.input_tokens,
+      initial_output_tokens: initialDiag.output_tokens,
+      initial_total_tokens: initialDiag.total_tokens,
+      initial_returned_count: initialDiag.returned_count,
+      initial_unique_valid_ids: initialDiag.unique_valid_ids,
+      initial_duration_ms: initialDiag.duration_ms,
+      repair_finish_reason: repairDiag?.finish_reason ?? null,
+      repair_input_tokens: repairDiag?.input_tokens ?? null,
+      repair_output_tokens: repairDiag?.output_tokens ?? null,
+      repair_total_tokens: repairDiag?.total_tokens ?? null,
+      repair_ranked_candidates_count: repairDiag?.ranked_candidates_count ?? null,
+      repair_missing_candidates_count: repairDiag?.missing_candidates_count ?? null,
+      repair_returned_count: repairDiag?.returned_count ?? null,
+      repair_duration_ms: repairDiag?.duration_ms ?? null,
     },
   };
 }

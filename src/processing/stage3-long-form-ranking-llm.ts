@@ -73,102 +73,106 @@ export async function runStage3LongFormRankingLlm(
   let lastAssignment: Stage3RankingIntegrity | null = null;
   let attemptsUsed = 0;
 
-  for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
-    attemptsUsed = attempt;
-    try {
-      const response = await client.responses.create(
-        {
-          model,
-          instructions: buildStage3LongFormRankingInstructions(),
-          input: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "input_text",
-                  text: buildStage3LongFormRankingUserPrompt(input),
-                },
-              ],
-            },
-          ],
-          max_output_tokens: 2_000,
-          store: false,
-          text: {
-            format: {
-              type: "json_schema",
-              name: "stage3_long_form_ranking",
-              description: "Structured Stage 3 Long-form ranking output.",
-              schema: stage3RankingOutputJsonSchema,
-              strict: true,
+  try {
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
+      attemptsUsed = attempt;
+      try {
+        const response = await client.responses.create(
+          {
+            model,
+            instructions: buildStage3LongFormRankingInstructions(),
+            input: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: buildStage3LongFormRankingUserPrompt(input),
+                  },
+                ],
+              },
+            ],
+            max_output_tokens: 2_000,
+            store: false,
+            text: {
+              format: {
+                type: "json_schema",
+                name: "stage3_long_form_ranking",
+                description: "Structured Stage 3 Long-form ranking output.",
+                schema: stage3RankingOutputJsonSchema,
+                strict: true,
+              },
             },
           },
-        },
-        {
-          timeout: timeoutMs,
-        },
-      );
+          {
+            timeout: timeoutMs,
+          },
+        );
 
-      rawOutputText = response.output_text;
-      const validation = parseAndValidateStage3RankingOutput(rawOutputText);
-      if (!validation.success) {
-        lastAssignment = null;
-        lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
+        rawOutputText = response.output_text;
+        const validation = parseAndValidateStage3RankingOutput(rawOutputText);
+        if (!validation.success) {
+          lastAssignment = null;
+          lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
+          if (attempt <= maxRetries) {
+            await sleep(RETRY_DELAY_MS * attempt);
+            continue;
+          }
+
+          break;
+        }
+
+        const assignment = validateStage3RankingIntegrity(validation.output, expectedIds);
+        lastAssignment = assignment;
+        if (!assignment.passed) {
+          lastError = `Ranking integrity validation failed: ${assignment.errors.join("; ")}`;
+          if (attempt <= maxRetries) {
+            await sleep(RETRY_DELAY_MS * attempt);
+            continue;
+          }
+
+          break;
+        }
+
+        return {
+          success: true,
+          input,
+          output: validation.output,
+          assignment,
+          model,
+          promptVersion: STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
+          responseId: response.id,
+          attempts: attempt,
+          elapsedMs: Date.now() - startedAt,
+          rawOutputText,
+        };
+      } catch (error) {
+        lastError = sanitizeLlmError(error instanceof Error ? error.message : String(error));
+        if (isNonRetryableLlmError(lastError)) {
+          break;
+        }
+
         if (attempt <= maxRetries) {
           await sleep(RETRY_DELAY_MS * attempt);
           continue;
         }
-
-        break;
-      }
-
-      const assignment = validateStage3RankingIntegrity(validation.output, expectedIds);
-      lastAssignment = assignment;
-      if (!assignment.passed) {
-        lastError = `Ranking integrity validation failed: ${assignment.errors.join("; ")}`;
-        if (attempt <= maxRetries) {
-          await sleep(RETRY_DELAY_MS * attempt);
-          continue;
-        }
-
-        break;
-      }
-
-      return {
-        success: true,
-        input,
-        output: validation.output,
-        assignment,
-        model,
-        promptVersion: STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
-        responseId: response.id,
-        attempts: attempt,
-        elapsedMs: Date.now() - startedAt,
-        rawOutputText,
-      };
-    } catch (error) {
-      lastError = sanitizeLlmError(error instanceof Error ? error.message : String(error));
-      if (isNonRetryableLlmError(lastError)) {
-        break;
-      }
-
-      if (attempt <= maxRetries) {
-        await sleep(RETRY_DELAY_MS * attempt);
-        continue;
       }
     }
-  }
 
-  return {
-    success: false,
-    input,
-    assignment: lastAssignment,
-    model,
-    promptVersion: STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
-    attempts: attemptsUsed,
-    elapsedMs: Date.now() - startedAt,
-    error: lastError,
-    rawOutputText,
-  };
+    return {
+      success: false,
+      input,
+      assignment: lastAssignment,
+      model,
+      promptVersion: STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
+      attempts: attemptsUsed,
+      elapsedMs: Date.now() - startedAt,
+      error: lastError,
+      rawOutputText,
+    };
+  } finally {
+    await client.close();
+  }
 }
 
 function isNonRetryableLlmError(errorMessage: string): boolean {

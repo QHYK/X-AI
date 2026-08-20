@@ -19,6 +19,8 @@ export type Stage4PersistencePlan = {
 export type Stage4PersistenceResult = {
   previousUnlinkedCount: number;
   previousDeletedCount: number;
+  cleanupEventCount: number;
+  cleanupEventDates: string[];
   createdEventIds: string[];
   eventGroupToEventId: Record<string, string>;
   associations: Array<{
@@ -35,8 +37,30 @@ export async function persistStage4Events(
 ): Promise<Stage4PersistenceResult> {
   let previousUnlinkedCount = 0;
   let previousDeletedCount = 0;
+  let cleanupEventCount = 0;
+  let cleanupEventDates: string[] = [];
 
   if (plan.previousCreatedEventIds.length > 0) {
+    const previousEvents = await loadExistingPreviousEvents(
+      client,
+      plan.previousCreatedEventIds,
+    );
+    const rebuildEventDates = uniqueSorted(plan.events.map((event) => event.eventDate));
+    cleanupEventDates = uniqueSorted(previousEvents.map((event) => event.event_date));
+    cleanupEventCount = previousEvents.length;
+    const outOfScopeEventDates = cleanupEventDates.filter(
+      (eventDate) => !rebuildEventDates.includes(eventDate),
+    );
+    if (outOfScopeEventDates.length > 0) {
+      throw new Error(
+        [
+          "Refusing to delete Stage 4 Events outside the current rebuild scope.",
+          `rebuild_event_dates=${rebuildEventDates.join(",") || "none"}`,
+          `cleanup_event_dates=${cleanupEventDates.join(",")}`,
+        ].join(" "),
+      );
+    }
+
     const unlinkResult = await client.query(
       `
         update processed_contents
@@ -139,10 +163,33 @@ export async function persistStage4Events(
   return {
     previousUnlinkedCount,
     previousDeletedCount,
+    cleanupEventCount,
+    cleanupEventDates,
     createdEventIds,
     eventGroupToEventId,
     associations,
   };
+}
+
+async function loadExistingPreviousEvents(
+  client: Queryable,
+  eventIds: string[],
+): Promise<Array<{ id: string; event_date: string }>> {
+  const result = await client.query<{ id: string; event_date: string }>(
+    `
+      select id, event_date::text
+      from events
+      where id = any($1::uuid[])
+      order by event_date, id
+    `,
+    [eventIds],
+  );
+
+  return result.rows;
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort();
 }
 
 function toExternalContextJson(output: Stage4EventEnrichmentOutput): string | null {

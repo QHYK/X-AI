@@ -10,10 +10,10 @@ import {
   stage3EventRankingOutputJsonSchema,
   validateStage3EventRankingIntegrity,
   type Stage3EventRankedOutput,
+  type Stage3EventRankingInput,
   type Stage3EventRankingIntegrity,
   type Stage3EventRankingOutput,
 } from "./stage3-contract.js";
-import type { Stage3EventRankingInput } from "./stage3-validation-input.js";
 import {
   buildStage3EventRankingInstructions,
   buildStage3EventRankingUserPrompt,
@@ -91,115 +91,119 @@ export async function runStage3EventRankingLlm(
   let lastAssignment: Stage3EventRankingIntegrity | null = null;
   let attemptsUsed = 0;
 
-  for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
-    attemptsUsed = attempt;
-    try {
-      const response = await client.responses.create(
-        {
-          model,
-          instructions: buildStage3EventRankingInstructions(),
-          input: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "input_text",
-                  text: buildStage3EventRankingUserPrompt(input),
-                },
-              ],
-            },
-          ],
-          max_output_tokens: 8_000,
-          store: false,
-          text: {
-            format: {
-              type: "json_schema",
-              name: "stage3_event_ranking",
-              description: "Up to 50 most important Stage 3 Event IDs in ranked order.",
-              schema: stage3EventRankingOutputJsonSchema,
-              strict: true,
+  try {
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
+      attemptsUsed = attempt;
+      try {
+        const response = await client.responses.create(
+          {
+            model,
+            instructions: buildStage3EventRankingInstructions(),
+            input: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: buildStage3EventRankingUserPrompt(input),
+                  },
+                ],
+              },
+            ],
+            max_output_tokens: 8_000,
+            store: false,
+            text: {
+              format: {
+                type: "json_schema",
+                name: "stage3_event_ranking",
+                description: "Up to 50 most important Stage 3 Event IDs in ranked order.",
+                schema: stage3EventRankingOutputJsonSchema,
+                strict: true,
+              },
             },
           },
-        },
-        {
-          timeout: timeoutMs,
-        },
-      );
+          {
+            timeout: timeoutMs,
+          },
+        );
 
-      if (response.usage) {
-        tokenUsage.inputTokens += response.usage.input_tokens;
-        tokenUsage.outputTokens += response.usage.output_tokens;
-        tokenUsage.totalTokens += response.usage.total_tokens;
-        hasTokenUsage = true;
-      }
-      rawOutputText = response.output_text;
-      const validation = parseAndValidateStage3EventRankingOutput(rawOutputText);
-      if (!validation.success) {
-        lastAssignment = null;
-        lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
+        if (response.usage) {
+          tokenUsage.inputTokens += response.usage.input_tokens;
+          tokenUsage.outputTokens += response.usage.output_tokens;
+          tokenUsage.totalTokens += response.usage.total_tokens;
+          hasTokenUsage = true;
+        }
+        rawOutputText = response.output_text;
+        const validation = parseAndValidateStage3EventRankingOutput(rawOutputText);
+        if (!validation.success) {
+          lastAssignment = null;
+          lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
+          if (attempt <= maxRetries) {
+            await sleep(RETRY_DELAY_MS * attempt);
+            continue;
+          }
+
+          break;
+        }
+
+        const assignment = validateStage3EventRankingIntegrity(
+          validation.output,
+          expectedIds,
+        );
+        lastAssignment = assignment;
+        if (!assignment.passed) {
+          lastError = `Ranking integrity validation failed: ${assignment.errors.join("; ")}`;
+          if (attempt <= maxRetries) {
+            await sleep(RETRY_DELAY_MS * attempt);
+            continue;
+          }
+
+          break;
+        }
+
+        const deduplicatedOutput = deduplicateStage3EventRankingOutput(validation.output);
+        return {
+          success: true,
+          input,
+          output: deduplicatedOutput,
+          rankings: deriveStage3EventRankings(deduplicatedOutput),
+          assignment,
+          model,
+          promptVersion: STAGE3_EVENT_RANKING_PROMPT_VERSION,
+          responseId: response.id,
+          attempts: attempt,
+          elapsedMs: Date.now() - startedAt,
+          tokenUsage: hasTokenUsage ? tokenUsage : null,
+          rawOutputText,
+        };
+      } catch (error) {
+        lastError = sanitizeLlmError(error instanceof Error ? error.message : String(error));
+        if (isNonRetryableLlmError(lastError)) {
+          break;
+        }
+
         if (attempt <= maxRetries) {
           await sleep(RETRY_DELAY_MS * attempt);
           continue;
         }
-
-        break;
-      }
-
-      const assignment = validateStage3EventRankingIntegrity(
-        validation.output,
-        expectedIds,
-      );
-      lastAssignment = assignment;
-      if (!assignment.passed) {
-        lastError = `Ranking integrity validation failed: ${assignment.errors.join("; ")}`;
-        if (attempt <= maxRetries) {
-          await sleep(RETRY_DELAY_MS * attempt);
-          continue;
-        }
-
-        break;
-      }
-
-      const deduplicatedOutput = deduplicateStage3EventRankingOutput(validation.output);
-      return {
-        success: true,
-        input,
-        output: deduplicatedOutput,
-        rankings: deriveStage3EventRankings(deduplicatedOutput),
-        assignment,
-        model,
-        promptVersion: STAGE3_EVENT_RANKING_PROMPT_VERSION,
-        responseId: response.id,
-        attempts: attempt,
-        elapsedMs: Date.now() - startedAt,
-        tokenUsage: hasTokenUsage ? tokenUsage : null,
-        rawOutputText,
-      };
-    } catch (error) {
-      lastError = sanitizeLlmError(error instanceof Error ? error.message : String(error));
-      if (isNonRetryableLlmError(lastError)) {
-        break;
-      }
-
-      if (attempt <= maxRetries) {
-        await sleep(RETRY_DELAY_MS * attempt);
-        continue;
       }
     }
-  }
 
-  return {
-    success: false,
-    input,
-    assignment: lastAssignment,
-    model,
-    promptVersion: STAGE3_EVENT_RANKING_PROMPT_VERSION,
-    attempts: attemptsUsed,
-    elapsedMs: Date.now() - startedAt,
-    tokenUsage: hasTokenUsage ? tokenUsage : null,
-    error: lastError,
-    rawOutputText,
-  };
+    return {
+      success: false,
+      input,
+      assignment: lastAssignment,
+      model,
+      promptVersion: STAGE3_EVENT_RANKING_PROMPT_VERSION,
+      attempts: attemptsUsed,
+      elapsedMs: Date.now() - startedAt,
+      tokenUsage: hasTokenUsage ? tokenUsage : null,
+      error: lastError,
+      rawOutputText,
+    };
+  } finally {
+    await client.close();
+  }
 }
 
 function isNonRetryableLlmError(errorMessage: string): boolean {
