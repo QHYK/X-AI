@@ -15,6 +15,7 @@ X-AI-field 是一个 AI 驱动的信息筛选系统：持续收集可信信息�
 - Stage 4 — Selected Event Enrichment + Optional Web Search
 - Daily Workflow Orchestrator
 - Daily Brief API `GET /api/brief?date=YYYY-MM-DD`
+- Internal Dashboard `/dashboard`
 
 下一步：
 - X-field Daily Brief 页面
@@ -182,6 +183,19 @@ GET /api/brief?date=YYYY-MM-DD
 - `meta`
 
 所有可阅读内容都返回原文链接。MVP 使用 `created_at`（Asia/Shanghai）作为 Brief 日期归属依据。
+
+## Internal Dashboard
+
+启动 `npm run dev` 后访问：
+
+```text
+http://localhost:3000/dashboard
+```
+
+- 页面需要可用的 `DATABASE_URL`，默认展示最近 7 天的数据量与 Daily Workflow 运行情况。
+- 数据库是业务数据 Source of Truth；所有每日统计按 `Asia/Shanghai` 日期边界计算。
+- `runtime/stage1~4/` 只补充运行指标，例如 LLM calls、retry、实际记录的 token、duration、Stage 2/3/4 的中间与结果数量。
+- 某个字段没有时显示 `N/A`，不会估算或写入新的 metrics 数据。
 
 ## Documentation
 

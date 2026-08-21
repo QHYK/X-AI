@@ -1,0 +1,536 @@
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { Pool } from "pg";
+import { parseBriefDate, type ShanghaiDayRange } from "./brief-date.js";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DASHBOARD_DAYS = 7;
+const STAGES = ["stage1", "stage2", "stage3", "stage4"] as const;
+
+type Routing = "event" | "digest" | "long_form" | "inspiration";
+export type DashboardStage = (typeof STAGES)[number];
+
+type CountRow = {
+  date: string;
+  total: number | string;
+  pending?: number | string;
+  selected?: number | string;
+  ignored?: number | string;
+  failed?: number | string;
+  event?: number | string;
+  digest?: number | string;
+  long_form?: number | string;
+  inspiration?: number | string;
+};
+
+type CategoryRow = {
+  category: string;
+  count: number | string;
+};
+
+type TotalRow = {
+  raw_articles: number | string;
+  processed_contents: number | string;
+  events: number | string;
+};
+
+type JsonObject = Record<string, unknown>;
+
+export type DashboardStageMetrics = {
+  stage: DashboardStage;
+  status: string | null;
+  startedAt: string | null;
+  durationMs: number | null;
+  llmDurationMs: number | null;
+  llmCalls: number | null;
+  retryCount: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  candidateCount: number | null;
+  groupCount: number | null;
+  selectedEventCount: number | null;
+  digestBeforeDedup: number | null;
+  digestAfterDedup: number | null;
+  longFormCount: number | null;
+  enrichmentSuccessCount: number | null;
+  enrichmentFailureCount: number | null;
+  eventsCreated: number | null;
+};
+
+export type DashboardDay = {
+  date: string;
+  raw: {
+    total: number;
+    pending: number;
+    selected: number;
+    ignored: number;
+    failed: number;
+  };
+  processed: Record<Routing, number> & { total: number };
+  events: number;
+  runtime: {
+    stages: Record<DashboardStage, DashboardStageMetrics | null>;
+    llmCalls: number | null;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    totalTokens: number | null;
+    durationMs: number | null;
+  };
+};
+
+export type DashboardData = {
+  timezone: "Asia/Shanghai";
+  today: string;
+  detailDate: string;
+  totals: {
+    rawArticles: number;
+    processedContents: number;
+    events: number;
+  };
+  days: DashboardDay[];
+  details: {
+    processedByCategory: Record<string, number>;
+    digestByCategory: Record<string, number>;
+    stages: Record<DashboardStage, DashboardStageMetrics | null>;
+  };
+};
+
+export async function getDashboardData(
+  pool: Pool,
+  options: { detailDate?: string | null; rootDir?: string; now?: Date } = {},
+): Promise<DashboardData> {
+  const ranges = getRecentShanghaiDayRanges(options.now ?? new Date(), DASHBOARD_DAYS);
+  const todayRange = ranges[0];
+  if (!todayRange) {
+    throw new Error("Dashboard date range is empty.");
+  }
+
+  const oldestRange = ranges.at(-1);
+  if (!oldestRange) {
+    throw new Error("Dashboard oldest date range is missing.");
+  }
+  const detailRange = parseBriefDate(options.detailDate ?? "") ?? todayRange;
+
+  const [
+    totalsResult,
+    rawResult,
+    processedResult,
+    eventsResult,
+    processedCategoriesResult,
+    digestCategoriesResult,
+    runtimeByDate,
+  ] = await Promise.all([
+    pool.query<TotalRow>(`
+      select
+        (select count(*)::int from raw_articles) as raw_articles,
+        (select count(*)::int from processed_contents) as processed_contents,
+        (select count(*)::int from events) as events
+    `),
+    pool.query<CountRow>(
+      `
+        select
+          to_char(collected_at at time zone 'Asia/Shanghai', 'YYYY-MM-DD') as date,
+          count(*)::int as total,
+          count(*) filter (where stage1_status = 'pending')::int as pending,
+          count(*) filter (where stage1_status = 'selected')::int as selected,
+          count(*) filter (where stage1_status = 'ignored')::int as ignored,
+          count(*) filter (where stage1_status = 'failed')::int as failed
+        from raw_articles
+        where collected_at >= $1::timestamptz
+          and collected_at < $2::timestamptz
+        group by 1
+      `,
+      [oldestRange.startUtc, todayRange.endUtc],
+    ),
+    pool.query<CountRow>(
+      `
+        select
+          to_char(created_at at time zone 'Asia/Shanghai', 'YYYY-MM-DD') as date,
+          count(*)::int as total,
+          count(*) filter (where routing = 'event')::int as event,
+          count(*) filter (where routing = 'digest')::int as digest,
+          count(*) filter (where routing = 'long_form')::int as long_form,
+          count(*) filter (where routing = 'inspiration')::int as inspiration
+        from processed_contents
+        where created_at >= $1::timestamptz
+          and created_at < $2::timestamptz
+        group by 1
+      `,
+      [oldestRange.startUtc, todayRange.endUtc],
+    ),
+    pool.query<CountRow>(
+      `
+        select
+          to_char(created_at at time zone 'Asia/Shanghai', 'YYYY-MM-DD') as date,
+          count(*)::int as total
+        from events
+        where created_at >= $1::timestamptz
+          and created_at < $2::timestamptz
+        group by 1
+      `,
+      [oldestRange.startUtc, todayRange.endUtc],
+    ),
+    pool.query<CategoryRow>(
+      `
+        select category, count(*)::int as count
+        from processed_contents
+        where created_at >= $1::timestamptz
+          and created_at < $2::timestamptz
+        group by category
+        order by count desc, category asc
+      `,
+      [detailRange.startUtc, detailRange.endUtc],
+    ),
+    pool.query<CategoryRow>(
+      `
+        select category, count(*)::int as count
+        from processed_contents
+        where created_at >= $1::timestamptz
+          and created_at < $2::timestamptz
+          and routing = 'digest'
+        group by category
+        order by count desc, category asc
+      `,
+      [detailRange.startUtc, detailRange.endUtc],
+    ),
+    loadRuntimeMetricsByDate(
+      options.rootDir ?? process.cwd(),
+      new Set([...ranges.map((range) => range.date), detailRange.date]),
+    ),
+  ]);
+
+  const totals = totalsResult.rows[0];
+  if (!totals) {
+    throw new Error("Dashboard totals query returned no rows.");
+  }
+
+  const rawByDate = rowsByDate(rawResult.rows);
+  const processedByDate = rowsByDate(processedResult.rows);
+  const eventsByDate = rowsByDate(eventsResult.rows);
+
+  const days = ranges.map((range) => {
+    const raw = rawByDate.get(range.date);
+    const processed = processedByDate.get(range.date);
+    const event = eventsByDate.get(range.date);
+    const stages = emptyStageMap();
+    const runtimeStages = runtimeByDate.get(range.date);
+
+    for (const stage of STAGES) {
+      stages[stage] = runtimeStages?.get(stage) ?? null;
+    }
+
+    const availableStages = Object.values(stages).filter(
+      (metrics): metrics is DashboardStageMetrics => metrics !== null,
+    );
+
+    return {
+      date: range.date,
+      raw: {
+        total: count(raw?.total),
+        pending: count(raw?.pending),
+        selected: count(raw?.selected),
+        ignored: count(raw?.ignored),
+        failed: count(raw?.failed),
+      },
+      processed: {
+        total: count(processed?.total),
+        event: count(processed?.event),
+        digest: count(processed?.digest),
+        long_form: count(processed?.long_form),
+        inspiration: count(processed?.inspiration),
+      },
+      events: count(event?.total),
+      runtime: {
+        stages,
+        llmCalls: sumKnown(availableStages.map((stage) => stage.llmCalls)),
+        inputTokens: sumKnown(availableStages.map((stage) => stage.inputTokens)),
+        outputTokens: sumKnown(availableStages.map((stage) => stage.outputTokens)),
+        totalTokens: sumKnown(availableStages.map((stage) => stage.totalTokens)),
+        durationMs: sumKnown(availableStages.map((stage) => stage.durationMs)),
+      },
+    } satisfies DashboardDay;
+  });
+
+  const detailStages = emptyStageMap();
+  const runtimeDetailStages = runtimeByDate.get(detailRange.date);
+  for (const stage of STAGES) {
+    detailStages[stage] = runtimeDetailStages?.get(stage) ?? null;
+  }
+
+  return {
+    timezone: "Asia/Shanghai",
+    today: todayRange.date,
+    detailDate: detailRange.date,
+    totals: {
+      rawArticles: count(totals.raw_articles),
+      processedContents: count(totals.processed_contents),
+      events: count(totals.events),
+    },
+    days,
+    details: {
+      processedByCategory: categoryCounts(processedCategoriesResult.rows),
+      digestByCategory: categoryCounts(digestCategoriesResult.rows),
+      stages: detailStages,
+    },
+  };
+}
+
+function getRecentShanghaiDayRanges(now: Date, days: number): ShanghaiDayRange[] {
+  const today = parseBriefDate(formatShanghaiDate(now));
+  if (!today) {
+    throw new Error("Unable to determine today's Asia/Shanghai date.");
+  }
+
+  return Array.from({ length: days }, (_, index) => {
+    const date = formatShanghaiDate(new Date(today.startUtc.getTime() - index * DAY_MS));
+    const range = parseBriefDate(date);
+    if (!range) {
+      throw new Error(`Unable to build dashboard date range for ${date}.`);
+    }
+    return range;
+  });
+}
+
+function formatShanghaiDate(value: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const values = new Map(parts.map((part) => [part.type, part.value]));
+  return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
+}
+
+async function loadRuntimeMetricsByDate(
+  rootDir: string,
+  requestedDates: Set<string>,
+): Promise<Map<string, Map<DashboardStage, DashboardStageMetrics>>> {
+  const byDate = new Map<string, Map<DashboardStage, DashboardStageMetrics>>();
+
+  await Promise.all(
+    STAGES.map(async (stage) => {
+      const stageDir = join(rootDir, "runtime", stage);
+      let runNames: string[];
+      try {
+        runNames = await readdir(stageDir);
+      } catch (error) {
+        if (isMissingFile(error)) {
+          return;
+        }
+        throw error;
+      }
+
+      const runs = await Promise.all(
+        runNames.map(async (runName) => {
+          const runDir = join(stageDir, runName);
+          try {
+            const artifact = asObject(
+              JSON.parse(await readFile(join(runDir, "run.json"), "utf8")),
+            );
+            if (!artifact) {
+              throw new Error("run.json must contain a JSON object.");
+            }
+
+            const startedAt = stringValue(artifact.started_at) ?? parseRunName(runName);
+            if (!startedAt) {
+              throw new Error("run.json has no valid started_at timestamp.");
+            }
+
+            const date = formatShanghaiDate(new Date(startedAt));
+            if (!requestedDates.has(date)) {
+              return null;
+            }
+
+            return {
+              date,
+              metrics: await parseStageMetrics(stage, runDir, artifact, startedAt),
+            };
+          } catch (error) {
+            if (!isMissingFile(error)) {
+              console.error(`Failed to read dashboard runtime artifact ${runDir}.`, error);
+            }
+            return null;
+          }
+        }),
+      );
+
+      for (const run of runs) {
+        if (!run) {
+          continue;
+        }
+        const dateStages = byDate.get(run.date) ?? new Map();
+        const previous = dateStages.get(stage);
+        if (!previous || compareStartedAt(run.metrics.startedAt, previous.startedAt) > 0) {
+          dateStages.set(stage, run.metrics);
+          byDate.set(run.date, dateStages);
+        }
+      }
+    }),
+  );
+
+  return byDate;
+}
+
+async function parseStageMetrics(
+  stage: DashboardStage,
+  runDir: string,
+  artifact: JsonObject,
+  startedAt: string,
+): Promise<DashboardStageMetrics> {
+  const selectedEventCount = numberFrom(artifact, "selected_event_count", "event_selected_count");
+  const enrichmentSuccessCount = numberFrom(artifact, "enrichment_success_count");
+  const diagnosticTokens =
+    stage === "stage3" ? await loadStage3DiagnosticTokens(runDir) : null;
+  const finishedAt = stringValue(artifact.finished_at);
+
+  return {
+    stage,
+    status: stringValue(artifact.status),
+    startedAt,
+    durationMs:
+      numberFrom(artifact, "total_duration_ms", "duration_ms") ??
+      durationBetween(startedAt, finishedAt),
+    llmDurationMs: numberFrom(artifact, "llm_duration_ms"),
+    llmCalls: numberFrom(artifact, "llm_calls", "llm_call_count"),
+    retryCount: numberFrom(artifact, "retry_count"),
+    inputTokens: numberFrom(artifact, "input_tokens") ?? diagnosticTokens?.inputTokens ?? null,
+    outputTokens:
+      numberFrom(artifact, "output_tokens") ?? diagnosticTokens?.outputTokens ?? null,
+    totalTokens: numberFrom(artifact, "total_tokens") ?? diagnosticTokens?.totalTokens ?? null,
+    candidateCount: numberFrom(artifact, "candidate_count"),
+    groupCount: numberFrom(artifact, "final_group_count", "event_group_count"),
+    selectedEventCount,
+    digestBeforeDedup: numberFrom(artifact, "digest_before_dedup"),
+    digestAfterDedup: numberFrom(artifact, "digest_after_dedup"),
+    longFormCount: numberFrom(artifact, "long_form_count"),
+    enrichmentSuccessCount,
+    enrichmentFailureCount:
+      selectedEventCount !== null && enrichmentSuccessCount !== null
+        ? Math.max(0, selectedEventCount - enrichmentSuccessCount)
+        : null,
+    eventsCreated: numberFrom(artifact, "events_created"),
+  };
+}
+
+async function loadStage3DiagnosticTokens(runDir: string): Promise<{
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+} | null> {
+  const digestDir = join(runDir, "digest");
+  let names: string[];
+  try {
+    names = await readdir(digestDir);
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return null;
+    }
+    throw error;
+  }
+
+  const diagnostics = await Promise.all(
+    names
+      .filter((name) => name.endsWith("-ranking-diagnostics.json"))
+      .map(async (name) => {
+        const value = asObject(JSON.parse(await readFile(join(digestDir, name), "utf8")));
+        if (!value) {
+          throw new Error(`${name} must contain a JSON object.`);
+        }
+        return value;
+      }),
+  );
+  const inputTokens = sumKnown(
+    diagnostics.flatMap((value) => [
+      numberFrom(value, "initial_input_tokens"),
+      numberFrom(value, "repair_input_tokens"),
+    ]),
+  );
+  const outputTokens = sumKnown(
+    diagnostics.flatMap((value) => [
+      numberFrom(value, "initial_output_tokens"),
+      numberFrom(value, "repair_output_tokens"),
+    ]),
+  );
+  const totalTokens = sumKnown(
+    diagnostics.flatMap((value) => [
+      numberFrom(value, "initial_total_tokens"),
+      numberFrom(value, "repair_total_tokens"),
+    ]),
+  );
+
+  return inputTokens === null || outputTokens === null || totalTokens === null
+    ? null
+    : { inputTokens, outputTokens, totalTokens };
+}
+
+function emptyStageMap(): Record<DashboardStage, DashboardStageMetrics | null> {
+  return { stage1: null, stage2: null, stage3: null, stage4: null };
+}
+
+function rowsByDate(rows: CountRow[]): Map<string, CountRow> {
+  return new Map(rows.map((row) => [row.date, row]));
+}
+
+function categoryCounts(rows: CategoryRow[]): Record<string, number> {
+  return Object.fromEntries(rows.map((row) => [row.category, count(row.count)]));
+}
+
+function count(value: number | string | undefined): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function sumKnown(values: Array<number | null>): number | null {
+  const known = values.filter((value): value is number => value !== null);
+  return known.length > 0 ? known.reduce((sum, value) => sum + value, 0) : null;
+}
+
+function numberFrom(value: JsonObject, ...keys: string[]): number | null {
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === "number" && Number.isFinite(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function asObject(value: unknown): JsonObject | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as JsonObject)
+    : null;
+}
+
+function durationBetween(startedAt: string, finishedAt: string | null): number | null {
+  if (!finishedAt) {
+    return null;
+  }
+  const duration = Date.parse(finishedAt) - Date.parse(startedAt);
+  return Number.isFinite(duration) && duration >= 0 ? duration : null;
+}
+
+function parseRunName(runName: string): string | null {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/.exec(runName);
+  return match
+    ? `${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}Z`
+    : null;
+}
+
+function compareStartedAt(left: string | null, right: string | null): number {
+  return Date.parse(left ?? "") - Date.parse(right ?? "");
+}
+
+function isMissingFile(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
+  );
+}

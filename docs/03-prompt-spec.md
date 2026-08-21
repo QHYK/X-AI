@@ -54,16 +54,19 @@ Each article is evaluated independently, and every input `temp_id` must appear e
 - Routing 时根据文章本身的**primary value**判断，而不是仅根据 Source 的候选配置判断。
 - `event_candidate` / `source_digest_candidate` are eligibility signals, not final routing rules.
 - `Event`: concrete major event, decision, announcement, data release, accident, or key new development.
-- `Digest`: useful analysis, explanation, research, trend, profile, or general information. 不以需要进入 Today's Events 的重大现实事件为核心.
+- `Digest`: 值得用户花注意力、具有明显信息增量的 analysis, explanation, research, trend, profile, or general information. 不以需要进入 Today's Events 的重大现实事件为核心.
 - `Long-form`: important content worth reading in full; Eg: 深度分析、重要观点、调查报道、专题文章. May come from any source/category.
 - `Inspiration`: xkcd / NASA Image of the Day.
 - `Ignore`: 不符合 Daily Brief 内容标准的内容。
 - Commentary about an important event is not automatically `Event`; route deep, high-value analysis to `Long-form` when appropriate.
 - Scientific papers → `Digest` unless duplicate reposts.
+<!-- - Scientific papers with meaningful novelty, scientific significance, application value, or learning value → `Digest`; routine, narrow, or low-information papers may be `Ignore`. -->
 - Category: `Finance & Economy`, `Technology`, `Science`, `Policy`, `Company`, `General`, `Long-form`.
 - Prefer high-impact, systemic-risk, high-information-gain content and important policy / market / technology developments.
 - Tier-1 media 的 Exclusive 内容需要重点审视，通常应优先保留
 - Default ignore: marketing, duplicate reposts, no-new-information follow-ups, gossip, clickbait, unsupported rumors, sports, entertainment, lifestyle, consumer devices.
+- 普通更新、轻微趋势、重复信息、低影响公司动态、一般性解释、泛泛 profile、边缘兴趣内容应优先 Ignore。
+- 当内容“有用但不够重要”时，优先 Ignore，而不是 Digest。
 - `tags` ≤ 5; 用于补充和细化 Category；选择最能描述内容的具体标签
 - `entities` ≤ 3; 只保留对识别文章核心事件有帮助的主要实体.
 - For `routing != Ignore`, generate English summary + Chinese title/summary.
