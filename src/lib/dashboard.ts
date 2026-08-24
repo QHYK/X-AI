@@ -174,9 +174,10 @@ export async function getDashboardData(
       ? pool.query<CategoryRow>(
           `
             select category, count(*)::int as count
-            from processed_contents
-            where created_at >= $1::timestamptz
-              and created_at < $2::timestamptz
+            from processed_contents pc
+            join raw_articles ra on ra.id = pc.raw_article_id
+            where ra.collected_at >= $1::timestamptz
+              and ra.collected_at < $2::timestamptz
             group by category
             order by count desc, category asc
           `,
@@ -188,10 +189,11 @@ export async function getDashboardData(
       ? pool.query<CategoryRow>(
           `
             select category, count(*)::int as count
-            from processed_contents
-            where created_at >= $1::timestamptz
-              and created_at < $2::timestamptz
-              and routing = 'digest'
+            from processed_contents pc
+            join raw_articles ra on ra.id = pc.raw_article_id
+            where ra.collected_at >= $1::timestamptz
+              and ra.collected_at < $2::timestamptz
+              and pc.routing = 'digest'
             group by category
             order by count desc, category asc
           `,
@@ -262,9 +264,10 @@ export async function getDashboardData(
           count(pc.id) filter (where pc.routing = 'long_form')::int as long_form,
           count(pc.id) filter (where pc.routing = 'inspiration')::int as inspiration
         from scopes scope
-        left join processed_contents pc
-          on pc.created_at >= scope.start_at
-          and pc.created_at < scope.end_at
+        left join raw_articles ra
+          on ra.collected_at >= scope.start_at
+          and ra.collected_at < scope.end_at
+        left join processed_contents pc on pc.raw_article_id = ra.id
         group by scope.date
       `,
       [scopeDates, scopeStarts, scopeEnds],
@@ -281,11 +284,16 @@ export async function getDashboardData(
         )
         select
           scope.date,
-          count(e.id)::int as total
+          count(distinct e.id)::int as total
         from scopes scope
-        left join events e
-          on e.created_at >= scope.start_at
-          and e.created_at < scope.end_at
+        left join raw_articles ra
+          on ra.collected_at >= scope.start_at
+          and ra.collected_at < scope.end_at
+        left join processed_contents pc
+          on pc.raw_article_id = ra.id
+          and pc.event_id is not null
+          and pc.routing = 'event'
+        left join events e on e.id = pc.event_id
         group by scope.date
       `,
       [scopeDates, scopeStarts, scopeEnds],
@@ -415,12 +423,13 @@ async function loadContentFunnel(
             + char_length(coalesce(pc.summary_zh, ''))
           ), 0)::bigint as processed_summary_chars
         from processed_contents pc
-        where pc.created_at >= $1::timestamptz
-          and pc.created_at < $2::timestamptz
+        join raw_articles ra on ra.id = pc.raw_article_id
+        where ra.collected_at >= $1::timestamptz
+          and ra.collected_at < $2::timestamptz
       `,
       [scope.startAt, scope.endAt],
     ),
-    getDailyBrief(pool, briefRange),
+    getDailyBrief(pool, briefRange, { rawArticleScope: scope }),
   ]);
 
   const raw = rawResult.rows[0];

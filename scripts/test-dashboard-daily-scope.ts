@@ -103,6 +103,49 @@ checks.push({
   detail: detailScopeQueries.map((query) => query.values),
 });
 
+const processedAggregateQuery = completedQueries.find((query) =>
+  query.text.includes("count(pc.id)::int as total"),
+);
+const processedDetailQueries = completedQueries.filter(
+  (query) =>
+    query.text.includes("select category") ||
+    query.text.includes("as processed_summary_chars"),
+);
+checks.push({
+  name: "late Processed retries remain attributed to the Raw Article Daily scope",
+  passed:
+    processedAggregateQuery?.text.includes("left join raw_articles ra") === true &&
+    processedAggregateQuery.text.includes("pc.raw_article_id = ra.id") &&
+    !processedAggregateQuery.text.includes("pc.created_at >=") &&
+    processedDetailQueries.length === 3 &&
+    processedDetailQueries.every(
+      (query) =>
+        query.text.includes("join raw_articles ra on ra.id = pc.raw_article_id") &&
+        query.text.includes("ra.collected_at >=") &&
+        !query.text.includes("pc.created_at >="),
+    ),
+  detail: {
+    rawCollectedAt: "2026-08-19T05:00:00.000Z",
+    processedCreatedAt: "2026-08-21T05:00:00.000Z",
+    dailyDate: "2026-08-20",
+  },
+});
+
+const eventAggregateQuery = completedQueries.find((query) =>
+  query.text.includes("count(distinct e.id)::int as total"),
+);
+checks.push({
+  name: "Events are attributed through Event Candidates in the Raw scope and counted once",
+  passed:
+    eventAggregateQuery?.text.includes("count(distinct e.id)::int") === true &&
+    eventAggregateQuery.text.includes("left join raw_articles ra") &&
+    eventAggregateQuery.text.includes("pc.raw_article_id = ra.id") &&
+    eventAggregateQuery.text.includes("pc.event_id is not null") &&
+    eventAggregateQuery.text.includes("pc.routing = 'event'") &&
+    !eventAggregateQuery.text.includes("e.created_at >="),
+  detail: "Multiple in-scope Event Candidates for one event produce one count.",
+});
+
 const futureQueries: CapturedQuery[] = [];
 const futureData = await getDashboardData(createDashboardPool(futureQueries), {
   detailDate: "2026-08-25",

@@ -133,7 +133,7 @@ export type Stage3JobResult = {
 };
 
 const DEFAULT_LOOKBACK_HOURS = 24;
-const DEFAULT_EVENT_TOP_N = 10;
+const DEFAULT_EVENT_TOP_N = 15;
 const CATEGORY_ORDER = [
   "Company",
   "Finance & Economy",

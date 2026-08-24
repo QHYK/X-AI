@@ -1,6 +1,15 @@
 import type { Pool } from "pg";
 import type { ShanghaiDayRange } from "./brief-date.js";
 
+export type RawArticleScope = {
+  startAt: string;
+  endAt: string;
+};
+
+export type DailyBriefOptions = {
+  rawArticleScope?: RawArticleScope;
+};
+
 export const DIGEST_CATEGORY_KEYS = [
   "Finance & Economy",
   "Technology",
@@ -114,12 +123,13 @@ type InspirationRow = Omit<ContentRow, "rank" | "category"> & {
 export async function getDailyBrief(
   pool: Pool,
   range: ShanghaiDayRange,
+  options: DailyBriefOptions = {},
 ): Promise<DailyBriefResponse> {
   const [events, digests, longForm, inspiration] = await Promise.all([
-    loadEvents(pool, range),
-    loadDigestItems(pool, range),
-    loadLongFormItems(pool, range),
-    loadInspirationItems(pool, range),
+    loadEvents(pool, range, options.rawArticleScope),
+    loadDigestItems(pool, range, options.rawArticleScope),
+    loadLongFormItems(pool, range, options.rawArticleScope),
+    loadInspirationItems(pool, range, options.rawArticleScope),
   ]);
   const digestCountByCategory = countDigestsByCategory(digests);
 
@@ -142,7 +152,23 @@ export async function getDailyBrief(
   };
 }
 
-async function loadEvents(pool: Pool, range: ShanghaiDayRange): Promise<BriefEvent[]> {
+async function loadEvents(
+  pool: Pool,
+  range: ShanghaiDayRange,
+  rawArticleScope?: RawArticleScope,
+): Promise<BriefEvent[]> {
+  const scopePredicate = rawArticleScope
+    ? `
+        exists (
+          select 1
+          from processed_contents pc
+          join raw_articles ra on ra.id = pc.raw_article_id
+          where pc.event_id = events.id
+            and ra.collected_at >= $1::timestamptz
+            and ra.collected_at < $2::timestamptz
+        )
+      `
+    : `created_at >= $1::timestamptz and created_at < $2::timestamptz`;
   const eventResult = await pool.query<EventRow>(
     `
       select
@@ -161,13 +187,12 @@ async function loadEvents(pool: Pool, range: ShanghaiDayRange): Promise<BriefEve
         source_perspectives,
         external_context
       from events
-      where created_at >= $1::timestamptz
-        and created_at < $2::timestamptz
+      where ${scopePredicate}
         and coalesce(display_rank, ai_rank) is not null
       order by coalesce(display_rank, ai_rank) asc, created_at asc, id asc
       limit 10
     `,
-    [range.startUtc, range.endUtc],
+    scopeValues(range, rawArticleScope),
   );
 
   const eventIds = eventResult.rows.map((row) => row.id);
@@ -233,6 +258,7 @@ async function loadEventSources(
 async function loadDigestItems(
   pool: Pool,
   range: ShanghaiDayRange,
+  rawArticleScope?: RawArticleScope,
 ): Promise<Record<string, BriefContentItem[]>> {
   const result = await pool.query<ContentRow>(
     `
@@ -253,11 +279,10 @@ async function loadDigestItems(
       join sources s on s.id = ra.source_id
       where pc.routing = 'digest'
         and coalesce(pc.display_rank, pc.ai_rank) is not null
-        and pc.created_at >= $1::timestamptz
-        and pc.created_at < $2::timestamptz
+        and ${rawArticleScopePredicate(rawArticleScope, "pc.created_at", "ra")}
       order by pc.category asc, coalesce(pc.display_rank, pc.ai_rank) asc, pc.created_at asc, pc.id asc
     `,
-    [range.startUtc, range.endUtc],
+    scopeValues(range, rawArticleScope),
   );
 
   const digests = createEmptyDigests();
@@ -272,6 +297,7 @@ async function loadDigestItems(
 async function loadLongFormItems(
   pool: Pool,
   range: ShanghaiDayRange,
+  rawArticleScope?: RawArticleScope,
 ): Promise<BriefContentItem[]> {
   const result = await pool.query<ContentRow>(
     `
@@ -292,12 +318,11 @@ async function loadLongFormItems(
       join sources s on s.id = ra.source_id
       where pc.routing = 'long_form'
         and coalesce(pc.display_rank, pc.ai_rank) is not null
-        and pc.created_at >= $1::timestamptz
-        and pc.created_at < $2::timestamptz
+        and ${rawArticleScopePredicate(rawArticleScope, "pc.created_at", "ra")}
       order by coalesce(pc.display_rank, pc.ai_rank) asc, pc.created_at asc, pc.id asc
       limit 10
     `,
-    [range.startUtc, range.endUtc],
+    scopeValues(range, rawArticleScope),
   );
 
   return result.rows.map(toBriefContentItem);
@@ -306,6 +331,7 @@ async function loadLongFormItems(
 async function loadInspirationItems(
   pool: Pool,
   range: ShanghaiDayRange,
+  rawArticleScope?: RawArticleScope,
 ): Promise<BriefInspirationItem[]> {
   const result = await pool.query<InspirationRow>(
     `
@@ -324,11 +350,10 @@ async function loadInspirationItems(
       join raw_articles ra on ra.id = pc.raw_article_id
       join sources s on s.id = ra.source_id
       where pc.routing = 'inspiration'
-        and pc.created_at >= $1::timestamptz
-        and pc.created_at < $2::timestamptz
+        and ${rawArticleScopePredicate(rawArticleScope, "pc.created_at", "ra")}
       order by pc.created_at asc, pc.id asc
     `,
-    [range.startUtc, range.endUtc],
+    scopeValues(range, rawArticleScope),
   );
 
   return result.rows.map((row) => ({
@@ -343,6 +368,25 @@ async function loadInspirationItems(
     published_at: toIsoString(row.published_at),
     created_at: toIsoString(row.created_at) ?? "",
   }));
+}
+
+function rawArticleScopePredicate(
+  rawArticleScope: RawArticleScope | undefined,
+  createdAtColumn: string,
+  rawArticleAlias: string,
+): string {
+  return rawArticleScope
+    ? `${rawArticleAlias}.collected_at >= $1::timestamptz and ${rawArticleAlias}.collected_at < $2::timestamptz`
+    : `${createdAtColumn} >= $1::timestamptz and ${createdAtColumn} < $2::timestamptz`;
+}
+
+function scopeValues(
+  range: ShanghaiDayRange,
+  rawArticleScope: RawArticleScope | undefined,
+): [Date, Date] | [string, string] {
+  return rawArticleScope
+    ? [rawArticleScope.startAt, rawArticleScope.endAt]
+    : [range.startUtc, range.endUtc];
 }
 
 function createEmptyDigests(): Record<string, BriefContentItem[]> {
