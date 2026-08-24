@@ -2,6 +2,8 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Pool } from "pg";
 import { parseBriefDate, type ShanghaiDayRange } from "./brief-date.js";
+import { getDailyBrief, type DailyBriefResponse } from "./daily-brief.js";
+import { resolveDailyScope } from "./daily-scope.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DASHBOARD_DAYS = 7;
@@ -32,6 +34,12 @@ type TotalRow = {
   raw_articles: number | string;
   processed_contents: number | string;
   events: number | string;
+};
+
+type ContentFunnelRow = {
+  raw_chars?: number | string;
+  selected_chars?: number | string;
+  processed_summary_chars?: number | string;
 };
 
 type JsonObject = Record<string, unknown>;
@@ -70,6 +78,13 @@ export type DashboardContentCompletionMetrics = {
   remainingCount: number | null;
   limit: number | null;
   perSourceLimit: number | null;
+};
+
+export type DashboardContentFunnel = {
+  rawChars: number;
+  selectedChars: number;
+  processedSummaryChars: number;
+  dailyBriefChars: number;
 };
 
 export function formatContentCompletionRatio(
@@ -117,6 +132,7 @@ export type DashboardData = {
   };
   days: DashboardDay[];
   details: {
+    contentFunnel: DashboardContentFunnel;
     processedByCategory: Record<string, number>;
     digestByCategory: Record<string, number>;
     contentCompletion: DashboardContentCompletionMetrics | null;
@@ -149,6 +165,7 @@ export async function getDashboardData(
     digestCategoriesResult,
     runtimeByDate,
     completionByDate,
+    contentFunnel,
   ] = await Promise.all([
     pool.query<TotalRow>(`
       select
@@ -231,6 +248,7 @@ export async function getDashboardData(
       options.rootDir ?? process.cwd(),
       new Set([...ranges.map((range) => range.date), detailRange.date]),
     ),
+    loadContentFunnel(pool, detailRange),
   ]);
 
   const totals = totalsResult.rows[0];
@@ -303,12 +321,85 @@ export async function getDashboardData(
     },
     days,
     details: {
+      contentFunnel,
       processedByCategory: categoryCounts(processedCategoriesResult.rows),
       digestByCategory: categoryCounts(digestCategoriesResult.rows),
       contentCompletion: completionByDate.get(detailRange.date) ?? null,
       stages: detailStages,
     },
   };
+}
+
+async function loadContentFunnel(
+  pool: Pool,
+  briefRange: ShanghaiDayRange,
+): Promise<DashboardContentFunnel> {
+  const scope = resolveDailyScope(briefRange.date);
+  const [rawResult, processedResult, brief] = await Promise.all([
+    pool.query<ContentFunnelRow>(
+      `
+        select
+          coalesce(sum(
+            char_length(coalesce(title, ''))
+            + char_length(coalesce(content_text, ''))
+          ), 0)::bigint as raw_chars,
+          coalesce(sum(
+            char_length(coalesce(title, ''))
+            + char_length(coalesce(content_text, ''))
+          ) filter (where stage1_status = 'selected'), 0)::bigint as selected_chars
+        from raw_articles
+        where collected_at >= $1::timestamptz
+          and collected_at < $2::timestamptz
+      `,
+      [scope.startAt, scope.endAt],
+    ),
+    pool.query<ContentFunnelRow>(
+      `
+        select
+          coalesce(sum(
+            char_length(coalesce(pc.title_zh, ''))
+            + char_length(coalesce(pc.summary_zh, ''))
+          ), 0)::bigint as processed_summary_chars
+        from processed_contents pc
+        join raw_articles ra on ra.id = pc.raw_article_id
+        where ra.collected_at >= $1::timestamptz
+          and ra.collected_at < $2::timestamptz
+      `,
+      [scope.startAt, scope.endAt],
+    ),
+    getDailyBrief(pool, briefRange),
+  ]);
+
+  const raw = rawResult.rows[0];
+  const processed = processedResult.rows[0];
+  return {
+    rawChars: count(raw?.raw_chars),
+    selectedChars: count(raw?.selected_chars),
+    processedSummaryChars: count(processed?.processed_summary_chars),
+    dailyBriefChars: countDailyBriefCharacters(brief),
+  };
+}
+
+function countDailyBriefCharacters(brief: DailyBriefResponse): number {
+  const events = brief.events.reduce(
+    (sum, item) => sum + characterLength(item.title_zh) + characterLength(item.summary_zh),
+    0,
+  );
+  const digests = Object.values(brief.digests)
+    .flat()
+    .reduce(
+      (sum, item) => sum + characterLength(item.title_zh) + characterLength(item.summary_zh),
+      0,
+    );
+  const longForm = brief.long_form.reduce(
+    (sum, item) => sum + characterLength(item.title_zh) + characterLength(item.summary_zh),
+    0,
+  );
+  return events + digests + longForm;
+}
+
+function characterLength(value: string | null): number {
+  return value === null ? 0 : Array.from(value).length;
 }
 
 export async function loadContentCompletionRuntimeByDate(

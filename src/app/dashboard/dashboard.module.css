@@ -76,6 +76,7 @@
 
 .summaryCard,
 .panel,
+.funnelCard,
 .detailCard,
 .stageCard {
   border: 1px solid #dce2df;
@@ -117,6 +118,7 @@
 
 .panelHeading h2,
 .sectionHeading h2,
+.funnelCard h3,
 .detailCard h3,
 .stageCard h3 {
   margin: 0;
@@ -241,6 +243,87 @@
   background: #f0f7f3;
 }
 
+.funnelCard {
+  padding: 20px 24px;
+  margin-bottom: 16px;
+}
+
+.funnelHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.funnelHeading h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.funnelHeading p,
+.funnelHeading > span {
+  margin: 5px 0 0;
+  color: #68756f;
+  font-size: 0.76rem;
+}
+
+.funnelList {
+  margin: 16px 0 0;
+}
+
+.funnelList > div {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(250px, 1fr);
+  gap: 20px;
+  padding: 11px 0;
+  border-top: 1px solid #edf0ee;
+}
+
+.funnelList dt,
+.funnelRatios dt {
+  color: #4d5d55;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.funnelList dd {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(100px, 1fr);
+  gap: 16px;
+  margin: 0;
+  text-align: right;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.funnelList dd span {
+  color: #627068;
+}
+
+.funnelRatios {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0 0;
+}
+
+.funnelRatios > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-radius: 9px;
+  background: #f4f7f5;
+}
+
+.funnelRatios dd {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
 .detailGrid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -332,6 +415,7 @@
 
   .header,
   .panelHeading,
+  .funnelHeading,
   .sectionHeading {
     align-items: flex-start;
     flex-direction: column;
@@ -339,8 +423,19 @@
 
   .summaryGrid,
   .detailGrid,
+  .funnelRatios,
   .stageGrid {
     grid-template-columns: 1fr;
+  }
+
+  .funnelList > div,
+  .funnelList dd {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .funnelList dd {
+    text-align: left;
   }
 
   .panelHeading > p {

@@ -3,6 +3,7 @@ import {
   formatContentCompletionRatio,
   getDashboardData,
   type DashboardContentCompletionMetrics,
+  type DashboardContentFunnel,
   type DashboardStageMetrics,
 } from "@/lib/dashboard.js";
 import styles from "./dashboard.module.css";
@@ -119,7 +120,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             <p className={styles.kicker}>Date details</p>
             <h2>{data.detailDate}</h2>
           </div>
-          <form action="/dashboard" className={styles.dateForm}>
+          <form action="./dashboard" className={styles.dateForm}>
             <label htmlFor="dashboard-date">Select date</label>
             <input
               id="dashboard-date"
@@ -130,6 +131,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             <button type="submit">View</button>
           </form>
         </div>
+
+        <ContentFunnel funnel={data.details.contentFunnel} />
 
         <div className={styles.detailGrid}>
           <CategoryPanel
@@ -154,6 +157,64 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         </div>
       </section>
     </main>
+  );
+}
+
+function ContentFunnel({ funnel }: { funnel: DashboardContentFunnel }) {
+  const rows = [
+    {
+      label: "Raw Content",
+      chars: funnel.rawChars,
+      ratio: "100%",
+    },
+    {
+      label: "Selected Content",
+      chars: funnel.selectedChars,
+      ratio: `${formatPercentage(funnel.selectedChars, funnel.rawChars)} of Raw`,
+    },
+    {
+      label: "Processed Summary",
+      chars: funnel.processedSummaryChars,
+      ratio: `${formatPercentage(funnel.processedSummaryChars, funnel.rawChars)} of Raw`,
+    },
+    {
+      label: "Daily Brief",
+      chars: funnel.dailyBriefChars,
+      ratio: `${formatPercentage(funnel.dailyBriefChars, funnel.rawChars)} of Raw`,
+    },
+  ];
+
+  return (
+    <article className={styles.funnelCard}>
+      <div className={styles.funnelHeading}>
+        <div>
+          <h3>Content Funnel</h3>
+          <p>Character volume · Daily 09:00 boundary</p>
+        </div>
+        <span>Null values count as 0</span>
+      </div>
+      <dl className={styles.funnelList}>
+        {rows.map((row) => (
+          <div key={row.label}>
+            <dt>{row.label}</dt>
+            <dd>
+              <strong>{formatNumber(row.chars)} chars</strong>
+              <span>{row.ratio}</span>
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <dl className={styles.funnelRatios}>
+        <div>
+          <dt>Summary / Selected</dt>
+          <dd>{formatPercentage(funnel.processedSummaryChars, funnel.selectedChars)}</dd>
+        </div>
+        <div>
+          <dt>Daily Brief / Raw</dt>
+          <dd>{formatPercentage(funnel.dailyBriefChars, funnel.rawChars)}</dd>
+        </div>
+      </dl>
+    </article>
   );
 }
 
@@ -319,6 +380,10 @@ function formatNumber(value: number): string {
 
 function formatMetric(value: number | null | undefined): string {
   return value === null || value === undefined ? "N/A" : formatNumber(value);
+}
+
+function formatPercentage(value: number, total: number): string {
+  return total === 0 ? "N/A" : `${((value / total) * 100).toFixed(1)}%`;
 }
 
 function formatDuration(value: number | null | undefined): string {
