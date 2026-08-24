@@ -1,6 +1,7 @@
 import { getDatabasePool } from "@/db/index.js";
 import {
   getDashboardData,
+  type DashboardContentCompletionMetrics,
   type DashboardStageMetrics,
 } from "@/lib/dashboard.js";
 import styles from "./dashboard.module.css";
@@ -61,6 +62,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 <th>Stage1 Selected</th>
                 <th>Ignored</th>
                 <th>Failed</th>
+                <th>Completion</th>
+                <th>Backlog</th>
+                <th>Completion Duration</th>
                 <th>Stage1 Duration</th>
                 <th>Processed Total</th>
                 <th>Event</th>
@@ -85,6 +89,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   <td>{formatNumber(day.raw.selected)}</td>
                   <td>{formatNumber(day.raw.ignored)}</td>
                   <td>{formatNumber(day.raw.failed)}</td>
+                  <td>{formatCompletion(day.runtime.contentCompletion)}</td>
+                  <td>{formatMetric(day.runtime.contentCompletion?.remainingCount)}</td>
+                  <td>{formatDuration(day.runtime.contentCompletion?.durationMs)}</td>
                   <td>{formatDuration(day.runtime.stages.stage1?.durationMs)}</td>
                   <td>{formatNumber(day.processed.total)}</td>
                   <td>{formatNumber(day.processed.event)}</td>
@@ -135,6 +142,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         </div>
 
         <div className={styles.stageGrid}>
+          <ContentCompletionCard metrics={data.details.contentCompletion} />
           {Object.entries(data.details.stages).map(([stage, metrics]) => (
             <StageCard
               key={stage}
@@ -145,6 +153,42 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         </div>
       </section>
     </main>
+  );
+}
+
+function ContentCompletionCard({
+  metrics,
+}: {
+  metrics: DashboardContentCompletionMetrics | null;
+}) {
+  if (!metrics) {
+    return (
+      <article className={styles.stageCard}>
+        <div className={styles.stageHeader}>
+          <h3>Content Completion</h3>
+          <span className={styles.naBadge}>N/A</span>
+        </div>
+        <p className={styles.empty}>No runtime artifact for this date.</p>
+      </article>
+    );
+  }
+
+  return (
+    <article className={styles.stageCard}>
+      <div className={styles.stageHeader}>
+        <h3>Content Completion</h3>
+        <StatusBadge status={metrics.status} />
+      </div>
+      <dl className={styles.metricList}>
+        <Metric label="Candidates" value={formatMetric(metrics.candidateCount)} />
+        <Metric label="Selected" value={formatMetric(metrics.selectedCount)} />
+        <Metric label="Succeeded" value={formatMetric(metrics.successCount)} />
+        <Metric label="Failed" value={formatMetric(metrics.failedCount)} />
+        <Metric label="Remaining" value={formatMetric(metrics.remainingCount)} />
+        <Metric label="Duration" value={formatDuration(metrics.durationMs)} />
+        <Metric label="Limit" value={formatMetric(metrics.limit)} />
+      </dl>
+    </article>
   );
 }
 
@@ -274,6 +318,18 @@ function formatNumber(value: number): string {
 
 function formatMetric(value: number | null | undefined): string {
   return value === null || value === undefined ? "N/A" : formatNumber(value);
+}
+
+function formatCompletion(
+  metrics: DashboardContentCompletionMetrics | null,
+): string {
+  if (metrics?.successCount === null || metrics?.successCount === undefined) {
+    return "N/A";
+  }
+  if (metrics.selectedCount === null) {
+    return "N/A";
+  }
+  return `${formatNumber(metrics.successCount)} / ${formatNumber(metrics.selectedCount)}`;
 }
 
 function formatDuration(value: number | null | undefined): string {

@@ -16,10 +16,10 @@ X-AI-field 是一个 AI 驱动的信息筛选系统：持续收集可信信息�
 - Daily Workflow Orchestrator
 - Daily Brief API `GET /api/brief?date=YYYY-MM-DD`
 - Internal Dashboard `/dashboard`
-
-下一步：
 - X-field Daily Brief 页面
 - 09:00 Asia/Shanghai Cron
+
+下一步：
 - 增加 Review / feedback workflow
 
 ## Daily Brief
@@ -139,10 +139,12 @@ npm run test:deepseek
 npm run test:kimi
 
 npm run recover:stage4-events:dry-run      # 只读分析 Stage 4 runtime 与数据库，输出可恢复候选，不写库
+```
 
 常用运行参数：
 
 ```bash
+DAILY_DATE=2026-mm-dd npm run daily
 STAGE1_LIMIT=20 npm run process:stage1
 STAGE1_CONCURRENCY=2 npm run process:stage1
 STAGE3_EVENT_TOP_N=10 npm run process:stage3

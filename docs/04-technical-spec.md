@@ -370,6 +370,17 @@ source_id + date
 09:00 Asia/Shanghai
 ```
 
+每个 Daily 使用固定的 `raw_articles.collected_at` 半开区间，Daily 日期对应区间结束的
+09:00 boundary。例如：
+
+```text
+Daily 2026-08-25
+= 2026-08-24 09:00 <= collected_at < 2026-08-25 09:00 (Asia/Shanghai)
+```
+
+Orchestrator 启动时只计算一次 scope；默认选择最近一个已经结束的 09:00 boundary。
+`DAILY_DATE=YYYY-MM-DD npm run daily` 可显式选择相同 scope 进行 retry / backfill。
+
 只设置一个 Cron Trigger。
 ```text
 Cron 09:00
@@ -479,6 +490,9 @@ FT: Fed ...
 
 只处理最近 workflow window 内 `stage1_status IN ('pending', 'failed')` 的 Raw Articles。
 
+Daily Workflow 使用本次 Daily 固定的 `raw_articles.collected_at` scope；
+单独运行 Stage 1时继续使用现有最近 24 小时默认窗口。
+
 Stage 1 对普通文章使用小型 micro-batch，但每篇 Raw Article 仍独立判断；较大的 input 可以单独处理。
 ```text
 Raw Article → LLM → Ignore / Event / Digest / Long-form / Inspiration
@@ -497,6 +511,8 @@ processing_error = ...
 Stage 1 全部可处理内容完成后触发 Stage 2。
 读取当前 workflow 的 Event Candidates；生成轻量 Event Groups。
 默认时间窗口与 Stage 1 一致，为最近 24 小时 collected 内容。
+在 Daily Workflow 中改用本次 Daily 固定的 `raw_articles.collected_at` scope；单独运行
+Stage 2 时继续使用最近 24 小时默认窗口。
 
 ```text
 Event Candidates
@@ -516,6 +532,10 @@ invented IDs，但暂时不阻断 runtime output。这是已知限制，后续�
 
 Stage 2 完成后主动触发 Stage 3。
 Stage 3 分阶段执行。
+
+Daily Workflow 中 Digest / Long-form 候选使用与 Stage 1/2 相同的固定 `raw_articles.collected_at` scope；
+单独运行 Stage 3 时继续使用最近 24 小时默认窗口。
+Event Groups 读取 Orchestrator 明确传入的本次 Stage 2 runtime run。
 
 ```text
 Event Groups
@@ -804,6 +824,13 @@ runtime     → Debug / operational artifacts，不是数据库
 npm run daily
 ```
 
+Orchestrator 固定本次 Daily scope，并将本次 Stage 2 run 明确传给 Stage 3、本次 Stage 3
+run 明确传给 Stage 4，避免 Daily 依赖全局 latest runtime。显式 retry / backfill：
+
+```bash
+DAILY_DATE=2026-08-25 npm run daily
+```
+
 完成 Stage 4 后，`/api/brief` 可直接读取 publish-ready 数据。
 
 未来：
@@ -816,6 +843,10 @@ npm run daily
 ## 9. Runtime Artifacts
 
 `runtime/` 保存 Stage 2–4 的真实 input / output / mapping / run metadata，用于 Debug、Review、重跑边界。
+
+`runtime/daily/.../run.json` 额外记录 `daily_date`、`timezone`、
+`scope_start_at`、`scope_end_at`，以及本次 `stage2_run`、`stage3_run`、`stage4_run`，
+同时保留各 step status / duration / failed_step。
 
 它不是应用数据库，也不是长期业务 Source of Truth，并保持 Git ignored。
 

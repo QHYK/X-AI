@@ -32,6 +32,7 @@ import type {
 import { inferSciencePublication } from "./science-publication.js";
 import { resolveStageLlmModel } from "./llm-client.js";
 import { normalizeArticleUrl } from "./url-normalization.js";
+import type { CollectedAtScope } from "../lib/daily-scope.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
 
@@ -108,6 +109,7 @@ type Stage3IdMap = {
 export type Stage3JobOptions = {
   stage2RunDir?: string;
   collectedWithinHours?: number;
+  collectedAtScope?: CollectedAtScope;
   eventTopN?: number;
   model?: string;
   rootDir?: string;
@@ -190,8 +192,18 @@ export async function processStage3(
     eventGroupCount = eventBundle.input.events.length;
     await writeJson(join(eventsDir, "input.json"), eventBundle.input);
 
-    const digestRows = await loadRankingRows(pool, "digest", collectedWithinHours);
-    const longFormRows = await loadRankingRows(pool, "long_form", collectedWithinHours);
+    const digestRows = await loadStage3RankingRows(
+      pool,
+      "digest",
+      collectedWithinHours,
+      options.collectedAtScope,
+    );
+    const longFormRows = await loadStage3RankingRows(
+      pool,
+      "long_form",
+      collectedWithinHours,
+      options.collectedAtScope,
+    );
     const digestRecords = buildDigestRecords(digestRows);
     const longFormRecords = buildLongFormRecords(longFormRows);
     digestBeforeDedup = digestRecords.length;
@@ -526,11 +538,18 @@ function validateStage2IdMap(input: Stage2Input, idMap: Stage2IdMap) {
   }
 }
 
-async function loadRankingRows(
+export async function loadStage3RankingRows(
   queryable: Queryable,
   routing: "digest" | "long_form",
   collectedWithinHours: number,
+  collectedAtScope?: CollectedAtScope,
 ): Promise<RankingCandidateRow[]> {
+  const collectedAtPredicate = collectedAtScope
+    ? "ra.collected_at >= $2::timestamptz and ra.collected_at < $3::timestamptz"
+    : "ra.collected_at >= now() - ($2::int * interval '1 hour')";
+  const values: Array<number | string> = collectedAtScope
+    ? [routing, collectedAtScope.startAt, collectedAtScope.endAt]
+    : [routing, collectedWithinHours];
   const result = await queryable.query<RankingCandidateRow>(
     `
       select
@@ -546,14 +565,14 @@ async function loadRankingRows(
       join sources s on s.id = ra.source_id
       where pc.routing = $1
         and ra.stage1_status = 'selected'
-        and ra.collected_at >= now() - ($2::int * interval '1 hour')
+        and ${collectedAtPredicate}
       order by
         pc.category,
         coalesce(ra.published_at, ra.collected_at) desc,
         s.name,
         pc.id
     `,
-    [routing, collectedWithinHours],
+    values,
   );
 
   return result.rows;

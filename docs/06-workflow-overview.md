@@ -104,6 +104,11 @@ flowchart LR
     UI -. "未来" .-> FB["[计划] Human Review / Feedback"]
 ```
 
+Daily Orchestrator 在启动时按 Asia/Shanghai 09:00 boundary 固定一次
+`raw_articles.collected_at` scope，并传给 Stage 1、Stage 2、Stage 3 Digest / Long-form。
+它也将本次 Stage 2 runtime 明确传给 Stage 3，再将本次 Stage 3 runtime 明确传给 Stage 4。
+单独运行 Stage 1–3 时仍使用原有最近 24 小时窗口。
+
 ## 四个 AI Stage
 
 ```text

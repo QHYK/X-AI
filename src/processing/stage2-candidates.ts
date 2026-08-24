@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from "pg";
+import type { CollectedAtScope } from "../lib/daily-scope.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
 
@@ -39,9 +40,16 @@ export async function loadStage2EventCandidates(
   queryable: Queryable,
   options: {
     collectedWithinHours?: number;
+    collectedAtScope?: CollectedAtScope;
   } = {},
 ): Promise<Stage2CandidateRow[]> {
   const collectedWithinHours = options.collectedWithinHours ?? DEFAULT_STAGE2_LOOKBACK_HOURS;
+  const collectedAtPredicate = options.collectedAtScope
+    ? "ra.collected_at >= $1::timestamptz and ra.collected_at < $2::timestamptz"
+    : "ra.collected_at >= now() - ($1::int * interval '1 hour')";
+  const values: Array<number | string> = options.collectedAtScope
+    ? [options.collectedAtScope.startAt, options.collectedAtScope.endAt]
+    : [collectedWithinHours];
   const result = await queryable.query<Stage2CandidateRow>(
     `
       select
@@ -58,13 +66,13 @@ export async function loadStage2EventCandidates(
       join sources s on s.id = ra.source_id
       where pc.routing = 'event'
         and ra.stage1_status = 'selected'
-        and ra.collected_at >= now() - ($1::int * interval '1 hour')
+        and ${collectedAtPredicate}
       order by
         coalesce(ra.published_at, ra.collected_at) desc,
         s.name,
         pc.id
     `,
-    [collectedWithinHours],
+    values,
   );
 
   return result.rows;

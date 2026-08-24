@@ -24,12 +24,33 @@ export type ContentCompletionResult = {
 };
 
 export type ContentCompletionSummary = {
+  candidateCount: number;
+  selectedCount: number;
+  successCount: number;
+  remainingCount: number;
+  limit: number;
+  perSourceLimit: number;
   checkedCount: number;
   attemptedCount: number;
   updatedCount: number;
   failedCount: number;
   skippedCount: number;
   results: ContentCompletionResult[];
+};
+
+export type ContentCompletionMetrics = Pick<
+  ContentCompletionSummary,
+  | "candidateCount"
+  | "selectedCount"
+  | "successCount"
+  | "failedCount"
+  | "skippedCount"
+  | "remainingCount"
+>;
+
+export type ContentCompletionLimits = {
+  limit: number;
+  perSourceLimit: number;
 };
 
 type CompletionTrigger = "empty_content" | "invalid_placeholder" | "short_long_form";
@@ -91,34 +112,98 @@ const CHALLENGE_MARKERS = [
   "cloudflare",
 ];
 
+const COMPLETION_ELIGIBILITY_SQL = `
+  ra.stage1_status = 'pending'
+  and ra.url is not null
+  and (
+    cardinality($1::text[]) = 0
+    or s.name = any($1::text[])
+  )
+  and (
+    $4::boolean = true
+    or ra.content_text is null
+    or btrim(ra.content_text) = ''
+    or lower(btrim(ra.content_text)) = any($2::text[])
+    or (
+      s.category = 'long-form'
+      and length(ra.content_text) < $3
+    )
+  )
+`;
+
 export async function completeRawArticleContent(
   pool: Pool,
   options: ContentCompletionOptions = {},
+  onMetrics?: (metrics: Partial<ContentCompletionMetrics>) => void,
 ): Promise<ContentCompletionSummary> {
+  const limits = resolveContentCompletionLimits(options);
+  const candidateCount = await countCompletionCandidates(pool, options);
+  onMetrics?.({ candidateCount });
   const candidates = await loadCompletionCandidates(pool, options);
+  onMetrics?.({ selectedCount: candidates.length });
+  const completedResults: ContentCompletionResult[] = [];
   const results = await runWithConcurrency(
     candidates,
     Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY),
-    (candidate) => completeRawArticle(pool, candidate),
+    async (candidate) => {
+      const result = await completeRawArticle(pool, candidate);
+      completedResults.push(result);
+      onMetrics?.(summarizeCompletionResults(completedResults));
+      return result;
+    },
   );
+  const resultCounts = summarizeCompletionResults(results);
+  onMetrics?.(resultCounts);
+  const remainingCount = await countCompletionCandidates(pool, options);
+  onMetrics?.({ remainingCount });
 
   return {
+    candidateCount,
+    selectedCount: candidates.length,
+    successCount: resultCounts.successCount,
+    remainingCount,
+    ...limits,
     checkedCount: results.length,
     attemptedCount: results.filter((result) => result.status !== "skipped").length,
-    updatedCount: results.filter((result) => result.status === "updated").length,
-    failedCount: results.filter((result) => result.status === "failed").length,
-    skippedCount: results.filter((result) => result.status === "skipped").length,
+    updatedCount: resultCounts.successCount,
+    failedCount: resultCounts.failedCount,
+    skippedCount: resultCounts.skippedCount,
     results,
   };
 }
 
-async function loadCompletionCandidates(
-  pool: Pool,
+export function resolveContentCompletionLimits(
+  options: ContentCompletionOptions = {},
+): ContentCompletionLimits {
+  return {
+    limit: options.limit ?? DEFAULT_LIMIT,
+    perSourceLimit: options.perSourceLimit ?? DEFAULT_PER_SOURCE_LIMIT,
+  };
+}
+
+export async function countCompletionCandidates(
+  queryable: Pick<Pool | PoolClient, "query">,
+  options: ContentCompletionOptions = {},
+): Promise<number> {
+  const result = await queryable.query<{ count: number | string }>(
+    `
+      select count(*)::int as count
+      from raw_articles ra
+      join sources s on s.id = ra.source_id
+      where ${COMPLETION_ELIGIBILITY_SQL}
+    `,
+    completionEligibilityValues(options),
+  );
+
+  return Number(result.rows[0]?.count ?? 0);
+}
+
+export async function loadCompletionCandidates(
+  queryable: Pick<Pool | PoolClient, "query">,
   options: ContentCompletionOptions,
 ): Promise<RawArticleCompletionCandidate[]> {
-  const sourceNames = options.sourceNames?.filter(Boolean) ?? [];
-  const includeTriggerSkippedRows = sourceNames.length > 0;
-  const result = await pool.query<RawArticleCompletionCandidate>(
+  const limits = resolveContentCompletionLimits(options);
+  const result = await queryable.query<RawArticleCompletionCandidate>(
     `
       with ranked as (
         select
@@ -134,9 +219,9 @@ async function loadCompletionCandidates(
             order by
               case
                 when ra.content_text is null or btrim(ra.content_text) = '' then 0
-                when lower(btrim(ra.content_text)) = any($4::text[]) then 1
+                when lower(btrim(ra.content_text)) = any($2::text[]) then 1
                 when s.category = 'long-form'
-                  and length(ra.content_text) < $5 then 2
+                  and length(ra.content_text) < $3 then 2
                 else 3
               end,
               length(coalesce(ra.content_text, '')) asc,
@@ -144,22 +229,7 @@ async function loadCompletionCandidates(
           ) as source_rank
         from raw_articles ra
         join sources s on s.id = ra.source_id
-        where ra.stage1_status = 'pending'
-          and ra.url is not null
-          and (
-            cardinality($1::text[]) = 0
-            or s.name = any($1::text[])
-          )
-          and (
-            $6::boolean = true
-            or ra.content_text is null
-            or btrim(ra.content_text) = ''
-            or lower(btrim(ra.content_text)) = any($4::text[])
-            or (
-              s.category = 'long-form'
-              and length(ra.content_text) < $5
-            )
-          )
+        where ${COMPLETION_ELIGIBILITY_SQL}
       )
       select
         id,
@@ -170,21 +240,40 @@ async function loadCompletionCandidates(
         url,
         "contentText"
       from ranked
-      where source_rank <= $2
+      where source_rank <= $5
       order by "sourceName", source_rank
-      limit $3
+      limit $6
     `,
     [
-      sourceNames,
-      options.perSourceLimit ?? DEFAULT_PER_SOURCE_LIMIT,
-      options.limit ?? DEFAULT_LIMIT,
-      [...PLACEHOLDER_CONTENT],
-      LONG_FORM_SHORT_CONTENT_CHARS,
-      includeTriggerSkippedRows,
+      ...completionEligibilityValues(options),
+      limits.perSourceLimit,
+      limits.limit,
     ],
   );
 
   return result.rows;
+}
+
+export function summarizeCompletionResults(
+  results: ContentCompletionResult[],
+): Pick<ContentCompletionMetrics, "successCount" | "failedCount" | "skippedCount"> {
+  return {
+    successCount: results.filter((result) => result.status === "updated").length,
+    failedCount: results.filter((result) => result.status === "failed").length,
+    skippedCount: results.filter((result) => result.status === "skipped").length,
+  };
+}
+
+function completionEligibilityValues(
+  options: ContentCompletionOptions,
+): [string[], string[], number, boolean] {
+  const sourceNames = options.sourceNames?.filter(Boolean) ?? [];
+  return [
+    sourceNames,
+    [...PLACEHOLDER_CONTENT],
+    LONG_FORM_SHORT_CONTENT_CHARS,
+    sourceNames.length > 0,
+  ];
 }
 
 async function completeRawArticle(
