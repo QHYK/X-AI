@@ -59,6 +59,7 @@ export const rawArticles = pgTable(
   (table) => [
     index("raw_articles_source_id_idx").on(table.sourceId),
     index("raw_articles_published_at_idx").on(table.publishedAt),
+    index("raw_articles_collected_at_idx").on(table.collectedAt),
     index("raw_articles_stage1_status_idx").on(table.stage1Status),
   ],
 );

@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import type { ShanghaiDayRange } from "./brief-date.js";
+import { resolveDailyScope, type DailyScope } from "./daily-scope.js";
 
 export type RawArticleScope = {
   startAt: string;
@@ -68,7 +69,7 @@ export type DailyBriefResponse = {
   inspiration: BriefInspirationItem[];
   meta: {
     timezone: "Asia/Shanghai";
-    date_basis: "created_at";
+    date_basis: "raw_articles.collected_at";
     generated_at: string;
     event_count: number;
     digest_count: number;
@@ -141,7 +142,7 @@ export async function getDailyBrief(
     inspiration,
     meta: {
       timezone: "Asia/Shanghai",
-      date_basis: "created_at",
+      date_basis: "raw_articles.collected_at",
       generated_at: new Date().toISOString(),
       event_count: events.length,
       digest_count: Object.values(digests).reduce((sum, items) => sum + items.length, 0),
@@ -150,6 +151,28 @@ export async function getDailyBrief(
       inspiration_count: inspiration.length,
     },
   };
+}
+
+export function getDailyBriefForDailyScope(
+  pool: Pool,
+  scope: DailyScope,
+): Promise<DailyBriefResponse> {
+  return getDailyBrief(
+    pool,
+    {
+      date: scope.dailyDate,
+      startUtc: new Date(scope.startAt),
+      endUtc: new Date(scope.endAt),
+    },
+    { rawArticleScope: scope },
+  );
+}
+
+export function getDailyBriefForDailyDate(
+  pool: Pool,
+  dailyDate: string,
+): Promise<DailyBriefResponse> {
+  return getDailyBriefForDailyScope(pool, resolveDailyScope(dailyDate));
 }
 
 async function loadEvents(

@@ -7,6 +7,7 @@ import {
   loadContentCompletionRuntimeByDate,
   loadRuntimeMetricsByDate,
 } from "../src/lib/dashboard.js";
+import { getDailyBriefForDailyDate } from "../src/lib/daily-brief.js";
 import {
   resolveDailyScope,
   resolveRecentCompletedDailyScopes,
@@ -167,6 +168,63 @@ checks.push({
     ),
 });
 
+const apiQueries: CapturedQuery[] = [];
+const apiBrief = await getDailyBriefForDailyDate(createBriefPool(apiQueries), detailScope.dailyDate);
+const adjacentScope = resolveDailyScope("2026-08-25");
+const adjacentApiQueries: CapturedQuery[] = [];
+await getDailyBriefForDailyDate(createBriefPool(adjacentApiQueries), adjacentScope.dailyDate);
+const apiScopeQueries = apiQueries.filter((query) =>
+  query.text.includes("from events") || query.text.includes("pc.routing ="),
+);
+checks.push({
+  name: "API uses Raw Article scope for late Processed and Event results",
+  passed:
+    apiBrief.events.length === 1 &&
+    Object.values(apiBrief.digests).flat().length === 1 &&
+    apiBrief.long_form.length === 1 &&
+    apiBrief.inspiration.length === 1 &&
+    apiBrief.meta.date_basis === "raw_articles.collected_at" &&
+    apiScopeQueries.length === 4 &&
+    apiScopeQueries.every(
+      (query) =>
+        query.text.includes("ra.collected_at >=") &&
+        query.text.includes("ra.collected_at <") &&
+        JSON.stringify(query.values) === JSON.stringify([detailScope.startAt, detailScope.endAt]),
+    ),
+  detail: {
+    rawCollectedAt: "2026-08-23T02:00:00.000Z",
+    processedAndEventCreatedAt: "2026-08-26T02:00:00.000Z",
+    dailyDate: detailScope.dailyDate,
+  },
+});
+checks.push({
+  name: "API Events use EXISTS over Event Candidates and adjacent Daily scopes do not share bounds",
+  passed:
+    apiQueries.some(
+      (query) =>
+        query.text.includes("where pc.event_id = events.id") &&
+        query.text.includes("exists (") &&
+        !query.text.includes("events.created_at >="),
+    ) &&
+    apiBrief.events.length === 1 &&
+    adjacentApiQueries
+      .filter((query) => query.text.includes("from events") || query.text.includes("pc.routing ="))
+      .every(
+        (query) =>
+          JSON.stringify(query.values) ===
+          JSON.stringify([adjacentScope.startAt, adjacentScope.endAt]),
+      ) &&
+    JSON.stringify([detailScope.startAt, detailScope.endAt]) !==
+      JSON.stringify([adjacentScope.startAt, adjacentScope.endAt]),
+  detail: "The fixture supplies two Event Candidate sources for one Event; the Event remains one item.",
+});
+checks.push({
+  name: "Dashboard and API use identical attribution bounds for the same daily_date",
+  passed: apiScopeQueries.every(
+    (query) => JSON.stringify(query.values) === JSON.stringify([detailScope.startAt, detailScope.endAt]),
+  ),
+});
+
 const runtimeRoot = await mkdtemp(join(tmpdir(), "x-ai-field-dashboard-runtime-"));
 try {
   await writeRun(runtimeRoot, "runtime/stage2/fixture", {
@@ -226,6 +284,71 @@ function createDashboardPool(queries: CapturedQuery[]): Pool {
       return { rows: [] };
     }) as Pool["query"],
   } as Pool;
+}
+
+function createBriefPool(queries: CapturedQuery[]): Pool {
+  return {
+    query: (async (text: string, values?: unknown[]) => {
+      queries.push({ text, values });
+      if (text.includes("from events")) {
+        return {
+          rows: [
+            {
+              id: "event-1",
+              rank: 1,
+              event_date: "2026-08-24",
+              created_at: "2026-08-26T02:00:00.000Z",
+              title: "Event",
+              title_zh: "事件",
+              summary: "Event summary",
+              summary_zh: "事件摘要",
+              tags: [],
+              tags_zh: [],
+              entities: [],
+              entities_zh: [],
+              source_perspectives: {},
+              external_context: null,
+            },
+          ],
+        };
+      }
+      if (text.includes("where pc.event_id = any")) {
+        return {
+          rows: [
+            { event_id: "event-1", source: "Source A", title: "Candidate A", url: null },
+            { event_id: "event-1", source: "Source B", title: "Candidate B", url: null },
+          ],
+        };
+      }
+      if (text.includes("pc.routing = 'digest'")) {
+        return { rows: [briefContentRow("digest-1", "Digest")] };
+      }
+      if (text.includes("pc.routing = 'long_form'")) {
+        return { rows: [briefContentRow("long-form-1", "Long form")] };
+      }
+      if (text.includes("pc.routing = 'inspiration'")) {
+        return { rows: [briefContentRow("inspiration-1", "Inspiration")] };
+      }
+      return { rows: [] };
+    }) as Pool["query"],
+  } as Pool;
+}
+
+function briefContentRow(id: string, title: string) {
+  return {
+    id,
+    rank: 1,
+    title,
+    title_zh: title,
+    summary: `${title} summary`,
+    summary_zh: `${title} 摘要`,
+    category: "Technology",
+    source: "Source",
+    url: null,
+    image_url: null,
+    published_at: null,
+    created_at: "2026-08-26T02:00:00.000Z",
+  };
 }
 
 async function writeRun(rootDir: string, relativeRunDir: string, body: unknown): Promise<void> {

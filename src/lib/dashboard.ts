@@ -1,8 +1,11 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Pool } from "pg";
-import { parseBriefDate, type ShanghaiDayRange } from "./brief-date.js";
-import { getDailyBrief, type DailyBriefResponse } from "./daily-brief.js";
+import { parseBriefDate } from "./brief-date.js";
+import {
+  getDailyBriefForDailyScope,
+  type DailyBriefResponse,
+} from "./daily-brief.js";
 import {
   isDailyScopeCompleted,
   resolveDailyScope,
@@ -159,7 +162,6 @@ export async function getDashboardData(
   const requestedDate = parseBriefDate(options.detailDate ?? "")?.date;
   const detailScope = resolveDailyScope(requestedDate ?? latestScope.dailyDate);
   const detailScopeCompleted = isDailyScopeCompleted(detailScope, now);
-  const briefRange = dailyScopeToBriefRange(detailScope);
 
   const scopeDates = scopes.map((scope) => scope.dailyDate);
   const scopeStarts = scopes.map((scope) => scope.startAt);
@@ -201,7 +203,7 @@ export async function getDashboardData(
         )
       : Promise.resolve({ rows: [] });
   const contentFunnelPromise = detailScopeCompleted
-    ? loadContentFunnel(pool, detailScope, briefRange)
+    ? loadContentFunnel(pool, detailScope)
     : Promise.resolve(null);
 
   const [
@@ -395,7 +397,6 @@ export async function getDashboardData(
 async function loadContentFunnel(
   pool: Pool,
   scope: DailyScope,
-  briefRange: ShanghaiDayRange,
 ): Promise<DashboardContentFunnel> {
   const [rawResult, processedResult, brief] = await Promise.all([
     pool.query<ContentFunnelRow>(
@@ -429,7 +430,7 @@ async function loadContentFunnel(
       `,
       [scope.startAt, scope.endAt],
     ),
-    getDailyBrief(pool, briefRange, { rawArticleScope: scope }),
+    getDailyBriefForDailyScope(pool, scope),
   ]);
 
   const raw = rawResult.rows[0];
@@ -439,14 +440,6 @@ async function loadContentFunnel(
     selectedChars: count(raw?.selected_chars),
     processedSummaryChars: count(processed?.processed_summary_chars),
     dailyBriefChars: countDailyBriefCharacters(brief),
-  };
-}
-
-function dailyScopeToBriefRange(scope: DailyScope): ShanghaiDayRange {
-  return {
-    date: scope.dailyDate,
-    startUtc: new Date(scope.startAt),
-    endUtc: new Date(scope.endAt),
   };
 }
 

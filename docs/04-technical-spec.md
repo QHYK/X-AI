@@ -341,6 +341,7 @@ MVP 只建立明确需要的索引：
 ```text
 raw_articles(source_id)
 raw_articles(published_at)
+raw_articles(collected_at)
 raw_articles(stage1_status)
 
 processed_contents(raw_article_id) UNIQUE
@@ -636,7 +637,18 @@ Daily Workflow 必须可以安全重复执行。
 GET /api/brief?date=YYYY-MM-DD
 ```
 
-MVP 使用 `created_at`（Asia/Shanghai）作为 Brief 日期归属依据。
+Daily Date 由 Raw input scope 决定，而不是任一结果记录的 `created_at`：
+
+```text
+Daily YYYY-MM-DD
+= 前一天 09:00 <= raw_articles.collected_at < 当天 09:00 (Asia/Shanghai)
+```
+
+- Digest / Long-form / Inspiration 通过 `processed_contents.raw_article_id → raw_articles`
+  按该 `collected_at` scope 归属。
+- Event 通过 `events ← processed_contents.event_id ← raw_articles` 归属；只要至少一条
+  `routing = event` 的 Candidate 属于 scope 即归入该 Daily，且一个 Event 只返回一次。
+- `/api/brief` 不使用 `processed_contents.created_at` 或 `events.created_at` 判断 Daily 归属。
 
 返回：
 - `events` — Top 10

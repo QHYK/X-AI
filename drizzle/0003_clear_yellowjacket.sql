@@ -1,0 +1,1 @@
+CREATE INDEX "raw_articles_collected_at_idx" ON "raw_articles" USING btree ("collected_at");

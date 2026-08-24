@@ -188,7 +188,10 @@ GET /api/brief?date=YYYY-MM-DD
 - `inspiration`
 - `meta`
 
-所有可阅读内容都返回原文链接。MVP 使用 `created_at`（Asia/Shanghai）作为 Brief 日期归属依据。
+所有可阅读内容都返回原文链接。Brief 的 Daily Date 由 Raw input scope 决定：
+`Daily YYYY-MM-DD = 前一天 09:00 <= raw_articles.collected_at < 当天 09:00`
+（Asia/Shanghai）。Digest / Long-form / Inspiration 通过关联 Raw Article 归属；Event 只要有
+一条 scope 内的 Event Candidate 即归入该 Daily，且只返回一次。`created_at` 不用于 Brief 日期归属。
 
 ## Internal Dashboard
 

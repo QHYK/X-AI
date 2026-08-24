@@ -1,6 +1,6 @@
 import { getDatabasePool } from "@/db/index.js";
 import { parseBriefDate } from "@/lib/brief-date.js";
-import { getDailyBrief } from "@/lib/daily-brief.js";
+import { getDailyBriefForDailyDate } from "@/lib/daily-brief.js";
 
 export const runtime = "nodejs";
 
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const brief = await getDailyBrief(getDatabasePool(), dateRange);
+    const brief = await getDailyBriefForDailyDate(getDatabasePool(), dateRange.date);
     return jsonResponse(brief, { headers });
   } catch (error) {
     console.error("Failed to load daily brief.", error);

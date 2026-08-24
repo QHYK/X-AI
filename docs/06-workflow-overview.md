@@ -109,6 +109,11 @@ Daily Orchestrator 在启动时按 Asia/Shanghai 09:00 boundary 固定一次
 它也将本次 Stage 2 runtime 明确传给 Stage 3，再将本次 Stage 3 runtime 明确传给 Stage 4。
 单独运行 Stage 1–3 时仍使用原有最近 24 小时窗口。
 
+`GET /api/brief?date=YYYY-MM-DD` 使用同一 Raw input scope 归属 Daily：
+`Daily YYYY-MM-DD = 前一天 09:00 <= raw_articles.collected_at < 当天 09:00`
+（Asia/Shanghai）。Processed 内容通过关联 Raw Article 归属；Event 通过其 Event Candidates
+关联的 Raw Article 归属，而非按结果 `created_at`。
+
 ## 四个 AI Stage
 
 ```text
