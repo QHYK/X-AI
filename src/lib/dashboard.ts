@@ -3,9 +3,13 @@ import { join } from "node:path";
 import type { Pool } from "pg";
 import { parseBriefDate, type ShanghaiDayRange } from "./brief-date.js";
 import { getDailyBrief, type DailyBriefResponse } from "./daily-brief.js";
-import { resolveDailyScope } from "./daily-scope.js";
+import {
+  isDailyScopeCompleted,
+  resolveDailyScope,
+  resolveRecentCompletedDailyScopes,
+  type DailyScope,
+} from "./daily-scope.js";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 const DASHBOARD_DAYS = 7;
 const STAGES = ["stage1", "stage2", "stage3", "stage4"] as const;
 
@@ -123,7 +127,7 @@ export type DashboardDay = {
 
 export type DashboardData = {
   timezone: "Asia/Shanghai";
-  today: string;
+  latestDailyDate: string;
   detailDate: string;
   totals: {
     rawArticles: number;
@@ -132,7 +136,8 @@ export type DashboardData = {
   };
   days: DashboardDay[];
   details: {
-    contentFunnel: DashboardContentFunnel;
+    scopeCompleted: boolean;
+    contentFunnel: DashboardContentFunnel | null;
     processedByCategory: Record<string, number>;
     digestByCategory: Record<string, number>;
     contentCompletion: DashboardContentCompletionMetrics | null;
@@ -144,17 +149,58 @@ export async function getDashboardData(
   pool: Pool,
   options: { detailDate?: string | null; rootDir?: string; now?: Date } = {},
 ): Promise<DashboardData> {
-  const ranges = getRecentShanghaiDayRanges(options.now ?? new Date(), DASHBOARD_DAYS);
-  const todayRange = ranges[0];
-  if (!todayRange) {
-    throw new Error("Dashboard date range is empty.");
+  const now = options.now ?? new Date();
+  const scopes = resolveRecentCompletedDailyScopes(DASHBOARD_DAYS, now);
+  const latestScope = scopes[0];
+  if (!latestScope) {
+    throw new Error("Dashboard Daily scope range is empty.");
   }
 
-  const oldestRange = ranges.at(-1);
-  if (!oldestRange) {
-    throw new Error("Dashboard oldest date range is missing.");
-  }
-  const detailRange = parseBriefDate(options.detailDate ?? "") ?? todayRange;
+  const requestedDate = parseBriefDate(options.detailDate ?? "")?.date;
+  const detailScope = resolveDailyScope(requestedDate ?? latestScope.dailyDate);
+  const detailScopeCompleted = isDailyScopeCompleted(detailScope, now);
+  const briefRange = dailyScopeToBriefRange(detailScope);
+
+  const scopeDates = scopes.map((scope) => scope.dailyDate);
+  const scopeStarts = scopes.map((scope) => scope.startAt);
+  const scopeEnds = scopes.map((scope) => scope.endAt);
+  const requestedRuntimeDates = new Set([
+    ...scopeDates,
+    ...(detailScopeCompleted ? [detailScope.dailyDate] : []),
+  ]);
+
+  const processedCategoriesPromise: Promise<{ rows: CategoryRow[] }> =
+    detailScopeCompleted
+      ? pool.query<CategoryRow>(
+          `
+            select category, count(*)::int as count
+            from processed_contents
+            where created_at >= $1::timestamptz
+              and created_at < $2::timestamptz
+            group by category
+            order by count desc, category asc
+          `,
+          [detailScope.startAt, detailScope.endAt],
+        )
+      : Promise.resolve({ rows: [] });
+  const digestCategoriesPromise: Promise<{ rows: CategoryRow[] }> =
+    detailScopeCompleted
+      ? pool.query<CategoryRow>(
+          `
+            select category, count(*)::int as count
+            from processed_contents
+            where created_at >= $1::timestamptz
+              and created_at < $2::timestamptz
+              and routing = 'digest'
+            group by category
+            order by count desc, category asc
+          `,
+          [detailScope.startAt, detailScope.endAt],
+        )
+      : Promise.resolve({ rows: [] });
+  const contentFunnelPromise = detailScopeCompleted
+    ? loadContentFunnel(pool, detailScope, briefRange)
+    : Promise.resolve(null);
 
   const [
     totalsResult,
@@ -175,80 +221,83 @@ export async function getDashboardData(
     `),
     pool.query<CountRow>(
       `
+        with scopes as (
+          select *
+          from unnest(
+            $1::text[],
+            $2::timestamptz[],
+            $3::timestamptz[]
+          ) as scope(date, start_at, end_at)
+        )
         select
-          to_char(collected_at at time zone 'Asia/Shanghai', 'YYYY-MM-DD') as date,
-          count(*)::int as total,
-          count(*) filter (where stage1_status = 'pending')::int as pending,
-          count(*) filter (where stage1_status = 'selected')::int as selected,
-          count(*) filter (where stage1_status = 'ignored')::int as ignored,
-          count(*) filter (where stage1_status = 'failed')::int as failed
-        from raw_articles
-        where collected_at >= $1::timestamptz
-          and collected_at < $2::timestamptz
-        group by 1
+          scope.date,
+          count(ra.id)::int as total,
+          count(ra.id) filter (where ra.stage1_status = 'pending')::int as pending,
+          count(ra.id) filter (where ra.stage1_status = 'selected')::int as selected,
+          count(ra.id) filter (where ra.stage1_status = 'ignored')::int as ignored,
+          count(ra.id) filter (where ra.stage1_status = 'failed')::int as failed
+        from scopes scope
+        left join raw_articles ra
+          on ra.collected_at >= scope.start_at
+          and ra.collected_at < scope.end_at
+        group by scope.date
       `,
-      [oldestRange.startUtc, todayRange.endUtc],
+      [scopeDates, scopeStarts, scopeEnds],
     ),
     pool.query<CountRow>(
       `
+        with scopes as (
+          select *
+          from unnest(
+            $1::text[],
+            $2::timestamptz[],
+            $3::timestamptz[]
+          ) as scope(date, start_at, end_at)
+        )
         select
-          to_char(created_at at time zone 'Asia/Shanghai', 'YYYY-MM-DD') as date,
-          count(*)::int as total,
-          count(*) filter (where routing = 'event')::int as event,
-          count(*) filter (where routing = 'digest')::int as digest,
-          count(*) filter (where routing = 'long_form')::int as long_form,
-          count(*) filter (where routing = 'inspiration')::int as inspiration
-        from processed_contents
-        where created_at >= $1::timestamptz
-          and created_at < $2::timestamptz
-        group by 1
+          scope.date,
+          count(pc.id)::int as total,
+          count(pc.id) filter (where pc.routing = 'event')::int as event,
+          count(pc.id) filter (where pc.routing = 'digest')::int as digest,
+          count(pc.id) filter (where pc.routing = 'long_form')::int as long_form,
+          count(pc.id) filter (where pc.routing = 'inspiration')::int as inspiration
+        from scopes scope
+        left join processed_contents pc
+          on pc.created_at >= scope.start_at
+          and pc.created_at < scope.end_at
+        group by scope.date
       `,
-      [oldestRange.startUtc, todayRange.endUtc],
+      [scopeDates, scopeStarts, scopeEnds],
     ),
     pool.query<CountRow>(
       `
+        with scopes as (
+          select *
+          from unnest(
+            $1::text[],
+            $2::timestamptz[],
+            $3::timestamptz[]
+          ) as scope(date, start_at, end_at)
+        )
         select
-          to_char(created_at at time zone 'Asia/Shanghai', 'YYYY-MM-DD') as date,
-          count(*)::int as total
-        from events
-        where created_at >= $1::timestamptz
-          and created_at < $2::timestamptz
-        group by 1
+          scope.date,
+          count(e.id)::int as total
+        from scopes scope
+        left join events e
+          on e.created_at >= scope.start_at
+          and e.created_at < scope.end_at
+        group by scope.date
       `,
-      [oldestRange.startUtc, todayRange.endUtc],
+      [scopeDates, scopeStarts, scopeEnds],
     ),
-    pool.query<CategoryRow>(
-      `
-        select category, count(*)::int as count
-        from processed_contents
-        where created_at >= $1::timestamptz
-          and created_at < $2::timestamptz
-        group by category
-        order by count desc, category asc
-      `,
-      [detailRange.startUtc, detailRange.endUtc],
-    ),
-    pool.query<CategoryRow>(
-      `
-        select category, count(*)::int as count
-        from processed_contents
-        where created_at >= $1::timestamptz
-          and created_at < $2::timestamptz
-          and routing = 'digest'
-        group by category
-        order by count desc, category asc
-      `,
-      [detailRange.startUtc, detailRange.endUtc],
-    ),
-    loadRuntimeMetricsByDate(
-      options.rootDir ?? process.cwd(),
-      new Set([...ranges.map((range) => range.date), detailRange.date]),
-    ),
+    processedCategoriesPromise,
+    digestCategoriesPromise,
+    loadRuntimeMetricsByDate(options.rootDir ?? process.cwd(), requestedRuntimeDates),
     loadContentCompletionRuntimeByDate(
       options.rootDir ?? process.cwd(),
-      new Set([...ranges.map((range) => range.date), detailRange.date]),
+      requestedRuntimeDates,
     ),
-    loadContentFunnel(pool, detailRange),
+    contentFunnelPromise,
   ]);
 
   const totals = totalsResult.rows[0];
@@ -260,12 +309,12 @@ export async function getDashboardData(
   const processedByDate = rowsByDate(processedResult.rows);
   const eventsByDate = rowsByDate(eventsResult.rows);
 
-  const days = ranges.map((range) => {
-    const raw = rawByDate.get(range.date);
-    const processed = processedByDate.get(range.date);
-    const event = eventsByDate.get(range.date);
+  const days = scopes.map((scope) => {
+    const raw = rawByDate.get(scope.dailyDate);
+    const processed = processedByDate.get(scope.dailyDate);
+    const event = eventsByDate.get(scope.dailyDate);
     const stages = emptyStageMap();
-    const runtimeStages = runtimeByDate.get(range.date);
+    const runtimeStages = runtimeByDate.get(scope.dailyDate);
 
     for (const stage of STAGES) {
       stages[stage] = runtimeStages?.get(stage) ?? null;
@@ -276,7 +325,7 @@ export async function getDashboardData(
     );
 
     return {
-      date: range.date,
+      date: scope.dailyDate,
       raw: {
         total: count(raw?.total),
         pending: count(raw?.pending),
@@ -293,7 +342,7 @@ export async function getDashboardData(
       },
       events: count(event?.total),
       runtime: {
-        contentCompletion: completionByDate.get(range.date) ?? null,
+        contentCompletion: completionByDate.get(scope.dailyDate) ?? null,
         stages,
         llmCalls: sumKnown(availableStages.map((stage) => stage.llmCalls)),
         inputTokens: sumKnown(availableStages.map((stage) => stage.inputTokens)),
@@ -305,15 +354,17 @@ export async function getDashboardData(
   });
 
   const detailStages = emptyStageMap();
-  const runtimeDetailStages = runtimeByDate.get(detailRange.date);
+  const runtimeDetailStages = detailScopeCompleted
+    ? runtimeByDate.get(detailScope.dailyDate)
+    : undefined;
   for (const stage of STAGES) {
     detailStages[stage] = runtimeDetailStages?.get(stage) ?? null;
   }
 
   return {
     timezone: "Asia/Shanghai",
-    today: todayRange.date,
-    detailDate: detailRange.date,
+    latestDailyDate: latestScope.dailyDate,
+    detailDate: detailScope.dailyDate,
     totals: {
       rawArticles: count(totals.raw_articles),
       processedContents: count(totals.processed_contents),
@@ -321,10 +372,13 @@ export async function getDashboardData(
     },
     days,
     details: {
+      scopeCompleted: detailScopeCompleted,
       contentFunnel,
       processedByCategory: categoryCounts(processedCategoriesResult.rows),
       digestByCategory: categoryCounts(digestCategoriesResult.rows),
-      contentCompletion: completionByDate.get(detailRange.date) ?? null,
+      contentCompletion: detailScopeCompleted
+        ? completionByDate.get(detailScope.dailyDate) ?? null
+        : null,
       stages: detailStages,
     },
   };
@@ -332,9 +386,9 @@ export async function getDashboardData(
 
 async function loadContentFunnel(
   pool: Pool,
+  scope: DailyScope,
   briefRange: ShanghaiDayRange,
 ): Promise<DashboardContentFunnel> {
-  const scope = resolveDailyScope(briefRange.date);
   const [rawResult, processedResult, brief] = await Promise.all([
     pool.query<ContentFunnelRow>(
       `
@@ -361,9 +415,8 @@ async function loadContentFunnel(
             + char_length(coalesce(pc.summary_zh, ''))
           ), 0)::bigint as processed_summary_chars
         from processed_contents pc
-        join raw_articles ra on ra.id = pc.raw_article_id
-        where ra.collected_at >= $1::timestamptz
-          and ra.collected_at < $2::timestamptz
+        where pc.created_at >= $1::timestamptz
+          and pc.created_at < $2::timestamptz
       `,
       [scope.startAt, scope.endAt],
     ),
@@ -377,6 +430,14 @@ async function loadContentFunnel(
     selectedChars: count(raw?.selected_chars),
     processedSummaryChars: count(processed?.processed_summary_chars),
     dailyBriefChars: countDailyBriefCharacters(brief),
+  };
+}
+
+function dailyScopeToBriefRange(scope: DailyScope): ShanghaiDayRange {
+  return {
+    date: scope.dailyDate,
+    startUtc: new Date(scope.startAt),
+    endUtc: new Date(scope.endAt),
   };
 }
 
@@ -432,7 +493,7 @@ export async function loadContentCompletionRuntimeByDate(
         if (!startedAt) {
           throw new Error("Content Completion run.json has no valid started_at timestamp.");
         }
-        const date = formatShanghaiDate(new Date(startedAt));
+        const date = dailyDateForRuntime(artifact, startedAt);
         if (!requestedDates.has(date)) {
           return null;
         }
@@ -487,34 +548,7 @@ function contentCompletionMetricsFromArtifact(
   };
 }
 
-function getRecentShanghaiDayRanges(now: Date, days: number): ShanghaiDayRange[] {
-  const today = parseBriefDate(formatShanghaiDate(now));
-  if (!today) {
-    throw new Error("Unable to determine today's Asia/Shanghai date.");
-  }
-
-  return Array.from({ length: days }, (_, index) => {
-    const date = formatShanghaiDate(new Date(today.startUtc.getTime() - index * DAY_MS));
-    const range = parseBriefDate(date);
-    if (!range) {
-      throw new Error(`Unable to build dashboard date range for ${date}.`);
-    }
-    return range;
-  });
-}
-
-function formatShanghaiDate(value: Date): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(value);
-  const values = new Map(parts.map((part) => [part.type, part.value]));
-  return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
-}
-
-async function loadRuntimeMetricsByDate(
+export async function loadRuntimeMetricsByDate(
   rootDir: string,
   requestedDates: Set<string>,
 ): Promise<Map<string, Map<DashboardStage, DashboardStageMetrics>>> {
@@ -549,7 +583,7 @@ async function loadRuntimeMetricsByDate(
               throw new Error("run.json has no valid started_at timestamp.");
             }
 
-            const date = formatShanghaiDate(new Date(startedAt));
+            const date = dailyDateForRuntime(artifact, startedAt);
             if (!requestedDates.has(date)) {
               return null;
             }
@@ -631,7 +665,7 @@ async function loadDailyStage1Metrics(
         if (!startedAt) {
           throw new Error("Daily Stage 1 step has no valid started_at timestamp.");
         }
-        const date = formatShanghaiDate(new Date(startedAt));
+        const date = dailyDateForRuntime(artifact, startedAt);
         if (!requestedDates.has(date)) {
           return null;
         }
@@ -652,6 +686,14 @@ async function loadDailyStage1Metrics(
   return runs.filter(
     (run): run is { date: string; metrics: DashboardStageMetrics } => run !== null,
   );
+}
+
+function dailyDateForRuntime(artifact: JsonObject, startedAt: string): string {
+  const recordedDailyDate = stringValue(artifact.daily_date);
+  if (recordedDailyDate && parseBriefDate(recordedDailyDate)) {
+    return recordedDailyDate;
+  }
+  return resolveDailyScope(undefined, new Date(startedAt)).dailyDate;
 }
 
 function stage1MetricsFromDailyStep(

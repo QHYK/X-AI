@@ -34,6 +34,30 @@ export function resolveDailyScope(
   };
 }
 
+export function resolveRecentCompletedDailyScopes(
+  count: number,
+  now: Date = new Date(),
+): DailyScope[] {
+  if (!Number.isInteger(count) || count < 1) {
+    throw new Error("Daily scope count must be a positive integer.");
+  }
+
+  const latest = resolveDailyScope(undefined, now);
+  return Array.from({ length: count }, (_, index) =>
+    resolveDailyScope(shiftDailyDate(latest.dailyDate, -index)),
+  );
+}
+
+export function isDailyScopeCompleted(
+  scope: DailyScope,
+  now: Date = new Date(),
+): boolean {
+  if (Number.isNaN(now.getTime())) {
+    throw new Error("Current time must be a valid date.");
+  }
+  return Date.parse(scope.endAt) <= now.getTime();
+}
+
 export function readCollectedAtScopeFromEnv(
   env: Readonly<Record<string, string | undefined>>,
 ): CollectedAtScope | undefined {
@@ -103,6 +127,16 @@ function shanghaiBoundaryForDate(dailyDate: string): Date {
   }
 
   return new Date(day.startUtc.getTime() + DAILY_BOUNDARY_HOUR * 60 * 60 * 1000);
+}
+
+function shiftDailyDate(dailyDate: string, days: number): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dailyDate);
+  if (!match) {
+    throw new Error(`DAILY_DATE must be a valid YYYY-MM-DD date, got "${dailyDate}".`);
+  }
+  return formatUtcDate(
+    new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + days)),
+  );
 }
 
 function parseTimestamp(value: string, name: string): Date {

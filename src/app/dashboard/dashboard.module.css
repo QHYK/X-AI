@@ -77,6 +77,7 @@
 .summaryCard,
 .panel,
 .funnelCard,
+.scopeNotice,
 .detailCard,
 .stageCard {
   border: 1px solid #dce2df;
@@ -246,6 +247,22 @@
 .funnelCard {
   padding: 20px 24px;
   margin-bottom: 16px;
+}
+
+.scopeNotice {
+  padding: 24px;
+  border-color: #e1d5b7;
+  background: #fffaf0;
+}
+
+.scopeNotice strong {
+  font-size: 0.95rem;
+}
+
+.scopeNotice p {
+  margin: 7px 0 0;
+  color: #70654b;
+  font-size: 0.82rem;
 }
 
 .funnelHeading {

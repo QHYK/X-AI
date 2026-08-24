@@ -34,10 +34,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           <p className={styles.eyebrow}>X-AI-field · Internal</p>
           <h1 className={styles.title}>Daily Workflow Dashboard</h1>
           <p className={styles.subtitle}>
-            最近 7 天 · 数据日期边界与 Daily Brief 一致（{data.timezone}）
+            最近 7 个已完成 Daily scope · 09:00 boundary（{data.timezone}）
           </p>
         </div>
-        <div className={styles.today}>Today · {data.today}</div>
+        <div className={styles.today}>Latest Daily · {data.latestDailyDate}</div>
       </header>
 
       <section className={styles.summaryGrid} aria-label="Database totals">
@@ -50,7 +50,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         <div className={styles.panelHeading}>
           <div>
             <p className={styles.kicker}>Daily volume</p>
-            <h2>最近 7 天</h2>
+            <h2>最近 7 个已完成 Daily</h2>
           </div>
           <p>DB 指标为业务数据；runtime 指标取 Completion / 各 Stage 当天最新一次 run。</p>
         </div>
@@ -132,29 +132,38 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           </form>
         </div>
 
-        <ContentFunnel funnel={data.details.contentFunnel} />
+        {data.details.scopeCompleted && data.details.contentFunnel ? (
+          <>
+            <ContentFunnel funnel={data.details.contentFunnel} />
 
-        <div className={styles.detailGrid}>
-          <CategoryPanel
-            title="Processed by Category"
-            counts={data.details.processedByCategory}
-          />
-          <CategoryPanel
-            title="Digest by Category"
-            counts={data.details.digestByCategory}
-          />
-        </div>
+            <div className={styles.detailGrid}>
+              <CategoryPanel
+                title="Processed by Category"
+                counts={data.details.processedByCategory}
+              />
+              <CategoryPanel
+                title="Digest by Category"
+                counts={data.details.digestByCategory}
+              />
+            </div>
 
-        <div className={styles.stageGrid}>
-          <ContentCompletionCard metrics={data.details.contentCompletion} />
-          {Object.entries(data.details.stages).map(([stage, metrics]) => (
-            <StageCard
-              key={stage}
-              label={STAGE_LABELS[stage as keyof typeof STAGE_LABELS]}
-              metrics={metrics}
-            />
-          ))}
-        </div>
+            <div className={styles.stageGrid}>
+              <ContentCompletionCard metrics={data.details.contentCompletion} />
+              {Object.entries(data.details.stages).map(([stage, metrics]) => (
+                <StageCard
+                  key={stage}
+                  label={STAGE_LABELS[stage as keyof typeof STAGE_LABELS]}
+                  metrics={metrics}
+                />
+              ))}
+            </div>
+          </>
+        ) : (
+          <article className={styles.scopeNotice} role="status">
+            <strong>Daily scope has not completed yet</strong>
+            <p>Details and Content Funnel are unavailable until the 09:00 boundary.</p>
+          </article>
+        )}
       </section>
     </main>
   );
