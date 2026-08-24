@@ -370,6 +370,17 @@ source_id + date
 09:00 Asia/Shanghai
 ```
 
+每个 Daily 使用固定的 `raw_articles.collected_at` 半开区间，Daily 日期对应区间结束的
+09:00 boundary。例如：
+
+```text
+Daily 2026-08-25
+= 2026-08-24 09:00 <= collected_at < 2026-08-25 09:00 (Asia/Shanghai)
+```
+
+Orchestrator 启动时只计算一次 scope；默认选择最近一个已经结束的 09:00 boundary。
+`DAILY_DATE=YYYY-MM-DD npm run daily` 可显式选择相同 scope 进行 retry / backfill。
+
 只设置一个 Cron Trigger。
 ```text
 Cron 09:00
@@ -448,6 +459,17 @@ update raw_articles.content_text
 * Stage 1 根据现有 Title / Metadata 判断是否可以继续处理；
 * 必要时记录处理错误或低内容状态。
 
+每次 `npm run complete:content` 写入独立的
+`runtime/content-completion/<timestamp>/run.json`。其中：
+
+- `candidate_count`：执行开始时符合相同 eligibility 条件的总数，不受总 LIMIT 和 per-source limit 影响；
+- `selected_count`：应用 per-source limit 和总 LIMIT 后实际进入本次处理的数量；
+- `success_count` / `failed_count` / `skipped_count`：本次所选内容的真实处理结果；
+- `remaining_count`：执行结束后按相同 eligibility 条件重新查询的 backlog；
+- `duration_ms`、`limit`、`per_source_limit`：本次实际运行配置和时长。
+
+运行失败时 artifact 保留已经获得的真实 metrics；未知字段为 `null`，不估算。
+
 ### 4.4 Deduplication
 区分两类重复。
 
@@ -477,7 +499,10 @@ FT: Fed ...
 
 ### 4.5 Stage 1
 
-只处理最近 workflow window 内 `stage1_status = pending` 的 Raw Articles。
+只处理最近 workflow window 内 `stage1_status IN ('pending', 'failed')` 的 Raw Articles。
+
+Daily Workflow 使用本次 Daily 固定的 `raw_articles.collected_at` scope；
+单独运行 Stage 1时继续使用现有最近 24 小时默认窗口。
 
 Stage 1 对普通文章使用小型 micro-batch，但每篇 Raw Article 仍独立判断；较大的 input 可以单独处理。
 ```text
@@ -497,6 +522,8 @@ processing_error = ...
 Stage 1 全部可处理内容完成后触发 Stage 2。
 读取当前 workflow 的 Event Candidates；生成轻量 Event Groups。
 默认时间窗口与 Stage 1 一致，为最近 24 小时 collected 内容。
+在 Daily Workflow 中改用本次 Daily 固定的 `raw_articles.collected_at` scope；单独运行
+Stage 2 时继续使用最近 24 小时默认窗口。
 
 ```text
 Event Candidates
@@ -516,6 +543,10 @@ invented IDs，但暂时不阻断 runtime output。这是已知限制，后续�
 
 Stage 2 完成后主动触发 Stage 3。
 Stage 3 分阶段执行。
+
+Daily Workflow 中 Digest / Long-form 候选使用与 Stage 1/2 相同的固定 `raw_articles.collected_at` scope；
+单独运行 Stage 3 时继续使用最近 24 小时默认窗口。
+Event Groups 读取 Orchestrator 明确传入的本次 Stage 2 runtime run。
 
 ```text
 Event Groups
@@ -592,7 +623,7 @@ Stage 4 完成后：
 Daily Workflow 必须可以安全重复执行。
 
 - Collection：item ID / URL 去重
-- Stage 1：只处理 `stage1_status = pending`；`processed_contents.raw_article_id` UNIQUE
+- Stage 1：只处理 `stage1_status IN ('pending', 'failed')`；`processed_contents.raw_article_id` UNIQUE
 - Stage 2：只生成当前 Workflow 使用的 Event Groups，不直接持久化 events.runtime Event Groups 可安全重算
 - Stage 3：覆盖 `ai_rank`，保护人工 `display_rank`
 - Stage 4：根据当前输出的 `event_date` scope，从历史 `runtime/stage4/.../persistence.json` / `persistence-plan.json` 中识别同一日期 scope 的上一轮派生 Events，unlink → delete → rebuild → relink；不同 `event_date` 的历史 Events 必须保留。
@@ -804,6 +835,13 @@ runtime     → Debug / operational artifacts，不是数据库
 npm run daily
 ```
 
+Orchestrator 固定本次 Daily scope，并将本次 Stage 2 run 明确传给 Stage 3、本次 Stage 3
+run 明确传给 Stage 4，避免 Daily 依赖全局 latest runtime。显式 retry / backfill：
+
+```bash
+DAILY_DATE=2026-08-25 npm run daily
+```
+
 完成 Stage 4 后，`/daily-brief` 可直接读取 publish-ready 数据。
 
 未来：
@@ -817,6 +855,15 @@ npm run daily
 
 `runtime/` 保存 Stage 2–4 的真实 input / output / mapping / run metadata，用于 Debug、Review、重跑边界。
 
+`runtime/daily/.../run.json` 额外记录 `daily_date`、`timezone`、
+`scope_start_at`、`scope_end_at`，以及本次 `content_completion_run`、`stage2_run`、
+`stage3_run`、`stage4_run`，
+同时保留各 step status / duration / failed_step。
+
 它不是应用数据库，也不是长期业务 Source of Truth，并保持 Git ignored。
 
 Stage 4 rebuild 使用 runtime artifacts 识别同一 `event_date` scope 的上一轮派生 Events。runtime artifacts 也用于 Debug、Review 和必要时的数据恢复分析；不要把它作为 Stage 间传递数据的正式接口。
+
+Internal Dashboard 按 Asia/Shanghai 运行日期读取每天最新一次 Content Completion runtime，
+展示 Completion success/selected、remaining backlog、duration，并在 Date Details 展示完整计数。
+缺少 runtime 时显示 `N/A`，不从当前数据库状态反推历史指标。

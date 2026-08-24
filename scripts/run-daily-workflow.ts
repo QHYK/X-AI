@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { resolveDailyScope } from "../src/lib/daily-scope.js";
+import {
+  buildDailyStepEnv,
+  type DailyStageName,
+} from "../src/lib/daily-workflow.js";
 
 const STEPS = [
   "collect:rss",
@@ -11,7 +16,7 @@ const STEPS = [
   "process:stage4",
 ] as const;
 
-type StepName = (typeof STEPS)[number];
+type StepName = (typeof STEPS)[number] & DailyStageName;
 type StepStatus = "running" | "success" | "failed";
 
 type StepRun = {
@@ -24,6 +29,14 @@ type StepRun = {
 };
 
 type DailyRun = {
+  daily_date: string;
+  timezone: "Asia/Shanghai";
+  scope_start_at: string;
+  scope_end_at: string;
+  content_completion_run: string | null;
+  stage2_run: string | null;
+  stage3_run: string | null;
+  stage4_run: string | null;
   started_at: string;
   finished_at: string | null;
   status: StepStatus;
@@ -34,9 +47,18 @@ type DailyRun = {
 
 async function main() {
   const startedAt = new Date();
+  const scope = resolveDailyScope(process.env.DAILY_DATE, startedAt);
   const runDir = join(process.cwd(), "runtime/daily", toRunTimestamp(startedAt));
   const runPath = join(runDir, "run.json");
   const run: DailyRun = {
+    daily_date: scope.dailyDate,
+    timezone: scope.timezone,
+    scope_start_at: scope.startAt,
+    scope_end_at: scope.endAt,
+    content_completion_run: null,
+    stage2_run: null,
+    stage3_run: null,
+    stage4_run: null,
     started_at: startedAt.toISOString(),
     finished_at: null,
     status: "running",
@@ -48,6 +70,9 @@ async function main() {
   await mkdir(runDir, { recursive: true });
   await writeRun(runPath, run);
   console.log(`[daily] Runtime artifact: ${runPath}`);
+  console.log(
+    `[daily] Daily ${scope.dailyDate}: ${scope.startAt} <= collected_at < ${scope.endAt} (${scope.timezone})`,
+  );
 
   for (const name of STEPS) {
     const stepStartedAt = new Date();
@@ -63,7 +88,30 @@ async function main() {
     await writeRun(runPath, run);
 
     console.log(`\n[daily] Starting ${name}`);
-    const exitCode = await runNpmScript(name);
+    const pointerPath = getRunPointerPath(runDir, name);
+    const stepEnv = buildDailyStepEnv({
+      scope,
+      step: name,
+      lineage: {
+        stage2Run: run.stage2_run,
+        stage3Run: run.stage3_run,
+      },
+      runPointerPath: pointerPath ?? undefined,
+    });
+    let exitCode = await runNpmScript(name, {
+      ...process.env,
+      ...stepEnv,
+    });
+    if (pointerPath) {
+      try {
+        setStageRun(run, name, (await readFile(pointerPath, "utf8")).trim());
+      } catch (error) {
+        if (exitCode === 0) {
+          console.error(`[daily] ${name} did not report its runtime path.`, error);
+          exitCode = 1;
+        }
+      }
+    }
     const stepFinishedAt = new Date();
     step.finished_at = stepFinishedAt.toISOString();
     step.duration_ms = stepFinishedAt.getTime() - stepStartedAt.getTime();
@@ -88,10 +136,10 @@ async function main() {
   console.log(`\n[daily] Workflow success (${run.duration_ms} ms)`);
 }
 
-function runNpmScript(name: StepName): Promise<number> {
+function runNpmScript(name: StepName, env: NodeJS.ProcessEnv): Promise<number> {
   return new Promise((resolve) => {
     const child = spawn("npm", ["run", name], {
-      env: process.env,
+      env,
       stdio: "inherit",
     });
 
@@ -109,6 +157,42 @@ function runNpmScript(name: StepName): Promise<number> {
       resolve(1);
     });
   });
+}
+
+function getRunPointerPath(runDir: string, name: StepName): string | null {
+  switch (name) {
+    case "complete:content":
+      return join(runDir, "content-completion-run.txt");
+    case "process:stage2":
+      return join(runDir, "stage2-run.txt");
+    case "process:stage3":
+      return join(runDir, "stage3-run.txt");
+    case "process:stage4":
+      return join(runDir, "stage4-run.txt");
+    default:
+      return null;
+  }
+}
+
+function setStageRun(run: DailyRun, name: StepName, runDir: string): void {
+  if (!runDir) {
+    throw new Error(`${name} reported an empty runtime path.`);
+  }
+
+  switch (name) {
+    case "complete:content":
+      run.content_completion_run = runDir;
+      break;
+    case "process:stage2":
+      run.stage2_run = runDir;
+      break;
+    case "process:stage3":
+      run.stage3_run = runDir;
+      break;
+    case "process:stage4":
+      run.stage4_run = runDir;
+      break;
+  }
 }
 
 function finishRun(

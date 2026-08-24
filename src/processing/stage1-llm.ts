@@ -60,6 +60,7 @@ export type Stage1TokenUsage = {
 const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE1_LLM_TIMEOUT_MS ?? 45_000);
 const DEFAULT_MAX_RETRIES = Number(process.env.STAGE1_LLM_MAX_RETRIES ?? 2);
 const RETRY_DELAY_MS = Number(process.env.STAGE1_LLM_RETRY_DELAY_MS ?? 1_000);
+const HTTP_503_RETRY_DELAY_MS = 600_000;
 const MAX_OUTPUT_TOKENS_PER_ARTICLE = 1_200;
 
 export async function runStage1BatchLlm(
@@ -171,7 +172,12 @@ export async function runStage1BatchLlm(
       }
 
       if (attempt <= maxRetries) {
-        await sleep(RETRY_DELAY_MS * attempt);
+        if (getHttpStatus(error) === 503) {
+          console.warn("Stage 1 LLM returned 503; waiting 600s before retrying...");
+          await sleep(HTTP_503_RETRY_DELAY_MS);
+        } else {
+          await sleep(RETRY_DELAY_MS * attempt);
+        }
         continue;
       }
     }
@@ -200,6 +206,20 @@ function isNonRetryableLlmError(errorMessage: string): boolean {
 
 function sanitizeLlmError(errorMessage: string): string {
   return errorMessage.replace(/sk-[A-Za-z0-9_*.-]+/g, "[redacted_api_key]");
+}
+
+function getHttpStatus(error: unknown): number | null {
+  let current = error;
+  for (let depth = 0; depth < 4 && current; depth += 1) {
+    if (typeof current === "object" && "status" in current) {
+      const status = (current as { status?: unknown }).status;
+      if (typeof status === "number") {
+        return status;
+      }
+    }
+    current = current instanceof Error ? current.cause : null;
+  }
+  return null;
 }
 
 function sleep(ms: number): Promise<void> {

@@ -58,6 +58,32 @@ export type DashboardStageMetrics = {
   eventsCreated: number | null;
 };
 
+export type DashboardContentCompletionMetrics = {
+  status: string | null;
+  startedAt: string | null;
+  durationMs: number | null;
+  candidateCount: number | null;
+  selectedCount: number | null;
+  successCount: number | null;
+  failedCount: number | null;
+  skippedCount: number | null;
+  remainingCount: number | null;
+  limit: number | null;
+  perSourceLimit: number | null;
+};
+
+export function formatContentCompletionRatio(
+  metrics: DashboardContentCompletionMetrics | null,
+): string {
+  if (metrics?.successCount === null || metrics?.successCount === undefined) {
+    return "N/A";
+  }
+  if (metrics.selectedCount === null) {
+    return "N/A";
+  }
+  return `${metrics.successCount.toLocaleString("en-US")} / ${metrics.selectedCount.toLocaleString("en-US")}`;
+}
+
 export type DashboardDay = {
   date: string;
   raw: {
@@ -70,6 +96,7 @@ export type DashboardDay = {
   processed: Record<Routing, number> & { total: number };
   events: number;
   runtime: {
+    contentCompletion: DashboardContentCompletionMetrics | null;
     stages: Record<DashboardStage, DashboardStageMetrics | null>;
     llmCalls: number | null;
     inputTokens: number | null;
@@ -92,6 +119,7 @@ export type DashboardData = {
   details: {
     processedByCategory: Record<string, number>;
     digestByCategory: Record<string, number>;
+    contentCompletion: DashboardContentCompletionMetrics | null;
     stages: Record<DashboardStage, DashboardStageMetrics | null>;
   };
 };
@@ -120,6 +148,7 @@ export async function getDashboardData(
     processedCategoriesResult,
     digestCategoriesResult,
     runtimeByDate,
+    completionByDate,
   ] = await Promise.all([
     pool.query<TotalRow>(`
       select
@@ -198,6 +227,10 @@ export async function getDashboardData(
       options.rootDir ?? process.cwd(),
       new Set([...ranges.map((range) => range.date), detailRange.date]),
     ),
+    loadContentCompletionRuntimeByDate(
+      options.rootDir ?? process.cwd(),
+      new Set([...ranges.map((range) => range.date), detailRange.date]),
+    ),
   ]);
 
   const totals = totalsResult.rows[0];
@@ -242,6 +275,7 @@ export async function getDashboardData(
       },
       events: count(event?.total),
       runtime: {
+        contentCompletion: completionByDate.get(range.date) ?? null,
         stages,
         llmCalls: sumKnown(availableStages.map((stage) => stage.llmCalls)),
         inputTokens: sumKnown(availableStages.map((stage) => stage.inputTokens)),
@@ -271,8 +305,94 @@ export async function getDashboardData(
     details: {
       processedByCategory: categoryCounts(processedCategoriesResult.rows),
       digestByCategory: categoryCounts(digestCategoriesResult.rows),
+      contentCompletion: completionByDate.get(detailRange.date) ?? null,
       stages: detailStages,
     },
+  };
+}
+
+export async function loadContentCompletionRuntimeByDate(
+  rootDir: string,
+  requestedDates: Set<string>,
+): Promise<Map<string, DashboardContentCompletionMetrics>> {
+  const completionDir = join(rootDir, "runtime", "content-completion");
+  let runNames: string[];
+  try {
+    runNames = await readdir(completionDir);
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return new Map();
+    }
+    throw error;
+  }
+
+  const runs = await Promise.all(
+    runNames.map(async (runName) => {
+      const runDir = join(completionDir, runName);
+      try {
+        const artifact = asObject(
+          JSON.parse(await readFile(join(runDir, "run.json"), "utf8")),
+        );
+        if (!artifact) {
+          throw new Error("Content Completion run.json must contain a JSON object.");
+        }
+
+        const startedAt = stringValue(artifact.started_at) ?? parseRunName(runName);
+        if (!startedAt) {
+          throw new Error("Content Completion run.json has no valid started_at timestamp.");
+        }
+        const date = formatShanghaiDate(new Date(startedAt));
+        if (!requestedDates.has(date)) {
+          return null;
+        }
+
+        return {
+          date,
+          metrics: contentCompletionMetricsFromArtifact(artifact, startedAt),
+        };
+      } catch (error) {
+        if (!isMissingFile(error)) {
+          console.error(
+            `Failed to read dashboard Content Completion runtime artifact ${runDir}.`,
+            error,
+          );
+        }
+        return null;
+      }
+    }),
+  );
+
+  const byDate = new Map<string, DashboardContentCompletionMetrics>();
+  for (const run of runs) {
+    if (!run) {
+      continue;
+    }
+    const previous = byDate.get(run.date);
+    if (!previous || compareStartedAt(run.metrics.startedAt, previous.startedAt) > 0) {
+      byDate.set(run.date, run.metrics);
+    }
+  }
+  return byDate;
+}
+
+function contentCompletionMetricsFromArtifact(
+  artifact: JsonObject,
+  startedAt: string,
+): DashboardContentCompletionMetrics {
+  const finishedAt = stringValue(artifact.finished_at);
+  return {
+    status: stringValue(artifact.status),
+    startedAt,
+    durationMs:
+      numberFrom(artifact, "duration_ms") ?? durationBetween(startedAt, finishedAt),
+    candidateCount: numberFrom(artifact, "candidate_count"),
+    selectedCount: numberFrom(artifact, "selected_count"),
+    successCount: numberFrom(artifact, "success_count"),
+    failedCount: numberFrom(artifact, "failed_count"),
+    skippedCount: numberFrom(artifact, "skipped_count"),
+    remainingCount: numberFrom(artifact, "remaining_count"),
+    limit: numberFrom(artifact, "limit"),
+    perSourceLimit: numberFrom(artifact, "per_source_limit"),
   };
 }
 
@@ -370,7 +490,104 @@ async function loadRuntimeMetricsByDate(
     }),
   );
 
+  const dailyStage1Runs = await loadDailyStage1Metrics(rootDir, requestedDates);
+  for (const run of dailyStage1Runs) {
+    const dateStages = byDate.get(run.date) ?? new Map();
+    const previous = dateStages.get("stage1");
+    if (!previous || compareStartedAt(run.metrics.startedAt, previous.startedAt) > 0) {
+      dateStages.set("stage1", run.metrics);
+      byDate.set(run.date, dateStages);
+    }
+  }
+
   return byDate;
+}
+
+async function loadDailyStage1Metrics(
+  rootDir: string,
+  requestedDates: Set<string>,
+): Promise<Array<{ date: string; metrics: DashboardStageMetrics }>> {
+  const dailyDir = join(rootDir, "runtime", "daily");
+  let runNames: string[];
+  try {
+    runNames = await readdir(dailyDir);
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  const runs = await Promise.all(
+    runNames.map(async (runName) => {
+      const runDir = join(dailyDir, runName);
+      try {
+        const artifact = asObject(
+          JSON.parse(await readFile(join(runDir, "run.json"), "utf8")),
+        );
+        if (!artifact) {
+          throw new Error("Daily run.json must contain a JSON object.");
+        }
+        const steps = Array.isArray(artifact.steps) ? artifact.steps : [];
+        const stage1Step = steps
+          .map(asObject)
+          .find((step) => step && stringValue(step.name) === "process:stage1");
+        if (!stage1Step) {
+          return null;
+        }
+
+        const startedAt = stringValue(stage1Step.started_at);
+        if (!startedAt) {
+          throw new Error("Daily Stage 1 step has no valid started_at timestamp.");
+        }
+        const date = formatShanghaiDate(new Date(startedAt));
+        if (!requestedDates.has(date)) {
+          return null;
+        }
+
+        return {
+          date,
+          metrics: stage1MetricsFromDailyStep(stage1Step, startedAt),
+        };
+      } catch (error) {
+        if (!isMissingFile(error)) {
+          console.error(`Failed to read dashboard daily runtime artifact ${runDir}.`, error);
+        }
+        return null;
+      }
+    }),
+  );
+
+  return runs.filter(
+    (run): run is { date: string; metrics: DashboardStageMetrics } => run !== null,
+  );
+}
+
+function stage1MetricsFromDailyStep(
+  step: JsonObject,
+  startedAt: string,
+): DashboardStageMetrics {
+  return {
+    stage: "stage1",
+    status: stringValue(step.status),
+    startedAt,
+    durationMs: numberFrom(step, "duration_ms"),
+    llmDurationMs: null,
+    llmCalls: null,
+    retryCount: null,
+    inputTokens: null,
+    outputTokens: null,
+    totalTokens: null,
+    candidateCount: null,
+    groupCount: null,
+    selectedEventCount: null,
+    digestBeforeDedup: null,
+    digestAfterDedup: null,
+    longFormCount: null,
+    enrichmentSuccessCount: null,
+    enrichmentFailureCount: null,
+    eventsCreated: null,
+  };
 }
 
 async function parseStageMetrics(

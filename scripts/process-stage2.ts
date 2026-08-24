@@ -1,8 +1,13 @@
 import { config } from "dotenv";
+import { writeFile } from "node:fs/promises";
 import { Pool } from "pg";
+import { readCollectedAtScopeFromEnv } from "../src/lib/daily-scope.js";
 import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
 import { processStage2Merge, summarizeStage2Result } from "../src/processing/stage2-job.js";
 import { writeStage2RuntimeArtifacts } from "../src/processing/stage2-runtime-artifacts.js";
+
+const inheritedDailyScope = readCollectedAtScopeFromEnv(process.env);
+const inheritedRunPointer = process.env.DAILY_STAGE_RUN_POINTER;
 
 config({ path: ".env" });
 config({ path: ".env.local", override: true });
@@ -29,11 +34,13 @@ async function main() {
     const startedAt = new Date();
     const result = await processStage2Merge(pool, {
       collectedWithinHours: optionalPositiveInteger(process.env.STAGE2_COLLECTED_WITHIN_HOURS),
+      collectedAtScope: inheritedDailyScope ?? readCollectedAtScopeFromEnv(process.env),
     });
     const summary = summarizeStage2Result(result);
     const artifacts = await writeStage2RuntimeArtifacts(result, {
       startedAt,
     });
+    await writeRunPointer(artifacts.runDir);
 
     console.log(JSON.stringify({ ...summary, runtimePath: artifacts.runDir }, null, 2));
     if (!result.success) {
@@ -41,6 +48,13 @@ async function main() {
     }
   } finally {
     await pool.end();
+  }
+}
+
+async function writeRunPointer(runDir: string): Promise<void> {
+  const path = inheritedRunPointer ?? process.env.DAILY_STAGE_RUN_POINTER;
+  if (path) {
+    await writeFile(path, `${runDir}\n`);
   }
 }
 

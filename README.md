@@ -16,10 +16,10 @@ X-AI-field 是一个 AI 驱动的信息筛选系统：持续收集可信信息�
 - Daily Workflow Orchestrator
 - Daily Brief API `GET /daily-brief?date=YYYY-MM-DD`
 - Internal Dashboard `/dashboard`
-
-下一步：
 - X-field Daily Brief 页面
 - 09:00 Asia/Shanghai Cron
+
+下一步：
 - 增加 Review / feedback workflow
 
 ## Daily Brief
@@ -134,21 +134,27 @@ npm run process:stage4                   # Stage 4: enrich Events and persist ev
 # npm run test:stage3-persistence          # Validate Stage 3 display_rank protection rules
 # npm run test:stage4-event-date           # Validate deterministic event_date 推导
 # npm run test:stage4-persistence          # 验证 Stage 4 跨日 append、同日 rebuild 和 rollback
+npm run test:content-completion-runtime  # 验证 Completion 统计与 Dashboard runtime 读取
 npm run test:openai                      # Structured-output provider smoke testsmoke test
 npm run test:deepseek
 npm run test:kimi
 
 npm run recover:stage4-events:dry-run      # 只读分析 Stage 4 runtime 与数据库，输出可恢复候选，不写库
+```
 
 常用运行参数：
 
 ```bash
+DAILY_DATE=2026-mm-dd npm run daily
 STAGE1_LIMIT=20 npm run process:stage1
 STAGE1_CONCURRENCY=2 npm run process:stage1
 STAGE3_EVENT_TOP_N=10 npm run process:stage3
 STAGE4_CONCURRENCY=3 npm run process:stage4
 ```
 `runtime/` 保存运行时 input/output/debug artifacts，并被 Git 忽略。
+每次 `npm run complete:content` 会写入
+`runtime/content-completion/<timestamp>/run.json`，记录候选总量、实际选中量、
+成功/失败/skip、结束后的 remaining backlog、LIMIT 和 duration。
 Stage 4 persistence 会使用最近一次成功 runtime artifacts 识别同一 `event_date` scope 的上一轮输出，因此不要随意删除仍参与 rebuild/recovery 的 Stage 4 runtime 目录。
 
 ### Production
@@ -194,6 +200,7 @@ http://localhost:3000/dashboard
 
 - 页面需要可用的 `DATABASE_URL`，默认展示最近 7 天的数据量与 Daily Workflow 运行情况。
 - 数据库是业务数据 Source of Truth；所有每日统计按 `Asia/Shanghai` 日期边界计算。
+- `runtime/content-completion/` 补充每天最新一次 Completion success/selected、remaining backlog、duration 和 Date Details 计数。
 - `runtime/stage1~4/` 只补充运行指标，例如 LLM calls、retry、实际记录的 token、duration、Stage 2/3/4 的中间与结果数量。
 - 某个字段没有时显示 `N/A`，不会估算或写入新的 metrics 数据。
 

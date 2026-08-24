@@ -11,6 +11,7 @@ import type {
   Stage1Routing,
 } from "./stage1-contract.js";
 import { resolveStageLlmModel } from "./llm-client.js";
+import type { CollectedAtScope } from "../lib/daily-scope.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
 
@@ -18,6 +19,7 @@ export type Stage1JobOptions = Stage1LlmOptions & {
   limit?: number;
   concurrency?: number;
   collectedWithinHours?: number;
+  collectedAtScope?: CollectedAtScope;
   batchSize?: number;
   batchMaxContentChars?: number;
   batchMaxTotalChars?: number;
@@ -38,7 +40,9 @@ export type Stage1JobSummary = {
   startedAt: string;
   finishedAt: string;
   model: string;
-  collectedWithinHours: number;
+  collectedWithinHours: number | null;
+  scopeStartAt: string | null;
+  scopeEndAt: string | null;
   requestedLimit: number | null;
   loadedCount: number;
   selectedCount: number;
@@ -86,6 +90,7 @@ export async function processStage1Batch(
   const articles = await loadPendingStage1Articles(pool, {
     limit: options.limit,
     collectedWithinHours,
+    collectedAtScope: options.collectedAtScope,
   });
   const batches = createStage1MicroBatches(articles, batchConfig);
 
@@ -99,7 +104,9 @@ export async function processStage1Batch(
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
     model: resolveStageLlmModel("stage1", options.model),
-    collectedWithinHours,
+    collectedWithinHours: options.collectedAtScope ? null : collectedWithinHours,
+    scopeStartAt: options.collectedAtScope?.startAt ?? null,
+    scopeEndAt: options.collectedAtScope?.endAt ?? null,
     requestedLimit: options.limit ?? null,
     loadedCount: articles.length,
     selectedCount: results.filter((result) => result.status === "selected").length,
@@ -205,11 +212,18 @@ export async function loadPendingStage1Articles(
   options: {
     limit?: number;
     collectedWithinHours?: number;
+    collectedAtScope?: CollectedAtScope;
   } = {},
 ): Promise<Stage1ArticleRow[]> {
   const collectedWithinHours = options.collectedWithinHours ?? DEFAULT_STAGE1_LOOKBACK_HOURS;
-  const limitClause = options.limit ? "limit $2" : "";
-  const values: Array<number> = [collectedWithinHours];
+  const collectedAtPredicate = options.collectedAtScope
+    ? "ra.collected_at >= $1::timestamptz and ra.collected_at < $2::timestamptz"
+    : "ra.collected_at >= now() - ($1::int * interval '1 hour')";
+  const limitParameter = options.collectedAtScope ? 3 : 2;
+  const limitClause = options.limit ? `limit $${limitParameter}` : "";
+  const values: Array<number | string> = options.collectedAtScope
+    ? [options.collectedAtScope.startAt, options.collectedAtScope.endAt]
+    : [collectedWithinHours];
   if (options.limit) {
     values.push(options.limit);
   }
@@ -234,8 +248,8 @@ export async function loadPendingStage1Articles(
         s.language as "sourceLanguage"
       from raw_articles ra
       join sources s on s.id = ra.source_id
-      where ra.stage1_status = 'pending'
-        and ra.collected_at >= now() - ($1::int * interval '1 hour')
+      where ra.stage1_status in ('pending', 'failed')
+        and ${collectedAtPredicate}
       order by
         case when s.priority = 'High' then 0 when s.priority = 'Medium' then 1 else 2 end,
         coalesce(ra.published_at, ra.collected_at) desc,

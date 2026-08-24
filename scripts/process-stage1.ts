@@ -2,6 +2,9 @@ import { config } from "dotenv";
 import { Pool } from "pg";
 import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
 import { processStage1Batch } from "../src/processing/stage1-job.js";
+import { readCollectedAtScopeFromEnv } from "../src/lib/daily-scope.js";
+
+const inheritedDailyScope = readCollectedAtScopeFromEnv(process.env);
 
 config({ path: ".env" });
 config({ path: ".env.local", override: true });
@@ -29,6 +32,7 @@ async function main() {
       limit: optionalPositiveInteger(process.env.STAGE1_LIMIT),
       concurrency: optionalPositiveInteger(process.env.STAGE1_CONCURRENCY),
       collectedWithinHours: optionalPositiveInteger(process.env.STAGE1_COLLECTED_WITHIN_HOURS),
+      collectedAtScope: inheritedDailyScope ?? readCollectedAtScopeFromEnv(process.env),
       batchSize: optionalPositiveInteger(process.env.STAGE1_BATCH_SIZE),
       batchMaxContentChars: optionalPositiveInteger(
         process.env.STAGE1_BATCH_MAX_CONTENT_CHARS,

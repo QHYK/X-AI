@@ -18,9 +18,11 @@ import {
   type Stage2TokenUsage,
 } from "./stage2-llm.js";
 import { resolveStageLlmModel } from "./llm-client.js";
+import type { CollectedAtScope } from "../lib/daily-scope.js";
 
 export type Stage2JobOptions = Stage2LlmOptions & {
   collectedWithinHours?: number;
+  collectedAtScope?: CollectedAtScope;
 };
 
 export type Stage2EventGroup = {
@@ -70,6 +72,7 @@ export async function processStage2Merge(
   const model = resolveStageLlmModel("stage2", options.model);
   const candidateRows = await loadStage2EventCandidates(pool, {
     collectedWithinHours: options.collectedWithinHours,
+    collectedAtScope: options.collectedAtScope,
   });
   const { input, idMap } = prepareStage2Input(candidateRows);
 
