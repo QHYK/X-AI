@@ -72,6 +72,18 @@ export type DashboardContentCompletionMetrics = {
   perSourceLimit: number | null;
 };
 
+export function formatContentCompletionRatio(
+  metrics: DashboardContentCompletionMetrics | null,
+): string {
+  if (metrics?.successCount === null || metrics?.successCount === undefined) {
+    return "N/A";
+  }
+  if (metrics.selectedCount === null) {
+    return "N/A";
+  }
+  return `${metrics.successCount.toLocaleString("en-US")} / ${metrics.selectedCount.toLocaleString("en-US")}`;
+}
+
 export type DashboardDay = {
   date: string;
   raw: {

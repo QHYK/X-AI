@@ -1,5 +1,6 @@
 import { getDatabasePool } from "@/db/index.js";
 import {
+  formatContentCompletionRatio,
   getDashboardData,
   type DashboardContentCompletionMetrics,
   type DashboardStageMetrics,
@@ -50,7 +51,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             <p className={styles.kicker}>Daily volume</p>
             <h2>最近 7 天</h2>
           </div>
-          <p>DB 指标为业务数据；runtime 指标取各 Stage 当天最新一次 run。</p>
+          <p>DB 指标为业务数据；runtime 指标取 Completion / 各 Stage 当天最新一次 run。</p>
         </div>
         <div className={styles.tableWrap}>
           <table className={styles.table}>
@@ -89,7 +90,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   <td>{formatNumber(day.raw.selected)}</td>
                   <td>{formatNumber(day.raw.ignored)}</td>
                   <td>{formatNumber(day.raw.failed)}</td>
-                  <td>{formatCompletion(day.runtime.contentCompletion)}</td>
+                  <td>{formatContentCompletionRatio(day.runtime.contentCompletion)}</td>
                   <td>{formatMetric(day.runtime.contentCompletion?.remainingCount)}</td>
                   <td>{formatDuration(day.runtime.contentCompletion?.durationMs)}</td>
                   <td>{formatDuration(day.runtime.stages.stage1?.durationMs)}</td>
@@ -318,18 +319,6 @@ function formatNumber(value: number): string {
 
 function formatMetric(value: number | null | undefined): string {
   return value === null || value === undefined ? "N/A" : formatNumber(value);
-}
-
-function formatCompletion(
-  metrics: DashboardContentCompletionMetrics | null,
-): string {
-  if (metrics?.successCount === null || metrics?.successCount === undefined) {
-    return "N/A";
-  }
-  if (metrics.selectedCount === null) {
-    return "N/A";
-  }
-  return `${formatNumber(metrics.successCount)} / ${formatNumber(metrics.selectedCount)}`;
 }
 
 function formatDuration(value: number | null | undefined): string {

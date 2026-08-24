@@ -459,6 +459,17 @@ update raw_articles.content_text
 * Stage 1 根据现有 Title / Metadata 判断是否可以继续处理；
 * 必要时记录处理错误或低内容状态。
 
+每次 `npm run complete:content` 写入独立的
+`runtime/content-completion/<timestamp>/run.json`。其中：
+
+- `candidate_count`：执行开始时符合相同 eligibility 条件的总数，不受总 LIMIT 和 per-source limit 影响；
+- `selected_count`：应用 per-source limit 和总 LIMIT 后实际进入本次处理的数量；
+- `success_count` / `failed_count` / `skipped_count`：本次所选内容的真实处理结果；
+- `remaining_count`：执行结束后按相同 eligibility 条件重新查询的 backlog；
+- `duration_ms`、`limit`、`per_source_limit`：本次实际运行配置和时长。
+
+运行失败时 artifact 保留已经获得的真实 metrics；未知字段为 `null`，不估算。
+
 ### 4.4 Deduplication
 区分两类重复。
 
@@ -845,9 +856,14 @@ DAILY_DATE=2026-08-25 npm run daily
 `runtime/` 保存 Stage 2–4 的真实 input / output / mapping / run metadata，用于 Debug、Review、重跑边界。
 
 `runtime/daily/.../run.json` 额外记录 `daily_date`、`timezone`、
-`scope_start_at`、`scope_end_at`，以及本次 `stage2_run`、`stage3_run`、`stage4_run`，
+`scope_start_at`、`scope_end_at`，以及本次 `content_completion_run`、`stage2_run`、
+`stage3_run`、`stage4_run`，
 同时保留各 step status / duration / failed_step。
 
 它不是应用数据库，也不是长期业务 Source of Truth，并保持 Git ignored。
 
 Stage 4 rebuild 使用 runtime artifacts 识别同一 `event_date` scope 的上一轮派生 Events。runtime artifacts 也用于 Debug、Review 和必要时的数据恢复分析；不要把它作为 Stage 间传递数据的正式接口。
+
+Internal Dashboard 按 Asia/Shanghai 运行日期读取每天最新一次 Content Completion runtime，
+展示 Completion success/selected、remaining backlog、duration，并在 Date Details 展示完整计数。
+缺少 runtime 时显示 `N/A`，不从当前数据库状态反推历史指标。

@@ -24,6 +24,7 @@
     "test:stage4-event-date": "tsx scripts/test-stage4-event-date.ts",
     "test:stage4-persistence": "tsx scripts/test-stage4-persistence.ts",
     "test:daily-scope": "tsx scripts/test-daily-scope.ts",
+    "test:content-completion-runtime": "tsx scripts/test-content-completion-runtime.ts",
     "test:openai": "tsx scripts/test-openai-call.ts openai",
     "test:deepseek": "tsx scripts/test-openai-call.ts deepseek",
     "test:kimi": "tsx scripts/test-openai-call.ts kimi",
