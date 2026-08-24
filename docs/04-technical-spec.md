@@ -477,7 +477,7 @@ FT: Fed ...
 
 ### 4.5 Stage 1
 
-只处理最近 workflow window 内 `stage1_status = pending` 的 Raw Articles。
+只处理最近 workflow window 内 `stage1_status IN ('pending', 'failed')` 的 Raw Articles。
 
 Stage 1 对普通文章使用小型 micro-batch，但每篇 Raw Article 仍独立判断；较大的 input 可以单独处理。
 ```text
@@ -592,7 +592,7 @@ Stage 4 完成后：
 Daily Workflow 必须可以安全重复执行。
 
 - Collection：item ID / URL 去重
-- Stage 1：只处理 `stage1_status = pending`；`processed_contents.raw_article_id` UNIQUE
+- Stage 1：只处理 `stage1_status IN ('pending', 'failed')`；`processed_contents.raw_article_id` UNIQUE
 - Stage 2：只生成当前 Workflow 使用的 Event Groups，不直接持久化 events.runtime Event Groups 可安全重算
 - Stage 3：覆盖 `ai_rank`，保护人工 `display_rank`
 - Stage 4：根据当前输出的 `event_date` scope，从历史 `runtime/stage4/.../persistence.json` / `persistence-plan.json` 中识别同一日期 scope 的上一轮派生 Events，unlink → delete → rebuild → relink；不同 `event_date` 的历史 Events 必须保留。

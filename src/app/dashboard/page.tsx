@@ -61,6 +61,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 <th>Stage1 Selected</th>
                 <th>Ignored</th>
                 <th>Failed</th>
+                <th>Stage1 Duration</th>
                 <th>Processed Total</th>
                 <th>Event</th>
                 <th>Digest</th>
@@ -84,6 +85,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   <td>{formatNumber(day.raw.selected)}</td>
                   <td>{formatNumber(day.raw.ignored)}</td>
                   <td>{formatNumber(day.raw.failed)}</td>
+                  <td>{formatDuration(day.runtime.stages.stage1?.durationMs)}</td>
                   <td>{formatNumber(day.processed.total)}</td>
                   <td>{formatNumber(day.processed.event)}</td>
                   <td>{formatNumber(day.processed.digest)}</td>

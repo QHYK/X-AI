@@ -370,7 +370,104 @@ async function loadRuntimeMetricsByDate(
     }),
   );
 
+  const dailyStage1Runs = await loadDailyStage1Metrics(rootDir, requestedDates);
+  for (const run of dailyStage1Runs) {
+    const dateStages = byDate.get(run.date) ?? new Map();
+    const previous = dateStages.get("stage1");
+    if (!previous || compareStartedAt(run.metrics.startedAt, previous.startedAt) > 0) {
+      dateStages.set("stage1", run.metrics);
+      byDate.set(run.date, dateStages);
+    }
+  }
+
   return byDate;
+}
+
+async function loadDailyStage1Metrics(
+  rootDir: string,
+  requestedDates: Set<string>,
+): Promise<Array<{ date: string; metrics: DashboardStageMetrics }>> {
+  const dailyDir = join(rootDir, "runtime", "daily");
+  let runNames: string[];
+  try {
+    runNames = await readdir(dailyDir);
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  const runs = await Promise.all(
+    runNames.map(async (runName) => {
+      const runDir = join(dailyDir, runName);
+      try {
+        const artifact = asObject(
+          JSON.parse(await readFile(join(runDir, "run.json"), "utf8")),
+        );
+        if (!artifact) {
+          throw new Error("Daily run.json must contain a JSON object.");
+        }
+        const steps = Array.isArray(artifact.steps) ? artifact.steps : [];
+        const stage1Step = steps
+          .map(asObject)
+          .find((step) => step && stringValue(step.name) === "process:stage1");
+        if (!stage1Step) {
+          return null;
+        }
+
+        const startedAt = stringValue(stage1Step.started_at);
+        if (!startedAt) {
+          throw new Error("Daily Stage 1 step has no valid started_at timestamp.");
+        }
+        const date = formatShanghaiDate(new Date(startedAt));
+        if (!requestedDates.has(date)) {
+          return null;
+        }
+
+        return {
+          date,
+          metrics: stage1MetricsFromDailyStep(stage1Step, startedAt),
+        };
+      } catch (error) {
+        if (!isMissingFile(error)) {
+          console.error(`Failed to read dashboard daily runtime artifact ${runDir}.`, error);
+        }
+        return null;
+      }
+    }),
+  );
+
+  return runs.filter(
+    (run): run is { date: string; metrics: DashboardStageMetrics } => run !== null,
+  );
+}
+
+function stage1MetricsFromDailyStep(
+  step: JsonObject,
+  startedAt: string,
+): DashboardStageMetrics {
+  return {
+    stage: "stage1",
+    status: stringValue(step.status),
+    startedAt,
+    durationMs: numberFrom(step, "duration_ms"),
+    llmDurationMs: null,
+    llmCalls: null,
+    retryCount: null,
+    inputTokens: null,
+    outputTokens: null,
+    totalTokens: null,
+    candidateCount: null,
+    groupCount: null,
+    selectedEventCount: null,
+    digestBeforeDedup: null,
+    digestAfterDedup: null,
+    longFormCount: null,
+    enrichmentSuccessCount: null,
+    enrichmentFailureCount: null,
+    eventsCreated: null,
+  };
 }
 
 async function parseStageMetrics(

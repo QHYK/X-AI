@@ -234,7 +234,7 @@ export async function loadPendingStage1Articles(
         s.language as "sourceLanguage"
       from raw_articles ra
       join sources s on s.id = ra.source_id
-      where ra.stage1_status = 'pending'
+      where ra.stage1_status in ('pending', 'failed')
         and ra.collected_at >= now() - ($1::int * interval '1 hour')
       order by
         case when s.priority = 'High' then 0 when s.priority = 'Medium' then 1 else 2 end,
