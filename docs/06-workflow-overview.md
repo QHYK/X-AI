@@ -128,7 +128,7 @@ Daily Inspiration  → processed_contents (routing=inspiration)
 
 上述数据
    ↓
-GET /daily-brief?date=YYYY-MM-DD
+GET /api/brief?date=YYYY-MM-DD
    ↓
 X-field 页面
 ```

@@ -14,7 +14,7 @@ X-AI-field 是一个 AI 驱动的信息筛选系统：持续收集可信信息�
 - Stage 3 - Channel Ranking + Exact Dedup
 - Stage 4 — Selected Event Enrichment + Optional Web Search
 - Daily Workflow Orchestrator
-- Daily Brief API `GET /daily-brief?date=YYYY-MM-DD`
+- Daily Brief API `GET /api/brief?date=YYYY-MM-DD`
 - Internal Dashboard `/dashboard`
 - X-field Daily Brief 页面
 - 09:00 Asia/Shanghai Cron
@@ -178,7 +178,7 @@ Use `Source + Collection Method` as the source identity, so URL changes update e
 ## Daily Brief API
 
 ```text
-GET /daily-brief?date=YYYY-MM-DD
+GET /api/brief?date=YYYY-MM-DD
 ```
 
 返回：

@@ -97,7 +97,7 @@ source articles 的 `raw_articles.published_at` 确定性推导：
 Daily Brief 不单独持久化为 `daily_briefs` 或 `brief_items`。
 X-AI-field 当前只提供 Daily Brief API；Daily Brief 页面放在独立的 X-field 项目中。
 ```text
-X-field → HTTP → X-AI-field /daily-brief → PostgreSQL
+X-field → HTTP → X-AI-field /api/brief → PostgreSQL
 ```
 
 API 根据日期实时组合：
@@ -633,7 +633,7 @@ Daily Workflow 必须可以安全重复执行。
 ## 5. Daily Brief API
 
 ```text
-GET /daily-brief?date=YYYY-MM-DD
+GET /api/brief?date=YYYY-MM-DD
 ```
 
 MVP 使用 `created_at`（Asia/Shanghai）作为 Brief 日期归属依据。
@@ -842,7 +842,7 @@ run 明确传给 Stage 4，避免 Daily 依赖全局 latest runtime。显式 ret
 DAILY_DATE=2026-08-25 npm run daily
 ```
 
-完成 Stage 4 后，`/daily-brief` 可直接读取 publish-ready 数据。
+完成 Stage 4 后，`/api/brief` 可直接读取 publish-ready 数据。
 
 未来：
 ```text
