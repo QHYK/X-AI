@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveDailyScope } from "../src/lib/daily-scope.js";
+import { STAGE1_PROMPT_VERSION } from "../src/prompts/stage1-content-understanding.js";
 import {
   buildDailyStepEnv,
   type DailyStageName,
@@ -26,6 +27,7 @@ type StepRun = {
   duration_ms: number | null;
   status: StepStatus;
   exit_code: number | null;
+  prompt_version?: string;
 };
 
 type DailyRun = {
@@ -83,6 +85,7 @@ async function main() {
       duration_ms: null,
       status: "running",
       exit_code: null,
+      ...(name === "process:stage1" ? { prompt_version: STAGE1_PROMPT_VERSION } : {}),
     };
     run.steps.push(step);
     await writeRun(runPath, run);

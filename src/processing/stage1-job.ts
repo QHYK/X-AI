@@ -340,17 +340,30 @@ async function persistSuccessfulBatch(
 ): Promise<Stage1JobArticleResult[]> {
   const outputByTempId = new Map(outputResults.map((result) => [result.temp_id, result]));
 
-  return Promise.all(
-    articles.map((article, index) => {
-      const tempId = `A${String(index + 1).padStart(3, "0")}`;
-      const outputResult = outputByTempId.get(tempId);
-      if (!outputResult) {
-        throw new Error(`Validated Stage 1 output is missing ${tempId}.`);
-      }
+  return persistStage1BatchSequentially(articles, (article, index) => {
+    const tempId = `A${String(index + 1).padStart(3, "0")}`;
+    const outputResult = outputByTempId.get(tempId);
+    if (!outputResult) {
+      throw new Error(`Validated Stage 1 output is missing ${tempId}.`);
+    }
 
-      return persistStage1Output(pool, article, toStage1Output(outputResult), options.attempts);
-    }),
-  );
+    return persistStage1Output(pool, article, toStage1Output(outputResult), options.attempts);
+  });
+}
+
+/**
+ * 同一个成功 micro-batch 内逐篇执行 persistence。
+ * micro-batch 之间的 LLM concurrency 保持不变，但每个 worker 同时最多占用一个 persistence。
+ */
+export async function persistStage1BatchSequentially<T, R>(
+  items: T[],
+  persist: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  for (const [index, item] of items.entries()) {
+    results.push(await persist(item, index));
+  }
+  return results;
 }
 
 async function persistFailedArticle(

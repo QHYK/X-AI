@@ -5,11 +5,16 @@
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Pool, PoolClient } from "pg";
-import type {
-  Stage3DigestRankingCandidate,
-  Stage3DigestRankingInput,
+import {
+  STAGE3_DIGEST_RANKING_PROMPT_VERSION,
+  type Stage3DigestRankingCandidate,
+  type Stage3DigestRankingInput,
 } from "../prompts/stage3-digest-ranking.js";
-import type { Stage3LongFormRankingInput } from "../prompts/stage3-long-form-ranking.js";
+import { STAGE3_EVENT_RANKING_PROMPT_VERSION } from "../prompts/stage3-event-ranking.js";
+import {
+  STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
+  type Stage3LongFormRankingInput,
+} from "../prompts/stage3-long-form-ranking.js";
 import {
   runStage3DigestRankingLlm,
   type Stage3DigestRankingResult,
@@ -1250,6 +1255,11 @@ async function writeRunJson(
     started_at: value.startedAt.toISOString(),
     finished_at: value.finishedAt.toISOString(),
     model: value.model,
+    prompt_versions: {
+      event: STAGE3_EVENT_RANKING_PROMPT_VERSION,
+      digest: STAGE3_DIGEST_RANKING_PROMPT_VERSION,
+      long_form: STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
+    },
     published_within_hours: value.publishedWithinHours,
     event_group_count: value.eventGroupCount,
     event_selected_count: value.eventSelectedCount,

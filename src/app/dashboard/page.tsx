@@ -342,6 +342,18 @@ function StageCard({
         <StatusBadge status={metrics.status} />
       </div>
       <dl className={styles.metricList}>
+        {metrics.stage === "stage3" ? (
+          <>
+            <Metric label="Prompt · Event" value={metrics.promptVersions?.event ?? "N/A"} />
+            <Metric label="Prompt · Digest" value={metrics.promptVersions?.digest ?? "N/A"} />
+            <Metric
+              label="Prompt · Long-form"
+              value={metrics.promptVersions?.longForm ?? "N/A"}
+            />
+          </>
+        ) : (
+          <Metric label="Prompt version" value={metrics.promptVersion ?? "N/A"} />
+        )}
         <Metric label="Duration" value={formatDuration(metrics.durationMs)} />
         <Metric label="LLM duration" value={formatDuration(metrics.llmDurationMs)} />
         <Metric label="LLM calls" value={formatMetric(metrics.llmCalls)} />
@@ -380,6 +392,8 @@ function stageSpecificMetrics(metrics: DashboardStageMetrics): Array<[string, nu
         ["Enrichment success", metrics.enrichmentSuccessCount],
         ["Enrichment failure", metrics.enrichmentFailureCount],
         ["Events created", metrics.eventsCreated],
+        ["Web Search Events", metrics.webSearchEventCount],
+        ["Web Search Calls", metrics.totalWebSearchCalls],
       ];
   }
 }

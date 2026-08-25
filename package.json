@@ -26,6 +26,7 @@
     "test:daily-scope": "tsx scripts/test-daily-scope.ts",
     "test:dashboard-daily-scope": "tsx scripts/test-dashboard-daily-scope.ts",
     "test:daily-workflow-retry": "tsx scripts/test-daily-workflow-retry.ts",
+    "test:stage1-persistence": "tsx scripts/test-stage1-persistence.ts",
     "test:content-completion-runtime": "tsx scripts/test-content-completion-runtime.ts",
     "test:openai": "tsx scripts/test-openai-call.ts openai",
     "test:deepseek": "tsx scripts/test-openai-call.ts deepseek",

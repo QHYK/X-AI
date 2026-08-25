@@ -244,7 +244,51 @@ try {
     finished_at: "2026-08-24T16:30:01.000Z",
     candidate_count: 7,
     final_group_count: 3,
+    prompt_version: "stage2-fixture-v1",
     status: "success",
+  });
+  await writeRun(runtimeRoot, "runtime/stage2/legacy-fixture", {
+    stage: "stage2",
+    daily_date: "2026-08-19",
+    started_at: "2026-08-19T01:30:00.000Z",
+    finished_at: "2026-08-19T01:30:01.000Z",
+    status: "success",
+  });
+  await writeRun(runtimeRoot, "runtime/stage3/fixture", {
+    stage: "stage3",
+    daily_date: "2026-08-20",
+    started_at: "2026-08-24T16:31:00.000Z",
+    finished_at: "2026-08-24T16:31:01.000Z",
+    prompt_versions: {
+      event: "event-fixture-v1",
+      digest: "digest-fixture-v2",
+      long_form: "long-form-fixture-v3",
+    },
+    status: "success",
+  });
+  await writeRun(runtimeRoot, "runtime/stage4/fixture", {
+    stage: "stage4",
+    daily_date: "2026-08-20",
+    started_at: "2026-08-24T16:32:00.000Z",
+    finished_at: "2026-08-24T16:32:01.000Z",
+    prompt_version: "stage4-fixture-v4",
+    web_search_event_count: 2,
+    total_web_search_calls: 5,
+    status: "success",
+  });
+  await writeRun(runtimeRoot, "runtime/daily/fixture", {
+    daily_date: "2026-08-20",
+    started_at: "2026-08-24T16:29:00.000Z",
+    status: "success",
+    steps: [
+      {
+        name: "process:stage1",
+        started_at: "2026-08-24T16:30:00.000Z",
+        duration_ms: 1000,
+        prompt_version: "stage1-fixture-v5",
+        status: "success",
+      },
+    ],
   });
   await writeRun(runtimeRoot, "runtime/content-completion/fixture", {
     daily_date: "2026-08-20",
@@ -258,7 +302,7 @@ try {
     status: "success",
   });
 
-  const dates = new Set(["2026-08-20"]);
+  const dates = new Set(["2026-08-20", "2026-08-19"]);
   const stageRuntime = await loadRuntimeMetricsByDate(runtimeRoot, dates);
   const completionRuntime = await loadContentCompletionRuntimeByDate(runtimeRoot, dates);
   checks.push({
@@ -267,6 +311,28 @@ try {
       stageRuntime.get("2026-08-20")?.get("stage2")?.candidateCount === 7 &&
       completionRuntime.get("2026-08-20")?.candidateCount === 11 &&
       completionRuntime.get("2026-08-20")?.remainingCount === 7,
+  });
+  checks.push({
+    name: "legacy runtime without a prompt version remains N/A",
+    passed: stageRuntime.get("2026-08-19")?.get("stage2")?.promptVersion === null,
+  });
+  const stages = stageRuntime.get("2026-08-20");
+  checks.push({
+    name: "Dashboard reads real prompt versions without merging Stage 3 prompts",
+    passed:
+      stages?.get("stage1")?.promptVersion === "stage1-fixture-v5" &&
+      stages.get("stage2")?.promptVersion === "stage2-fixture-v1" &&
+      stages.get("stage3")?.promptVersion === null &&
+      stages.get("stage3")?.promptVersions?.event === "event-fixture-v1" &&
+      stages.get("stage3")?.promptVersions?.digest === "digest-fixture-v2" &&
+      stages.get("stage3")?.promptVersions?.longForm === "long-form-fixture-v3" &&
+      stages.get("stage4")?.promptVersion === "stage4-fixture-v4",
+  });
+  checks.push({
+    name: "Dashboard keeps Stage 4 Web Search Events and Calls as separate metrics",
+    passed:
+      stages?.get("stage4")?.webSearchEventCount === 2 &&
+      stages.get("stage4")?.totalWebSearchCalls === 5,
   });
 } finally {
   await rm(runtimeRoot, { recursive: true, force: true });

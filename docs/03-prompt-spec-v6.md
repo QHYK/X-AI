@@ -179,7 +179,7 @@ Rank by:
 
 **Prompt Version:** `v6`
 
-**Goal:** Act as the final editorial synthesis layer for each selected Event. Make the Event independently understandable by explaining what happened and, when relevant, the minimum background / preceding development needed to understand it and why the development deserves attention now.
+**Goal:** Understand each selected Event Group and generate complete Event content for the Daily Brief.
 
 ### Input Schema
 ```json
@@ -220,38 +220,22 @@ Rank by:
 }
 ```
 
-### Editorial Goal
-For each Selected Event, answer these questions when relevant:
-
-1. **What happened?**
-2. **What minimum background or preceding development is needed to understand it?**
-3. **Why does this development deserve attention now?**
-
-“Why it matters” means why the development is consequential, unusual, systemically important, policy-relevant, scientifically important, strategically important, or a meaningful change in an ongoing story. It does **not** mean investment advice, price prediction, or speculative market impact.
-
-Do not manufacture significance. Straightforward Events whose significance is already clear should remain concise.
-
 ### Guidelines
-- Accurately describe what happened and extract common facts across the provided reports.
+- Accurately describe what happened and extract common facts.
 - Preserve meaningful added details, perspectives, uncertainty, and conflicts across sources.
-- `source_perspectives[].summary` must be faithful to that specific source and based only on the provided source candidates.
+- `source_perspectives[].summary` must be faithful to that specific source.
 - `event_tags` / `event_tags_zh` ≤ 5.
 - `event_entities` / `event_entities_zh` ≤ 3. 只保留识别该 Event 最重要的核心实体。
-- `event_summary_zh` normally about 150–300 Chinese characters; complex important Events may use up to about 400 Chinese characters when the additional context is genuinely useful.
-- Each `source_perspectives[].summary` ≤ ~80 Chinese characters.
-- Summaries must remain faithful to the provided reports and any actual Web Search results used.
-
-### Web Search
+- `event_summary_zh` ≤ ~200 Chinese characters.
+- Each `source_perspectives[].summary` ≤ ~80 Chinese characters. 
++ Summaries must be faithful to the provided reports.
+<!-- - Do not output `event_at`; Application Code derives it from source timestamps. -->
 - Web Search is available with `tool_choice=auto`; it remains optional and is not required for every Event.
-- First understand the provided reports, then actively judge whether important context is still missing.
-- Use Web Search when it can materially improve independent understanding through necessary background/context, important preceding developments, why the development matters now, important context for an ongoing story, first-party confirmation, or clarification of meaningful uncertainty/conflicting reports.
-- Web Search is especially useful when the provided candidates describe only the latest development in an important ongoing story without enough context to understand its significance.
-- Prefer first-party or authoritative sources when useful for important policy decisions, official economic data, company announcements, court decisions, regulatory actions, and research findings.
-- Search may also be used when a small amount of reliable background explains why an otherwise isolated fact deserves attention.
-- Do not search merely to accumulate facts, repeat facts already covered by the provided sources, add trivia / low-value background, or produce investment advice / price predictions.
-- If Web Search does not provide meaningful information gain, rely on the provided reports.
-- If Web Search is used, `event_summary` / `event_summary_zh` may naturally integrate verified background, preceding developments, confirmation, or significance needed to make the Event independently understandable.
-- If Web Search is used, keep `external_context.sources_summary` concise and state what useful background, confirmation, or explanation the search added; list the source URLs used in `external_context.sources`.
+- For each Selected Event, actively judge whether Web Search can materially improve independent understanding through necessary background, important preceding developments, why the development matters now, first-party confirmation, context for an ongoing story, or clarification of meaningful uncertainty/conflicting reports.
+- First-party confirmation is especially valuable for important policy, data, company announcements, court decisions, and research.
+- Do not search for unrelated details, repeat facts already covered by the provided sources, add low-value background, or produce investment advice / price predictions.
+- If Web Search is used, `event_summary` / `event_summary_zh` may naturally integrate genuinely necessary background and preceding developments.
+- If Web Search is used, keep `external_context.sources_summary` concise and state the background, confirmation, or explanation added; list the source URLs used in `external_context.sources`.
 - Web Search results must not be represented as original source perspectives; `source_perspectives` remains based only on provided source candidates.
 - Application Code derives actual `external_context.performed` and provenance URLs from real Responses API Web Search tool usage.
 - `external_context.sources_summary` ≤ 250 Chinese characters.

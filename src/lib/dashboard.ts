@@ -60,6 +60,12 @@ export type DashboardStageMetrics = {
   stage: DashboardStage;
   status: string | null;
   startedAt: string | null;
+  promptVersion: string | null;
+  promptVersions: {
+    event: string | null;
+    digest: string | null;
+    longForm: string | null;
+  } | null;
   durationMs: number | null;
   llmDurationMs: number | null;
   llmCalls: number | null;
@@ -76,6 +82,8 @@ export type DashboardStageMetrics = {
   enrichmentSuccessCount: number | null;
   enrichmentFailureCount: number | null;
   eventsCreated: number | null;
+  webSearchEventCount: number | null;
+  totalWebSearchCalls: number | null;
 };
 
 export type DashboardContentCompletionMetrics = {
@@ -726,6 +734,8 @@ function stage1MetricsFromDailyStep(
     stage: "stage1",
     status: stringValue(step.status),
     startedAt,
+    promptVersion: stringValue(step.prompt_version),
+    promptVersions: null,
     durationMs: numberFrom(step, "duration_ms"),
     llmDurationMs: null,
     llmCalls: null,
@@ -742,6 +752,8 @@ function stage1MetricsFromDailyStep(
     enrichmentSuccessCount: null,
     enrichmentFailureCount: null,
     eventsCreated: null,
+    webSearchEventCount: null,
+    totalWebSearchCalls: null,
   };
 }
 
@@ -756,11 +768,21 @@ async function parseStageMetrics(
   const diagnosticTokens =
     stage === "stage3" ? await loadStage3DiagnosticTokens(runDir) : null;
   const finishedAt = stringValue(artifact.finished_at);
+  const stage3PromptVersions = asObject(artifact.prompt_versions);
 
   return {
     stage,
     status: stringValue(artifact.status),
     startedAt,
+    promptVersion: stringValue(artifact.prompt_version),
+    promptVersions:
+      stage === "stage3"
+        ? {
+            event: stringValue(stage3PromptVersions?.event),
+            digest: stringValue(stage3PromptVersions?.digest),
+            longForm: stringValue(stage3PromptVersions?.long_form),
+          }
+        : null,
     durationMs:
       numberFrom(artifact, "total_duration_ms", "duration_ms") ??
       durationBetween(startedAt, finishedAt),
@@ -783,6 +805,8 @@ async function parseStageMetrics(
         ? Math.max(0, selectedEventCount - enrichmentSuccessCount)
         : null,
     eventsCreated: numberFrom(artifact, "events_created"),
+    webSearchEventCount: numberFrom(artifact, "web_search_event_count"),
+    totalWebSearchCalls: numberFrom(artifact, "total_web_search_calls"),
   };
 }
 
