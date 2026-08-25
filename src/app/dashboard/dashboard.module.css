@@ -130,6 +130,47 @@
   font-size: 1.25rem;
 }
 
+.detailsTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.retryControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.retryButton {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #789184;
+  border-radius: 7px;
+  background: #f0f7f3;
+  color: #294437;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.retryButton:hover:not(:disabled) {
+  background: #e0efe6;
+}
+
+.retryButton:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.retryError {
+  max-width: 250px;
+  color: #a43c36;
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
 .panelHeading > p {
   margin: 0;
   text-align: right;

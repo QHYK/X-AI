@@ -11,6 +11,11 @@ import {
   type DashboardContentFunnel,
   type DashboardStageMetrics,
 } from "@/lib/dashboard.js";
+import {
+  isCurrentDailyDate,
+  isDailyWorkflowRunning,
+} from "@/lib/daily-workflow-retry.js";
+import { DailyRetryButton } from "./daily-retry-button.js";
 import styles from "./dashboard.module.css";
 
 export const runtime = "nodejs";
@@ -32,6 +37,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const { date } = await searchParams;
   const detailDate = Array.isArray(date) ? date[0] : date;
   const data = await getDashboardData(getDatabasePool(), { detailDate });
+  const canRetryDaily = isCurrentDailyDate(data.detailDate, data.latestDailyDate);
+  const dailyWorkflowRunning = canRetryDaily ? await isDailyWorkflowRunning() : false;
 
   return (
     <main className={styles.page}>
@@ -124,7 +131,15 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         <div className={styles.sectionHeading}>
           <div>
             <p className={styles.kicker}>Date details</p>
-            <h2>{data.detailDate}</h2>
+            <div className={styles.detailsTitle}>
+              <h2>{data.detailDate}</h2>
+              {canRetryDaily ? (
+                <DailyRetryButton
+                  dailyDate={data.detailDate}
+                  initiallyRunning={dailyWorkflowRunning}
+                />
+              ) : null}
+            </div>
           </div>
           <form action="./dashboard" className={styles.dateForm}>
             <label htmlFor="dashboard-date">Select date</label>
