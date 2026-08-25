@@ -1,14 +1,18 @@
+/**
+ * Daily Brief 的数据库组合层。
+ *
+ * 复用同一查询规则提供 API 与 Dashboard 所需的最终展示内容，并在传入 Daily scope 时按原始采集输入归属。
+ */
 import type { Pool } from "pg";
 import type { ShanghaiDayRange } from "./brief-date.js";
-import { resolveDailyScope, type DailyScope } from "./daily-scope.js";
-
-export type RawArticleScope = {
-  startAt: string;
-  endAt: string;
-};
+import {
+  resolveDailyScope,
+  type DailyScope,
+  type PublishedAtScope,
+} from "./daily-scope.js";
 
 export type DailyBriefOptions = {
-  rawArticleScope?: RawArticleScope;
+  publishedAtScope?: PublishedAtScope;
 };
 
 export const DIGEST_CATEGORY_KEYS = [
@@ -69,7 +73,7 @@ export type DailyBriefResponse = {
   inspiration: BriefInspirationItem[];
   meta: {
     timezone: "Asia/Shanghai";
-    date_basis: "raw_articles.collected_at";
+    date_basis: "raw_articles.published_at";
     generated_at: string;
     event_count: number;
     digest_count: number;
@@ -121,16 +125,20 @@ type InspirationRow = Omit<ContentRow, "rank" | "category"> & {
   image_url: string | null;
 };
 
+/**
+ * 读取一个 Brief 的 Events、Digest、Long-form 与 Inspiration。
+ * 可选 publishedAtScope 让重跑后的处理结果仍归属于其新闻发布时间期次。
+ */
 export async function getDailyBrief(
   pool: Pool,
   range: ShanghaiDayRange,
   options: DailyBriefOptions = {},
 ): Promise<DailyBriefResponse> {
   const [events, digests, longForm, inspiration] = await Promise.all([
-    loadEvents(pool, range, options.rawArticleScope),
-    loadDigestItems(pool, range, options.rawArticleScope),
-    loadLongFormItems(pool, range, options.rawArticleScope),
-    loadInspirationItems(pool, range, options.rawArticleScope),
+    loadEvents(pool, range, options.publishedAtScope),
+    loadDigestItems(pool, range, options.publishedAtScope),
+    loadLongFormItems(pool, range, options.publishedAtScope),
+    loadInspirationItems(pool, range, options.publishedAtScope),
   ]);
   const digestCountByCategory = countDigestsByCategory(digests);
 
@@ -142,7 +150,7 @@ export async function getDailyBrief(
     inspiration,
     meta: {
       timezone: "Asia/Shanghai",
-      date_basis: "raw_articles.collected_at",
+      date_basis: "raw_articles.published_at",
       generated_at: new Date().toISOString(),
       event_count: events.length,
       digest_count: Object.values(digests).reduce((sum, items) => sum + items.length, 0),
@@ -153,6 +161,7 @@ export async function getDailyBrief(
   };
 }
 
+/** 以固定 Daily scope 读取 Brief，是正式 Daily attribution 的首选入口。 */
 export function getDailyBriefForDailyScope(
   pool: Pool,
   scope: DailyScope,
@@ -164,7 +173,7 @@ export function getDailyBriefForDailyScope(
       startUtc: new Date(scope.startAt),
       endUtc: new Date(scope.endAt),
     },
-    { rawArticleScope: scope },
+    { publishedAtScope: scope },
   );
 }
 
@@ -178,17 +187,19 @@ export function getDailyBriefForDailyDate(
 async function loadEvents(
   pool: Pool,
   range: ShanghaiDayRange,
-  rawArticleScope?: RawArticleScope,
+  publishedAtScope?: PublishedAtScope,
 ): Promise<BriefEvent[]> {
-  const scopePredicate = rawArticleScope
+  // Event 可能关联多篇候选稿；exists 避免 join 扩张导致同一 Event 重复返回。
+  const scopePredicate = publishedAtScope
     ? `
         exists (
           select 1
           from processed_contents pc
           join raw_articles ra on ra.id = pc.raw_article_id
           where pc.event_id = events.id
-            and ra.collected_at >= $1::timestamptz
-            and ra.collected_at < $2::timestamptz
+            and pc.routing = 'event'
+            and ra.published_at >= $1::timestamptz
+            and ra.published_at < $2::timestamptz
         )
       `
     : `created_at >= $1::timestamptz and created_at < $2::timestamptz`;
@@ -215,7 +226,7 @@ async function loadEvents(
       order by coalesce(display_rank, ai_rank) asc, created_at asc, id asc
       limit 10
     `,
-    scopeValues(range, rawArticleScope),
+    scopeValues(range, publishedAtScope),
   );
 
   const eventIds = eventResult.rows.map((row) => row.id);
@@ -260,7 +271,7 @@ async function loadEventSources(
       join raw_articles ra on ra.id = pc.raw_article_id
       join sources s on s.id = ra.source_id
       where pc.event_id = any($1::uuid[])
-      order by pc.event_id asc, coalesce(ra.published_at, ra.collected_at) asc, s.name asc, pc.id asc
+      order by pc.event_id asc, ra.published_at asc nulls last, s.name asc, pc.id asc
     `,
     [eventIds],
   );
@@ -281,7 +292,7 @@ async function loadEventSources(
 async function loadDigestItems(
   pool: Pool,
   range: ShanghaiDayRange,
-  rawArticleScope?: RawArticleScope,
+  publishedAtScope?: PublishedAtScope,
 ): Promise<Record<string, BriefContentItem[]>> {
   const result = await pool.query<ContentRow>(
     `
@@ -302,10 +313,10 @@ async function loadDigestItems(
       join sources s on s.id = ra.source_id
       where pc.routing = 'digest'
         and coalesce(pc.display_rank, pc.ai_rank) is not null
-        and ${rawArticleScopePredicate(rawArticleScope, "pc.created_at", "ra")}
+        and ${publishedAtScopePredicate(publishedAtScope, "pc.created_at", "ra")}
       order by pc.category asc, coalesce(pc.display_rank, pc.ai_rank) asc, pc.created_at asc, pc.id asc
     `,
-    scopeValues(range, rawArticleScope),
+    scopeValues(range, publishedAtScope),
   );
 
   const digests = createEmptyDigests();
@@ -320,7 +331,7 @@ async function loadDigestItems(
 async function loadLongFormItems(
   pool: Pool,
   range: ShanghaiDayRange,
-  rawArticleScope?: RawArticleScope,
+  publishedAtScope?: PublishedAtScope,
 ): Promise<BriefContentItem[]> {
   const result = await pool.query<ContentRow>(
     `
@@ -341,11 +352,11 @@ async function loadLongFormItems(
       join sources s on s.id = ra.source_id
       where pc.routing = 'long_form'
         and coalesce(pc.display_rank, pc.ai_rank) is not null
-        and ${rawArticleScopePredicate(rawArticleScope, "pc.created_at", "ra")}
+        and ${publishedAtScopePredicate(publishedAtScope, "pc.created_at", "ra")}
       order by coalesce(pc.display_rank, pc.ai_rank) asc, pc.created_at asc, pc.id asc
       limit 10
     `,
-    scopeValues(range, rawArticleScope),
+    scopeValues(range, publishedAtScope),
   );
 
   return result.rows.map(toBriefContentItem);
@@ -354,7 +365,7 @@ async function loadLongFormItems(
 async function loadInspirationItems(
   pool: Pool,
   range: ShanghaiDayRange,
-  rawArticleScope?: RawArticleScope,
+  publishedAtScope?: PublishedAtScope,
 ): Promise<BriefInspirationItem[]> {
   const result = await pool.query<InspirationRow>(
     `
@@ -373,10 +384,10 @@ async function loadInspirationItems(
       join raw_articles ra on ra.id = pc.raw_article_id
       join sources s on s.id = ra.source_id
       where pc.routing = 'inspiration'
-        and ${rawArticleScopePredicate(rawArticleScope, "pc.created_at", "ra")}
+        and ${publishedAtScopePredicate(publishedAtScope, "pc.created_at", "ra")}
       order by pc.created_at asc, pc.id asc
     `,
-    scopeValues(range, rawArticleScope),
+    scopeValues(range, publishedAtScope),
   );
 
   return result.rows.map((row) => ({
@@ -393,22 +404,22 @@ async function loadInspirationItems(
   }));
 }
 
-function rawArticleScopePredicate(
-  rawArticleScope: RawArticleScope | undefined,
+function publishedAtScopePredicate(
+  publishedAtScope: PublishedAtScope | undefined,
   createdAtColumn: string,
   rawArticleAlias: string,
 ): string {
-  return rawArticleScope
-    ? `${rawArticleAlias}.collected_at >= $1::timestamptz and ${rawArticleAlias}.collected_at < $2::timestamptz`
+  return publishedAtScope
+    ? `${rawArticleAlias}.published_at >= $1::timestamptz and ${rawArticleAlias}.published_at < $2::timestamptz`
     : `${createdAtColumn} >= $1::timestamptz and ${createdAtColumn} < $2::timestamptz`;
 }
 
 function scopeValues(
   range: ShanghaiDayRange,
-  rawArticleScope: RawArticleScope | undefined,
+  publishedAtScope: PublishedAtScope | undefined,
 ): [Date, Date] | [string, string] {
-  return rawArticleScope
-    ? [rawArticleScope.startAt, rawArticleScope.endAt]
+  return publishedAtScope
+    ? [publishedAtScope.startAt, publishedAtScope.endAt]
     : [range.startUtc, range.endUtc];
 }
 

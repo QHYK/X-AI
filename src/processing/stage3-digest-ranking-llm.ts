@@ -1,3 +1,7 @@
+/**
+ * Stage 3 Source Digest 排名与单次修复调用层。
+ * 初次结果不完整时仅修复 ID 排列，避免第二次调用把已完成的相对排序整体推翻。
+ */
 import {
   createLlmClient,
   resolveStageLlmModel,
@@ -116,6 +120,7 @@ const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE3_LLM_TIMEOUT_MS ?? 240_000);
 const DEFAULT_MAX_RETRIES = Number(process.env.STAGE3_LLM_MAX_RETRIES ?? 2);
 const RETRY_DELAY_MS = Number(process.env.STAGE3_LLM_RETRY_DELAY_MS ?? 1_000);
 
+/** 执行分类 Digest 排名；必要时进行一次针对遗漏或重复 ID 的轻量修复。 */
 export async function runStage3DigestRankingLlm(
   input: Stage3DigestRankingInput,
   options: Stage3DigestRankingLlmOptions = {},
@@ -417,6 +422,7 @@ type Stage3DigestRepairCallResult =
       missingCandidatesCount: number;
     };
 
+/** 从首次输出提取有效排序与遗漏候选，构造不需要重新理解全部数据的修复输入。 */
 export function buildStage3DigestRepairInput(
   input: Stage3DigestRankingInput,
   initialOutput: Stage3RankingOutput,

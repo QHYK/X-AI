@@ -1,3 +1,7 @@
+/**
+ * 应用的最小启动页。
+ * 保留给项目基础展示，不参与 Daily Workflow。
+ */
 export default function Home() {
   return (
     <main className="shell">

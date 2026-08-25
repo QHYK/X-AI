@@ -1,3 +1,7 @@
+/**
+ * Stage 3 Long-form Ranking 的 LLM 调用层。
+ * 对全部长文候选进行严格完整排名，成功结果才交给 Stage 3 persistence。
+ */
 import {
   createLlmClient,
   resolveStageLlmModel,
@@ -56,6 +60,7 @@ const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE3_LLM_TIMEOUT_MS ?? 240_000);
 const DEFAULT_MAX_RETRIES = Number(process.env.STAGE3_LLM_MAX_RETRIES ?? 2);
 const RETRY_DELAY_MS = Number(process.env.STAGE3_LLM_RETRY_DELAY_MS ?? 1_000);
 
+/** 调用模型并验证 Long-form 的完整、连续排名。 */
 export async function runStage3LongFormRankingLlm(
   input: Stage3LongFormRankingInput,
   options: Stage3LongFormRankingLlmOptions = {},

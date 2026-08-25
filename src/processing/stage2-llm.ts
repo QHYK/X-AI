@@ -1,3 +1,7 @@
+/**
+ * Stage 2 Event Merge 的 LLM 调用层。
+ * 负责 Provider 调用、重试与运行诊断；分组完整性由 job 层记录并交给后续 Stage 使用。
+ */
 import {
   createLlmClient,
   resolveStageLlmModel,
@@ -62,6 +66,7 @@ const DEFAULT_MAX_OUTPUT_TOKENS = Number(
 );
 const RETRY_DELAY_MS = Number(process.env.STAGE2_LLM_RETRY_DELAY_MS ?? 1_000);
 
+/** 调用模型将 Event candidates 归并为真实世界事件组。 */
 export async function runStage2MergeLlm(
   input: Stage2Input,
   options: Stage2LlmOptions = {},

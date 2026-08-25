@@ -1,3 +1,7 @@
+/**
+ * Stage 2 Event Merge 的 Structured Output 契约与完整性校验。
+ * 校验 temp_id assignment，确保下游能够安全地把模型分组映射回 processed_contents。
+ */
 import type { Stage2Input } from "./stage2-candidates.js";
 
 export type { Stage2Input, Stage2InputCandidate } from "./stage2-candidates.js";
@@ -111,6 +115,7 @@ export function validateStage2Output(value: unknown): Stage2ValidationResult {
   };
 }
 
+/** 验证每个 Event candidate 恰好被引用一次，识别遗漏、重复与虚构 ID。 */
 export function validateStage2Assignments(
   output: Stage2Output,
   input: Stage2Input,

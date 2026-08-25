@@ -1,3 +1,7 @@
+/**
+ * Stage 4 Event 日期推导规则。
+ * 优先采用关联稿件最早发布时间；缺失时才回退到 workflow 执行日，保持可解释性。
+ */
 export type EventDateDerivationSource = "earliest_published_at" | "workflow_date_fallback";
 
 export type EventDateDerivation = {
@@ -7,6 +11,7 @@ export type EventDateDerivation = {
 
 const EVENT_DATE_TIME_ZONE = "Asia/Shanghai";
 
+/** 为一个 Event Group 推导展示日期，并返回所采用的数据来源。 */
 export function deriveEventDate(options: {
   publishedAtValues: Array<Date | string | null>;
   workflowRunTimestamp: Date | string;

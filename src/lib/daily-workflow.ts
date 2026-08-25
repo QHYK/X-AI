@@ -1,3 +1,8 @@
+/**
+ * Daily 编排脚本与各独立命令之间的环境变量契约。
+ *
+ * 除传递固定 scope 外，也把本次 Stage 2/3 runtime 路径固定为下游 lineage。
+ */
 import { toDailyScopeEnv, type DailyScope } from "./daily-scope.js";
 
 export type DailyStageName =
@@ -13,6 +18,7 @@ export type DailyLineage = {
   stage3Run: string | null;
 };
 
+/** 为单个 Daily 步骤生成 scope 与上游 runtime lineage 的环境变量。 */
 export function buildDailyStepEnv(options: {
   scope: DailyScope;
   step: DailyStageName;

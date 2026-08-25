@@ -1,3 +1,7 @@
+/**
+ * Stage 3 Long-form Ranking Prompt builder。
+ * 为长文候选生成完整相对排名，输出契约由 Stage 3 contract 约束。
+ */
 export type Stage3LongFormRankingCandidate = {
   id: string;
   title: string;
@@ -11,6 +15,7 @@ export type Stage3LongFormRankingInput = {
 
 export const STAGE3_LONG_FORM_RANKING_PROMPT_VERSION = "v1";
 
+/** 构造以阅读价值为中心的长文排名指令。 */
 export function buildStage3LongFormRankingInstructions(): string {
   return [
     "You are Stage 3 of X-AI-field: Long-form Ranking.",

@@ -1,3 +1,8 @@
+/**
+ * Content Completion：在 Stage 1 前补全正文不足的原始文章。
+ *
+ * 复用同一 eligibility 条件统计候选和剩余 backlog，且仅更新 content_text，不改变后续 Stage 的选择逻辑。
+ */
 import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
 import type { Pool, PoolClient } from "pg";
@@ -131,6 +136,10 @@ const COMPLETION_ELIGIBILITY_SQL = `
   )
 `;
 
+/**
+ * 执行一次正文补全，并在关键阶段回传真实 metrics 给 runtime 写入方。
+ * candidateCount 不受 limit 影响，selectedCount 则遵守全局与单来源限制。
+ */
 export async function completeRawArticleContent(
   pool: Pool,
   options: ContentCompletionOptions = {},
@@ -198,6 +207,10 @@ export async function countCompletionCandidates(
   return Number(result.rows[0]?.count ?? 0);
 }
 
+/**
+ * 按既定缺失程度和来源配额挑选本次候选。
+ * 窗口函数先执行每来源限额，再应用全局 limit，以避免单一来源占满批次。
+ */
 export async function loadCompletionCandidates(
   queryable: Pick<Pool | PoolClient, "query">,
   options: ContentCompletionOptions,
@@ -513,6 +526,7 @@ function failedResult(
   };
 }
 
+/** 按域名串行并保留间隔，避免并发抓取对同一站点造成不必要压力。 */
 class DomainRateLimiter {
   private readonly lastRequestByDomain = new Map<string, number>();
   private readonly queueByDomain = new Map<string, Promise<unknown>>();

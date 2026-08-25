@@ -1,3 +1,8 @@
+/**
+ * RSS 采集与标准化模块，是 Workflow 的原始输入边界。
+ *
+ * 负责从启用 Source 读取 feed、保留采集元数据，并以来源 ID 或 URL 实现可重复执行的去重写入。
+ */
 import Parser from "rss-parser";
 import type { Pool, PoolClient } from "pg";
 
@@ -125,6 +130,7 @@ const COMMON_ITEM_KEYS = new Set([
   "enclosure",
 ]);
 
+/** 并发采集全部启用的 RSS Source，并返回按来源可追踪的汇总结果。 */
 export async function collectRssSources(pool: Pool): Promise<RssCollectionSummary> {
   const sources = await loadEnabledRssSources(pool);
   const results = await runWithConcurrency(
@@ -275,6 +281,10 @@ function normalizeItem(
   };
 }
 
+/**
+ * 从不同 feed 字段选取最可用的正文，同时记录字段状态。
+ * 偏好完整正文但仍允许摘要回退，以适应来源格式的不一致。
+ */
 function chooseContentText(item: Record<string, unknown>): ContentChoice {
   const candidates = [
     ["contentEncoded", item.contentEncoded],
@@ -455,6 +465,7 @@ function getDedupeKey(article: NormalizedRawArticle): DedupeKey | null {
   return null;
 }
 
+/** 根据 source 内稳定 origin ID 优先、URL 回退的规则检查重复，保障 RSS 重跑幂等。 */
 async function rawArticleExists(
   client: PoolClient,
   sourceId: string,

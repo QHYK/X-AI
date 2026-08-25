@@ -1,3 +1,7 @@
+/**
+ * Stage 3 Digest 排名修复 Prompt builder。
+ * 仅在初次结果遗漏或重复候选 ID 时使用，目标是恢复完整排列而非重新排名全部内容。
+ */
 import type { Stage3DigestRankingCandidate } from "./stage3-digest-ranking.js";
 
 export type Stage3DigestRepairInput = {
@@ -9,6 +13,7 @@ export type Stage3DigestRepairInput = {
 
 export const STAGE3_DIGEST_REPAIR_PROMPT_VERSION = "v2";
 
+/** 构造保持既有相对顺序的轻量修复指令。 */
 export function buildStage3DigestRepairInstructions(): string {
   return [
     "You are repairing an incomplete Source Digest ranking.",

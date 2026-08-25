@@ -1,3 +1,8 @@
+/**
+ * Stage 1 的输入、Structured Output Schema 与本地校验边界。
+ *
+ * 任何 LLM 结果在持久化前都必须通过这里的格式与 batch assignment 完整性校验。
+ */
 export type Stage1Input = {
   title: string;
   url: string | null;
@@ -206,6 +211,7 @@ export function buildStage1Input(row: Stage1ArticleRow): Stage1Input {
   };
 }
 
+/** 为一个 micro-batch 分配稳定临时 ID，供模型输出与原始文章一一对应。 */
 export function buildStage1BatchInput(rows: Stage1ArticleRow[]): Stage1BatchInput {
   return {
     articles: rows.map((row, index) => ({
@@ -321,6 +327,7 @@ export function validateStage1BatchOutput(value: unknown): Stage1BatchValidation
   };
 }
 
+/** 验证模型没有遗漏、重复或伪造 batch 中的 temp_id。 */
 export function validateStage1Assignments(
   output: Stage1BatchOutput,
   input: Stage1BatchInput,

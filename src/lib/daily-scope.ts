@@ -1,3 +1,9 @@
+/**
+ * Daily Workflow 的统一时间范围定义。
+ *
+ * 所有 Daily Date 都以 Asia/Shanghai 09:00 为右边界
+ * 并以 raw_articles.published_at 归属输入数据
+ */
 import { parseBriefDate } from "./brief-date.js";
 
 export const DAILY_TIMEZONE = "Asia/Shanghai";
@@ -6,16 +12,20 @@ export const DAILY_BOUNDARY_HOUR = 9;
 const SHANGHAI_UTC_OFFSET_HOURS = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export type CollectedAtScope = {
+export type PublishedAtScope = {
   startAt: string;
   endAt: string;
 };
 
-export type DailyScope = CollectedAtScope & {
+export type DailyScope = PublishedAtScope & {
   dailyDate: string;
   timezone: typeof DAILY_TIMEZONE;
 };
 
+/**
+ * 解析指定 Daily Date，或在未指定时选择最近已结束的 09:00 boundary。
+ * 固定结果使同一 Daily 的重跑不会因执行时刻变化而改变输入集合。
+ */
 export function resolveDailyScope(
   dailyDateOption: string | undefined,
   now: Date = new Date(),
@@ -58,24 +68,35 @@ export function isDailyScopeCompleted(
   return Date.parse(scope.endAt) <= now.getTime();
 }
 
-export function readCollectedAtScopeFromEnv(
+/**
+ * 读取 Daily 传给 Stage 的显式 published_at scope。
+ * 旧 DAILY_SCOPE_* 名称仅作为部署兼容 alias，新旧配置都必须成对出现。
+ */
+export function readPublishedAtScopeFromEnv(
   env: Readonly<Record<string, string | undefined>>,
-): CollectedAtScope | undefined {
-  const startAt = env.DAILY_SCOPE_START_AT;
-  const endAt = env.DAILY_SCOPE_END_AT;
+): PublishedAtScope | undefined {
+  const usesPublishedNames = Boolean(
+    env.DAILY_PUBLISHED_SCOPE_START_AT || env.DAILY_PUBLISHED_SCOPE_END_AT,
+  );
+  const startName = usesPublishedNames
+    ? "DAILY_PUBLISHED_SCOPE_START_AT"
+    : "DAILY_SCOPE_START_AT";
+  const endName = usesPublishedNames
+    ? "DAILY_PUBLISHED_SCOPE_END_AT"
+    : "DAILY_SCOPE_END_AT";
+  const startAt = env[startName];
+  const endAt = env[endName];
   if (!startAt && !endAt) {
     return undefined;
   }
   if (!startAt || !endAt) {
-    throw new Error(
-      "DAILY_SCOPE_START_AT and DAILY_SCOPE_END_AT must be provided together.",
-    );
+    throw new Error(`${startName} and ${endName} must be provided together.`);
   }
 
-  const start = parseTimestamp(startAt, "DAILY_SCOPE_START_AT");
-  const end = parseTimestamp(endAt, "DAILY_SCOPE_END_AT");
+  const start = parseTimestamp(startAt, startName);
+  const end = parseTimestamp(endAt, endName);
   if (end.getTime() - start.getTime() !== DAY_MS) {
-    throw new Error("Daily collected_at scope must be exactly 24 hours.");
+    throw new Error("Daily published_at scope must be exactly 24 hours.");
   }
 
   return {
@@ -88,11 +109,15 @@ export function toDailyScopeEnv(scope: DailyScope): Record<string, string> {
   return {
     DAILY_DATE: scope.dailyDate,
     DAILY_TIMEZONE: scope.timezone,
+    DAILY_PUBLISHED_SCOPE_START_AT: scope.startAt,
+    DAILY_PUBLISHED_SCOPE_END_AT: scope.endAt,
+    // 兼容尚未切换环境变量名的部署；业务代码只使用 published_at 语义。
     DAILY_SCOPE_START_AT: scope.startAt,
     DAILY_SCOPE_END_AT: scope.endAt,
   };
 }
 
+// 9:00 之后返回今天，否则返回前一天
 function resolveLatestEndedDailyDate(now: Date): string {
   if (Number.isNaN(now.getTime())) {
     throw new Error("Current time must be a valid date.");

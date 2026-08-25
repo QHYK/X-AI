@@ -1,3 +1,7 @@
+/**
+ * 从成功的 Stage 4 runtime 中找回数据库缺失的 Event 重建候选。
+ * 该模块仅解析 artifact 和核对现存记录，为 repair 脚本提供可审计输入。
+ */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Pool } from "pg";
@@ -49,6 +53,7 @@ export type Stage4RecoveryCandidate = {
   requiredFieldsAvailable: boolean;
 };
 
+/** 扫描成功 run，提取恢复所需的输出、关联和日期信息。 */
 export async function loadStage4RecoveryCandidates(
   database: Queryable,
   rootDir = process.cwd(),
@@ -124,6 +129,7 @@ export async function loadStage4RecoveryCandidates(
   return candidates;
 }
 
+/** 每个 event_date 只保留最新成功 run 的缺失候选，避免旧 artifact 覆盖较新重建。 */
 export function selectLatestMissingCandidatesByEventDate(
   candidates: Stage4RecoveryCandidate[],
 ): Stage4RecoveryCandidate[] {

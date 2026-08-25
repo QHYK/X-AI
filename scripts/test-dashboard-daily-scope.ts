@@ -77,6 +77,9 @@ checks.push({
     topScopeQueries.length === 3 &&
     topScopeQueries.every(
       (query) =>
+        query.text.includes("ra.published_at >= scope.start_at") &&
+        query.text.includes("ra.published_at < scope.end_at") &&
+        !query.text.includes("ra.collected_at >= scope.start_at") &&
         JSON.stringify(query.values) ===
         JSON.stringify([
           recentScopes.map((scope) => scope.dailyDate),
@@ -122,11 +125,14 @@ checks.push({
     processedDetailQueries.every(
       (query) =>
         query.text.includes("join raw_articles ra on ra.id = pc.raw_article_id") &&
-        query.text.includes("ra.collected_at >=") &&
+        query.text.includes("ra.published_at >=") &&
+        query.text.includes("ra.published_at <") &&
+        !query.text.includes("ra.collected_at >=") &&
         !query.text.includes("pc.created_at >="),
     ),
   detail: {
-    rawCollectedAt: "2026-08-19T05:00:00.000Z",
+    rawPublishedAt: "2026-08-19T05:00:00.000Z",
+    rawCollectedAt: "2026-08-22T05:00:00.000Z",
     processedCreatedAt: "2026-08-21T05:00:00.000Z",
     dailyDate: "2026-08-20",
   },
@@ -143,6 +149,7 @@ checks.push({
     eventAggregateQuery.text.includes("pc.raw_article_id = ra.id") &&
     eventAggregateQuery.text.includes("pc.event_id is not null") &&
     eventAggregateQuery.text.includes("pc.routing = 'event'") &&
+    eventAggregateQuery.text.includes("ra.published_at >= scope.start_at") &&
     !eventAggregateQuery.text.includes("e.created_at >="),
   detail: "Multiple in-scope Event Candidates for one event produce one count.",
 });
@@ -183,16 +190,18 @@ checks.push({
     Object.values(apiBrief.digests).flat().length === 1 &&
     apiBrief.long_form.length === 1 &&
     apiBrief.inspiration.length === 1 &&
-    apiBrief.meta.date_basis === "raw_articles.collected_at" &&
+    apiBrief.meta.date_basis === "raw_articles.published_at" &&
     apiScopeQueries.length === 4 &&
     apiScopeQueries.every(
       (query) =>
-        query.text.includes("ra.collected_at >=") &&
-        query.text.includes("ra.collected_at <") &&
+        query.text.includes("ra.published_at >=") &&
+        query.text.includes("ra.published_at <") &&
+        !query.text.includes("ra.collected_at >=") &&
         JSON.stringify(query.values) === JSON.stringify([detailScope.startAt, detailScope.endAt]),
     ),
   detail: {
-    rawCollectedAt: "2026-08-23T02:00:00.000Z",
+    rawPublishedAt: "2026-08-23T02:00:00.000Z",
+    rawCollectedAt: "2026-08-27T02:00:00.000Z",
     processedAndEventCreatedAt: "2026-08-26T02:00:00.000Z",
     dailyDate: detailScope.dailyDate,
   },
@@ -204,6 +213,7 @@ checks.push({
       (query) =>
         query.text.includes("where pc.event_id = events.id") &&
         query.text.includes("exists (") &&
+        query.text.includes("pc.routing = 'event'") &&
         !query.text.includes("events.created_at >="),
     ) &&
     apiBrief.events.length === 1 &&
@@ -346,7 +356,7 @@ function briefContentRow(id: string, title: string) {
     source: "Source",
     url: null,
     image_url: null,
-    published_at: null,
+    published_at: "2026-08-23T02:00:00.000Z",
     created_at: "2026-08-26T02:00:00.000Z",
   };
 }

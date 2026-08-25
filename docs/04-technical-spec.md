@@ -371,16 +371,20 @@ source_id + date
 09:00 Asia/Shanghai
 ```
 
-每个 Daily 使用固定的 `raw_articles.collected_at` 半开区间，Daily 日期对应区间结束的
+每个 Daily 使用固定的 `raw_articles.published_at` 半开区间，Daily 日期对应区间结束的
 09:00 boundary。例如：
 
 ```text
 Daily 2026-08-25
-= 2026-08-24 09:00 <= collected_at < 2026-08-25 09:00 (Asia/Shanghai)
+= 2026-08-24 09:00 <= published_at < 2026-08-25 09:00 (Asia/Shanghai)
 ```
 
 Orchestrator 启动时只计算一次 scope；默认选择最近一个已经结束的 09:00 boundary。
 `DAILY_DATE=YYYY-MM-DD npm run daily` 可显式选择相同 scope 进行 retry / backfill。
+`published_at` 决定新闻属于哪一期 Daily；`collected_at` 只记录系统何时采集。
+因此 late retry / backfill 不改变 Daily membership，`published_at IS NULL` 的文章不进入任何 Daily scope。
+Orchestrator 通过 `DAILY_PUBLISHED_SCOPE_START_AT` / `DAILY_PUBLISHED_SCOPE_END_AT`
+传递范围；旧 `DAILY_SCOPE_START_AT` / `DAILY_SCOPE_END_AT` 仅保留为部署兼容 alias。
 
 只设置一个 Cron Trigger。
 ```text
@@ -502,8 +506,8 @@ FT: Fed ...
 
 只处理最近 workflow window 内 `stage1_status IN ('pending', 'failed')` 的 Raw Articles。
 
-Daily Workflow 使用本次 Daily 固定的 `raw_articles.collected_at` scope；
-单独运行 Stage 1时继续使用现有最近 24 小时默认窗口。
+Daily Workflow 使用本次 Daily 固定的 `raw_articles.published_at` scope；
+单独运行 Stage 1 时使用基于 `published_at` 的最近 24 小时默认窗口。
 
 Stage 1 对普通文章使用小型 micro-batch，但每篇 Raw Article 仍独立判断；较大的 input 可以单独处理。
 ```text
@@ -522,9 +526,9 @@ processing_error = ...
 
 Stage 1 全部可处理内容完成后触发 Stage 2。
 读取当前 workflow 的 Event Candidates；生成轻量 Event Groups。
-默认时间窗口与 Stage 1 一致，为最近 24 小时 collected 内容。
-在 Daily Workflow 中改用本次 Daily 固定的 `raw_articles.collected_at` scope；单独运行
-Stage 2 时继续使用最近 24 小时默认窗口。
+默认时间窗口与 Stage 1 一致，为最近 24 小时 published 内容。
+在 Daily Workflow 中改用本次 Daily 固定的 `raw_articles.published_at` scope；单独运行
+Stage 2 时继续使用基于 `published_at` 的最近 24 小时默认窗口。
 
 ```text
 Event Candidates
@@ -545,8 +549,8 @@ invented IDs，但暂时不阻断 runtime output。这是已知限制，后续�
 Stage 2 完成后主动触发 Stage 3。
 Stage 3 分阶段执行。
 
-Daily Workflow 中 Digest / Long-form 候选使用与 Stage 1/2 相同的固定 `raw_articles.collected_at` scope；
-单独运行 Stage 3 时继续使用最近 24 小时默认窗口。
+Daily Workflow 中 Digest / Long-form 候选使用与 Stage 1/2 相同的固定 `raw_articles.published_at` scope；
+单独运行 Stage 3 时继续使用基于 `published_at` 的最近 24 小时默认窗口。
 Event Groups 读取 Orchestrator 明确传入的本次 Stage 2 runtime run。
 
 ```text
@@ -637,18 +641,21 @@ Daily Workflow 必须可以安全重复执行。
 GET /api/brief?date=YYYY-MM-DD
 ```
 
-Daily Date 由 Raw input scope 决定，而不是任一结果记录的 `created_at`：
+Daily Date 由 Raw Article 的新闻发布时间 scope 决定，而不是采集时间或任一结果记录的
+`created_at`：
 
 ```text
 Daily YYYY-MM-DD
-= 前一天 09:00 <= raw_articles.collected_at < 当天 09:00 (Asia/Shanghai)
+= 前一天 09:00 <= raw_articles.published_at < 当天 09:00 (Asia/Shanghai)
 ```
 
 - Digest / Long-form / Inspiration 通过 `processed_contents.raw_article_id → raw_articles`
-  按该 `collected_at` scope 归属。
+  按该 `published_at` scope 归属。
 - Event 通过 `events ← processed_contents.event_id ← raw_articles` 归属；只要至少一条
   `routing = event` 的 Candidate 属于 scope 即归入该 Daily，且一个 Event 只返回一次。
 - `/api/brief` 不使用 `processed_contents.created_at` 或 `events.created_at` 判断 Daily 归属。
+- `collected_at` 只表示系统采集时间；`published_at IS NULL` 的 Raw Article 不归入任何 Daily。
+- retry / backfill 继续使用同一 `published_at` scope，不改变 Daily membership。
 
 返回：
 - `events` — Top 10

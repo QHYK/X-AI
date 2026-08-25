@@ -1,3 +1,7 @@
+/**
+ * Stage 2 runtime artifact 写入层。
+ * 保存模型输入、id-map、输出与统计，作为 Stage 3 的明确上游 lineage。
+ */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { summarizeStage2Result, type Stage2JobResult } from "./stage2-job.js";
@@ -10,6 +14,7 @@ export type Stage2RuntimeArtifact = {
   runPath: string;
 };
 
+/** 将一次 Stage 2 结果落为独立 run 目录，即使失败也保留可排障的输入和运行摘要。 */
 export async function writeStage2RuntimeArtifacts(
   result: Stage2JobResult,
   options: {

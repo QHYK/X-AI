@@ -1,3 +1,8 @@
+/**
+ * Content Completion 的独立 runtime artifact 写入工具。
+ *
+ * runtime 只记录本次执行观测指标，供 Dashboard 和排障读取，不承载业务真相。
+ */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -28,6 +33,7 @@ export function contentCompletionRunDir(
   );
 }
 
+/** 创建 run 目录并原样写入本次 Completion 的运行快照。 */
 export async function writeContentCompletionRuntime(
   runDir: string,
   artifact: ContentCompletionRuntimeArtifact,

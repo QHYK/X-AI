@@ -1,3 +1,7 @@
+/**
+ * Stage 3 分类 Digest 排名 Prompt builder。
+ * 输入由 Stage 3 job 按类别构造，输出顺序随后会接受完整性校验与必要的 repair。
+ */
 export type Stage3DigestRankingCandidate = {
   id: string;
   title: string;
@@ -13,6 +17,7 @@ export type Stage3DigestRankingInput = {
 
 export const STAGE3_DIGEST_RANKING_PROMPT_VERSION = "v3";
 
+/** 为指定类别构造独立排名指令，避免模型进行跨类别比较。 */
 export function buildStage3DigestRankingInstructions(category: string): string {
   return [
     "You are Stage 3 of X-AI-field: Source Digest Ranking.",

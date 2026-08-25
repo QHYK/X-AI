@@ -1,9 +1,15 @@
+/**
+ * Daily Brief 的 HTTP 入口。
+ *
+ * 校验日期与跨域请求后，委托 Daily Brief 组合层按 Daily scope 返回既定 JSON 契约。
+ */
 import { getDatabasePool } from "@/db/index.js";
 import { parseBriefDate } from "@/lib/brief-date.js";
 import { getDailyBriefForDailyDate } from "@/lib/daily-brief.js";
 
 export const runtime = "nodejs";
 
+/** 处理指定 Daily Date 的正式 Brief 查询。 */
 export async function GET(request: Request) {
   const headers = corsHeaders(request);
   const { searchParams } = new URL(request.url);

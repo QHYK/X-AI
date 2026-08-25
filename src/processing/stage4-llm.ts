@@ -1,3 +1,7 @@
+/**
+ * Stage 4 Event Enrichment 的 LLM 调用层。
+ * 允许模型按需检索，并用实际工具调用记录覆盖模型自报的外部上下文字段。
+ */
 import {
   buildStage4EventEnrichmentInstructions,
   buildStage4EventEnrichmentUserPrompt,
@@ -64,6 +68,7 @@ const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE4_LLM_TIMEOUT_MS ?? 240_000);
 const DEFAULT_MAX_RETRIES = Number(process.env.STAGE4_LLM_MAX_RETRIES ?? 2);
 const RETRY_DELAY_MS = Number(process.env.STAGE4_LLM_RETRY_DELAY_MS ?? 1_000);
 
+/** 生成单个已选 Event 的可持久化双语内容，并校验 Structured Output。 */
 export async function runStage4EventEnrichmentLlm(
   input: Stage4EventEnrichmentInput,
   options: Stage4LlmOptions = {},
@@ -168,6 +173,7 @@ export async function runStage4EventEnrichmentLlm(
   };
 }
 
+/** 以 API 返回的真实 web search 轨迹为准，防止输出声称未实际发生的检索。 */
 function normalizeExternalContext(
   output: Stage4EventEnrichmentOutput,
   toolUsage: Stage4WebSearchToolUsage,

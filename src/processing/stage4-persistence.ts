@@ -1,3 +1,7 @@
+/**
+ * Stage 4 Event 的事务内重建与关联写入。
+ * 仅清理当前重建日期范围内的旧 Event，防止重跑误删除其他历史期次的数据。
+ */
 import type { Pool, PoolClient } from "pg";
 import type { Stage4EventEnrichmentOutput } from "./stage4-contract.js";
 
@@ -31,6 +35,10 @@ export type Stage4PersistenceResult = {
   }>;
 };
 
+/**
+ * 删除本次可证明同 scope 的旧 Event 后插入新结果，并回写 processed_contents.event_id。
+ * 由调用方包裹事务，任一步失败都会整体回滚。
+ */
 export async function persistStage4Events(
   client: Queryable,
   plan: Stage4PersistencePlan,

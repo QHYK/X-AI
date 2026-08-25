@@ -1,3 +1,8 @@
+/**
+ * 内部 Daily Workflow Dashboard 页面。
+ *
+ * 作为 Server Component 加载数据库归属统计与 runtime 指标；日期详情不会改变顶部最近七期数据。
+ */
 import { getDatabasePool } from "@/db/index.js";
 import {
   formatContentCompletionRatio,
@@ -22,6 +27,7 @@ type DashboardPageProps = {
   searchParams: Promise<{ date?: string | string[] }>;
 };
 
+/** 根据 query parameter 选择详情日期，并在服务端组装 Dashboard 数据。 */
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const { date } = await searchParams;
   const detailDate = Array.isArray(date) ? date[0] : date;
@@ -59,7 +65,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Raw Collected</th>
+                <th>Raw Published</th>
                 <th>Stage1 Pending</th>
                 <th>Stage1 Selected</th>
                 <th>Ignored</th>

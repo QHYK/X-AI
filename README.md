@@ -148,9 +148,12 @@ npm run recover:stage4-events:dry-run      # 只读分析 Stage 4 runtime 与数
 DAILY_DATE=2026-mm-dd npm run daily
 STAGE1_LIMIT=20 npm run process:stage1
 STAGE1_CONCURRENCY=2 npm run process:stage1
+STAGE1_PUBLISHED_WITHIN_HOURS=24 npm run process:stage1
 STAGE3_EVENT_TOP_N=10 npm run process:stage3
 STAGE4_CONCURRENCY=3 npm run process:stage4
 ```
+Daily 内部使用 `DAILY_PUBLISHED_SCOPE_START_AT` / `DAILY_PUBLISHED_SCOPE_END_AT`
+传递固定 scope；旧 `DAILY_SCOPE_START_AT` / `DAILY_SCOPE_END_AT` 仅作为部署兼容 alias。
 `runtime/` 保存运行时 input/output/debug artifacts，并被 Git 忽略。
 每次 `npm run complete:content` 会写入
 `runtime/content-completion/<timestamp>/run.json`，记录候选总量、实际选中量、
@@ -188,10 +191,12 @@ GET /api/brief?date=YYYY-MM-DD
 - `inspiration`
 - `meta`
 
-所有可阅读内容都返回原文链接。Brief 的 Daily Date 由 Raw input scope 决定：
-`Daily YYYY-MM-DD = 前一天 09:00 <= raw_articles.collected_at < 当天 09:00`
-（Asia/Shanghai）。Digest / Long-form / Inspiration 通过关联 Raw Article 归属；Event 只要有
-一条 scope 内的 Event Candidate 即归入该 Daily，且只返回一次。`created_at` 不用于 Brief 日期归属。
+所有可阅读内容都返回原文链接。Brief 的 Daily Date 由新闻发布时间 scope 决定：
+`Daily YYYY-MM-DD = 前一天 09:00 <= raw_articles.published_at < 当天 09:00`
+（Asia/Shanghai）。`collected_at` 只表示系统采集时间，不决定 Daily 归属。Digest / Long-form /
+Inspiration 通过关联 Raw Article 归属；Event 只要有一条 scope 内的 Event Candidate 即归入该
+Daily，且只返回一次。retry / backfill 不改变 Daily membership，`published_at IS NULL` 的文章
+不属于任何 Daily；`created_at` 也不用于 Brief 日期归属。
 
 ## Internal Dashboard
 
@@ -202,7 +207,8 @@ http://localhost:3000/dashboard
 ```
 
 - 页面需要可用的 `DATABASE_URL`，默认展示最近 7 天的数据量与 Daily Workflow 运行情况。
-- 数据库是业务数据 Source of Truth；所有每日统计按 `Asia/Shanghai` 日期边界计算。
+- 数据库是业务数据 Source of Truth；所有每日统计按 `raw_articles.published_at` 的
+  `Asia/Shanghai` 09:00 Daily boundary 计算。
 - `runtime/content-completion/` 补充每天最新一次 Completion success/selected、remaining backlog、duration 和 Date Details 计数。
 - `runtime/stage1~4/` 只补充运行指标，例如 LLM calls、retry、实际记录的 token、duration、Stage 2/3/4 的中间与结果数量。
 - 某个字段没有时显示 `N/A`，不会估算或写入新的 metrics 数据。

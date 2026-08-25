@@ -1,3 +1,7 @@
+/**
+ * Stage 1 Content Understanding 的 LLM 调用层。
+ * 将 batch 输入、Prompt 和严格 Schema 校验串联，并在可恢复错误上执行有限重试。
+ */
 import {
   buildStage1BatchInput,
   parseAndValidateStage1BatchOutput,
@@ -63,6 +67,10 @@ const RETRY_DELAY_MS = Number(process.env.STAGE1_LLM_RETRY_DELAY_MS ?? 1_000);
 const HTTP_503_RETRY_DELAY_MS = 600_000;
 const MAX_OUTPUT_TOKENS_PER_ARTICLE = 1_200;
 
+/**
+ * 处理一个 Stage 1 micro-batch，累计 token 与尝试次数后返回可持久化的验证结果。
+ * 明确的 HTTP 503 使用更长等待，但仍受既有 maxRetries 上限约束。
+ */
 export async function runStage1BatchLlm(
   articles: Stage1ArticleRow[],
   options: Stage1LlmOptions = {},

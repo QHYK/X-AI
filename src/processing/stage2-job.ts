@@ -1,3 +1,7 @@
+/**
+ * Stage 2 Workflow job：读取 Event candidates、请求合并分组并生成可供 Stage 3 消费的结果。
+ * 该阶段不直接写业务数据，runtime artifact 承担输入、输出和 id-map 的 lineage 载体。
+ */
 import type { Pool } from "pg";
 import { STAGE2_PROMPT_VERSION } from "../prompts/stage2-event-merge.js";
 import {
@@ -18,11 +22,11 @@ import {
   type Stage2TokenUsage,
 } from "./stage2-llm.js";
 import { resolveStageLlmModel } from "./llm-client.js";
-import type { CollectedAtScope } from "../lib/daily-scope.js";
+import type { PublishedAtScope } from "../lib/daily-scope.js";
 
 export type Stage2JobOptions = Stage2LlmOptions & {
-  collectedWithinHours?: number;
-  collectedAtScope?: CollectedAtScope;
+  publishedWithinHours?: number;
+  publishedAtScope?: PublishedAtScope;
 };
 
 export type Stage2EventGroup = {
@@ -64,6 +68,7 @@ export type Stage2JobFailure = Stage2JobBase & {
 
 export type Stage2JobResult = Stage2JobSuccess | Stage2JobFailure;
 
+/** 执行一次 Event Merge；无候选时返回成功的空分组，避免无意义 LLM 调用。 */
 export async function processStage2Merge(
   pool: Pool,
   options: Stage2JobOptions = {},
@@ -71,8 +76,8 @@ export async function processStage2Merge(
   const startedAt = Date.now();
   const model = resolveStageLlmModel("stage2", options.model);
   const candidateRows = await loadStage2EventCandidates(pool, {
-    collectedWithinHours: options.collectedWithinHours,
-    collectedAtScope: options.collectedAtScope,
+    publishedWithinHours: options.publishedWithinHours,
+    publishedAtScope: options.publishedAtScope,
   });
   const { input, idMap } = prepareStage2Input(candidateRows);
 

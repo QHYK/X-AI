@@ -1,3 +1,7 @@
+/**
+ * Science Digest 的出版物名称推断工具。
+ * 仅使用已确认的 Nature URL 编码映射，避免把 subject feed 名称误当作实际期刊。
+ */
 export type SciencePublicationInferenceInput = {
   url: string | null;
   sourceName: string;

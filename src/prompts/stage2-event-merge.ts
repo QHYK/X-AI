@@ -1,7 +1,12 @@
+/**
+ * Stage 2 Event Merge Prompt builder。
+ * 将候选组装规则保持在 prompt 层，输出契约由 stage2-contract 独立校验。
+ */
 import type { Stage2Input } from "../processing/stage2-contract.js";
 
 export const STAGE2_PROMPT_VERSION = "v3";
 
+/** 构造 Stage 2 的固定合并指令。 */
 export function buildStage2Instructions(): string {
   return [
     "You are Stage 2 of X-AI-field: Merge Events.",

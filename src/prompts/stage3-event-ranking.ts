@@ -1,7 +1,12 @@
+/**
+ * Stage 3 Event Ranking Prompt builder。
+ * 将 Stage 2 event groups 排序为有限的高优先级候选，最终 Top N 仍由业务代码截取。
+ */
 import type { Stage3EventRankingInput } from "../processing/stage3-contract.js";
 
 export const STAGE3_EVENT_RANKING_PROMPT_VERSION = "v3";
 
+/** 构造全局 Event 相对优先级的固定指令。 */
 export function buildStage3EventRankingInstructions(): string {
   return [
     "You are Stage 3 of X-AI-field: Event Ranking.",

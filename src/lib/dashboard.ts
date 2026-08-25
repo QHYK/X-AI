@@ -1,3 +1,8 @@
+/**
+ * Dashboard 的服务端数据聚合层。
+ *
+ * 数据库指标按 Daily raw input scope 归属；runtime 仅补充运行观测数据，不作为业务数据来源。
+ */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Pool } from "pg";
@@ -148,6 +153,10 @@ export type DashboardData = {
   };
 };
 
+/**
+ * 组装最近已完成 Daily 的总览和一个可选日期的详情。
+ * 尚未结束的 scope 不查询详情业务数据，防止展示不完整期次。
+ */
 export async function getDashboardData(
   pool: Pool,
   options: { detailDate?: string | null; rootDir?: string; now?: Date } = {},
@@ -178,8 +187,8 @@ export async function getDashboardData(
             select category, count(*)::int as count
             from processed_contents pc
             join raw_articles ra on ra.id = pc.raw_article_id
-            where ra.collected_at >= $1::timestamptz
-              and ra.collected_at < $2::timestamptz
+            where ra.published_at >= $1::timestamptz
+              and ra.published_at < $2::timestamptz
             group by category
             order by count desc, category asc
           `,
@@ -193,8 +202,8 @@ export async function getDashboardData(
             select category, count(*)::int as count
             from processed_contents pc
             join raw_articles ra on ra.id = pc.raw_article_id
-            where ra.collected_at >= $1::timestamptz
-              and ra.collected_at < $2::timestamptz
+            where ra.published_at >= $1::timestamptz
+              and ra.published_at < $2::timestamptz
               and pc.routing = 'digest'
             group by category
             order by count desc, category asc
@@ -242,8 +251,8 @@ export async function getDashboardData(
           count(ra.id) filter (where ra.stage1_status = 'failed')::int as failed
         from scopes scope
         left join raw_articles ra
-          on ra.collected_at >= scope.start_at
-          and ra.collected_at < scope.end_at
+          on ra.published_at >= scope.start_at
+          and ra.published_at < scope.end_at
         group by scope.date
       `,
       [scopeDates, scopeStarts, scopeEnds],
@@ -267,8 +276,8 @@ export async function getDashboardData(
           count(pc.id) filter (where pc.routing = 'inspiration')::int as inspiration
         from scopes scope
         left join raw_articles ra
-          on ra.collected_at >= scope.start_at
-          and ra.collected_at < scope.end_at
+          on ra.published_at >= scope.start_at
+          and ra.published_at < scope.end_at
         left join processed_contents pc on pc.raw_article_id = ra.id
         group by scope.date
       `,
@@ -289,8 +298,8 @@ export async function getDashboardData(
           count(distinct e.id)::int as total
         from scopes scope
         left join raw_articles ra
-          on ra.collected_at >= scope.start_at
-          and ra.collected_at < scope.end_at
+          on ra.published_at >= scope.start_at
+          and ra.published_at < scope.end_at
         left join processed_contents pc
           on pc.raw_article_id = ra.id
           and pc.event_id is not null
@@ -394,6 +403,9 @@ export async function getDashboardData(
   };
 }
 
+/**
+ * 统计同一 raw scope 在采集、选择、摘要和最终 Brief 各环节的
+ * 字符量 */
 async function loadContentFunnel(
   pool: Pool,
   scope: DailyScope,
@@ -411,8 +423,8 @@ async function loadContentFunnel(
             + char_length(coalesce(content_text, ''))
           ) filter (where stage1_status = 'selected'), 0)::bigint as selected_chars
         from raw_articles
-        where collected_at >= $1::timestamptz
-          and collected_at < $2::timestamptz
+        where published_at >= $1::timestamptz
+          and published_at < $2::timestamptz
       `,
       [scope.startAt, scope.endAt],
     ),
@@ -425,8 +437,8 @@ async function loadContentFunnel(
           ), 0)::bigint as processed_summary_chars
         from processed_contents pc
         join raw_articles ra on ra.id = pc.raw_article_id
-        where ra.collected_at >= $1::timestamptz
-          and ra.collected_at < $2::timestamptz
+        where ra.published_at >= $1::timestamptz
+          and ra.published_at < $2::timestamptz
       `,
       [scope.startAt, scope.endAt],
     ),
@@ -465,6 +477,10 @@ function characterLength(value: string | null): number {
   return value === null ? 0 : Array.from(value).length;
 }
 
+/**
+ * 读取每个日期最新一次 Content Completion runtime；
+ * 缺失 artifact 时返回空映射。
+ */
 export async function loadContentCompletionRuntimeByDate(
   rootDir: string,
   requestedDates: Set<string>,
@@ -550,6 +566,10 @@ function contentCompletionMetricsFromArtifact(
   };
 }
 
+/**
+ * 汇总各 Stage 的最新 runtime artifact。
+ * runtime 中记录 daily_date 时优先使用它，兼容旧 artifact 才按启动时间回推。
+ */
 export async function loadRuntimeMetricsByDate(
   rootDir: string,
   requestedDates: Set<string>,

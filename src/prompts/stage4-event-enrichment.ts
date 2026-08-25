@@ -1,3 +1,7 @@
+/**
+ * Stage 4 Event Enrichment Prompt builder。
+ * 基于已选 Event 的来源材料生成最终双语内容；event_date 仍由应用层从时间戳推导。
+ */
 export type Stage4EventSourceInput = {
   title: string;
   summary: string;
@@ -13,6 +17,7 @@ export type Stage4EventEnrichmentInput = {
 
 export const STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION = "v5";
 
+/** 构造单个 Event 的 enrichment 指令及按需 web search 约束。 */
 export function buildStage4EventEnrichmentInstructions(): string {
   return [
     "You are Stage 4 of X-AI-field: Selected Event Enrichment.",

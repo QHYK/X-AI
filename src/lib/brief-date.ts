@@ -1,3 +1,8 @@
+/**
+ * Brief API 的自然日日期解析工具。
+ *
+ * 该范围仅服务于兼容的日期输入；Daily Workflow 的 09:00 scope 由 daily-scope 模块定义。
+ */
 const SHANGHAI_UTC_OFFSET_HOURS = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -7,6 +12,7 @@ export type ShanghaiDayRange = {
   endUtc: Date;
 };
 
+/** 将 YYYY-MM-DD 严格解析为上海自然日对应的 UTC 半开区间。 */
 export function parseBriefDate(value: string | null): ShanghaiDayRange | null {
   if (!value) {
     return null;

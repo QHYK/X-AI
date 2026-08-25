@@ -1,3 +1,7 @@
+/**
+ * Stage 4 Workflow job：读取 Stage 3 选中的 Event、执行 enrichment，并重建最终 events。
+ * Daily 运行传入本次 Stage 3 runtime，单独运行才回退到最近成功 artifact。
+ */
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Pool } from "pg";
@@ -103,6 +107,7 @@ export type Stage4JobResult = {
 
 const DEFAULT_STAGE4_CONCURRENCY = 3;
 
+/** 执行 Event enrichment、写入完整 runtime，并在事务中持久化本次重建结果。 */
 export async function processStage4(
   pool: Pool,
   options: Stage4JobOptions = {},
@@ -360,6 +365,7 @@ export async function processStage4(
   }
 }
 
+/** 解析明确 lineage，或在独立执行时查找最近成功的 Stage 3 run。 */
 async function loadLatestSuccessfulStage3RunDir(
   rootDir: string,
   stage3RunDirOption?: string,
@@ -403,6 +409,10 @@ async function assertSuccessfulStage3Run(runDir: string): Promise<void> {
   await stat(join(runDir, "events/selected.json"));
 }
 
+/**
+ * 收集同一 event_date 范围的旧 Event ID 以供重建清理。
+ * 只从成功 run 的 persistence plan 取 ID，避免扩展到无关历史 Event。
+ */
 async function loadPreviousCreatedEventIds(
   rootDir: string,
   currentRunDir: string,

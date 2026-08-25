@@ -1,12 +1,12 @@
 import { config } from "dotenv";
 import { writeFile } from "node:fs/promises";
 import { Pool } from "pg";
-import { readCollectedAtScopeFromEnv } from "../src/lib/daily-scope.js";
+import { readPublishedAtScopeFromEnv } from "../src/lib/daily-scope.js";
 import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
 import { processStage2Merge, summarizeStage2Result } from "../src/processing/stage2-job.js";
 import { writeStage2RuntimeArtifacts } from "../src/processing/stage2-runtime-artifacts.js";
 
-const inheritedDailyScope = readCollectedAtScopeFromEnv(process.env);
+const inheritedDailyScope = readPublishedAtScopeFromEnv(process.env);
 const inheritedRunPointer = process.env.DAILY_STAGE_RUN_POINTER;
 
 config({ path: ".env" });
@@ -33,8 +33,11 @@ async function main() {
   try {
     const startedAt = new Date();
     const result = await processStage2Merge(pool, {
-      collectedWithinHours: optionalPositiveInteger(process.env.STAGE2_COLLECTED_WITHIN_HOURS),
-      collectedAtScope: inheritedDailyScope ?? readCollectedAtScopeFromEnv(process.env),
+      publishedWithinHours: optionalPositiveInteger(
+        process.env.STAGE2_PUBLISHED_WITHIN_HOURS ??
+          process.env.STAGE2_COLLECTED_WITHIN_HOURS,
+      ),
+      publishedAtScope: inheritedDailyScope ?? readPublishedAtScopeFromEnv(process.env),
     });
     const summary = summarizeStage2Result(result);
     const artifacts = await writeStage2RuntimeArtifacts(result, {

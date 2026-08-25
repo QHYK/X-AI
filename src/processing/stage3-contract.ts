@@ -1,3 +1,7 @@
+/**
+ * Stage 3 三类排名的 Structured Output 契约与完整性校验。
+ * 模型输出先验证 JSON，再验证 ID/rank 排列，防止错误排名污染 persistence。
+ */
 export type Stage3RankingItem = {
   id: string;
   rank: number;
@@ -162,6 +166,7 @@ export function validateStage3RankingOutput(value: unknown): Stage3ValidationRes
   };
 }
 
+/** 验证通用 ranking 是否覆盖全部候选且 rank 为连续、唯一的排列。 */
 export function validateStage3RankingIntegrity(
   output: Stage3RankingOutput,
   expectedIds: string[],
@@ -383,6 +388,7 @@ export function parseAndValidateStage3EventRankingOutput(
   };
 }
 
+/** Event Ranking 允许只选择 Top 50，因此只拒绝虚构 ID，不将未选 ID 视为错误。 */
 export function validateStage3EventRankingIntegrity(
   output: Stage3EventRankingOutput,
   expectedIds: string[],

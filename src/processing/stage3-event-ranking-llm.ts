@@ -1,3 +1,7 @@
+/**
+ * Stage 3 Event Ranking 的 LLM 调用层。
+ * 将 Stage 2 事件组排序为有限的 Top 候选，并在返回前校验和去除重复 ID。
+ */
 import {
   createLlmClient,
   resolveStageLlmModel,
@@ -68,6 +72,7 @@ const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE3_LLM_TIMEOUT_MS ?? 240_000);
 const DEFAULT_MAX_RETRIES = Number(process.env.STAGE3_LLM_MAX_RETRIES ?? 2);
 const RETRY_DELAY_MS = Number(process.env.STAGE3_LLM_RETRY_DELAY_MS ?? 1_000);
 
+/** 调用模型返回最多 50 个 Event Group 的排序，并保留 token 与重试观测。 */
 export async function runStage3EventRankingLlm(
   input: Stage3EventRankingInput,
   options: Stage3EventRankingLlmOptions = {},

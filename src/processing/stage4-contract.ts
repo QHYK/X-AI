@@ -1,3 +1,7 @@
+/**
+ * Stage 4 Event Enrichment 的 Structured Output 契约。
+ * 输出在写入 events 前由此验证，确保双语内容、来源视角与外部检索上下文结构一致。
+ */
 export type Stage4SourcePerspective = {
   source: string;
   summary: string;
@@ -116,6 +120,7 @@ export function parseAndValidateStage4EventEnrichmentOutput(
   return validateStage4EventEnrichmentOutput(parsed);
 }
 
+/** 校验 LLM 输出的全部持久化字段与数量限制，拒绝不完整的 Event 内容。 */
 export function validateStage4EventEnrichmentOutput(value: unknown): Stage4ValidationResult {
   const errors: string[] = [];
   if (!isRecord(value)) {

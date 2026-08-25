@@ -1,7 +1,12 @@
+/**
+ * Stage 1 Content Understanding Prompt builder。
+ * Prompt 文本与 stage1-contract 的 Structured Output 契约配套，由 LLM 调用层注入请求。
+ */
 import type { Stage1BatchInput } from "../processing/stage1-contract.js";
 
 export const STAGE1_PROMPT_VERSION = "v5";
 
+/** 构造 Stage 1 的固定指令；业务规则以 Prompt Spec 为准。 */
 export function buildStage1Instructions(): string {
   return [
     "You are Stage 1 of X-AI-field: Content Understanding & Selection.",

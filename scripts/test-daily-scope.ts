@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import {
-  readCollectedAtScopeFromEnv,
+  readPublishedAtScopeFromEnv,
   resolveDailyScope,
 } from "../src/lib/daily-scope.js";
 import { buildDailyStepEnv } from "../src/lib/daily-workflow.js";
@@ -52,21 +52,27 @@ checks.push({
 });
 
 const scope = scopes[0];
-const envScope = readCollectedAtScopeFromEnv({
+const envScope = readPublishedAtScopeFromEnv({
+  DAILY_PUBLISHED_SCOPE_START_AT: scope.startAt,
+  DAILY_PUBLISHED_SCOPE_END_AT: scope.endAt,
+});
+const legacyEnvScope = readPublishedAtScopeFromEnv({
   DAILY_SCOPE_START_AT: scope.startAt,
   DAILY_SCOPE_END_AT: scope.endAt,
 });
 checks.push({
-  name: "Daily scope environment preserves the exact half-open boundaries",
+  name: "published_at scope environment preserves exact bounds and accepts legacy aliases",
   passed:
-    envScope?.startAt === expectedScope.startAt && envScope.endAt === expectedScope.endAt,
-  detail: envScope,
+    envScope?.startAt === expectedScope.startAt &&
+    envScope.endAt === expectedScope.endAt &&
+    JSON.stringify(envScope) === JSON.stringify(legacyEnvScope),
+  detail: { envScope, legacyEnvScope },
 });
 
 const scopedQueries: CapturedQuery[] = [];
 const scopedQueryable = createCapturingQueryable(scopedQueries);
-await loadPendingStage1Articles(scopedQueryable, { collectedAtScope: scope });
-await loadStage2EventCandidates(scopedQueryable, { collectedAtScope: scope });
+await loadPendingStage1Articles(scopedQueryable, { publishedAtScope: scope });
+await loadStage2EventCandidates(scopedQueryable, { publishedAtScope: scope });
 await loadStage3RankingRows(scopedQueryable, "digest", 24, scope);
 
 checks.push({
@@ -74,7 +80,9 @@ checks.push({
   passed:
     scopedQueries.length === 3 &&
     scopedQueries.every((query) =>
-      query.text.includes("ra.collected_at >=") && query.text.includes("ra.collected_at <"),
+      query.text.includes("ra.published_at >=") &&
+      query.text.includes("ra.published_at <") &&
+      !query.text.includes("ra.collected_at >="),
     ) &&
     JSON.stringify(scopedQueries[0]?.values) ===
       JSON.stringify([expectedScope.startAt, expectedScope.endAt]) &&
@@ -91,14 +99,69 @@ await loadPendingStage1Articles(defaultQueryable);
 await loadStage2EventCandidates(defaultQueryable);
 await loadStage3RankingRows(defaultQueryable, "long_form", 24);
 checks.push({
-  name: "standalone Stage 1, 2, and 3 keep their rolling 24-hour defaults",
+  name: "standalone Stage 1, 2, and 3 use published_at rolling 24-hour defaults",
   passed:
     defaultQueries.length === 3 &&
-    defaultQueries.every((query) => query.text.includes("now() -")) &&
+    defaultQueries.every(
+      (query) =>
+        query.text.includes("ra.published_at >= now() -") &&
+        !query.text.includes("ra.collected_at >= now() -"),
+    ) &&
     JSON.stringify(defaultQueries[0]?.values) === JSON.stringify([24]) &&
     JSON.stringify(defaultQueries[1]?.values) === JSON.stringify([24]) &&
     JSON.stringify(defaultQueries[2]?.values) === JSON.stringify(["long_form", 24]),
   detail: defaultQueries,
+});
+
+const publicationFixtures = [
+  {
+    name: "published in scope despite late collection",
+    publishedAt: "2026-08-24T12:00:00.000Z",
+    collectedAt: "2026-08-27T12:00:00.000Z",
+    expected: true,
+  },
+  {
+    name: "collection in scope does not override publication outside scope",
+    publishedAt: "2026-08-25T02:00:00.000Z",
+    collectedAt: "2026-08-24T12:00:00.000Z",
+    expected: false,
+  },
+  {
+    name: "missing published_at is excluded",
+    publishedAt: null,
+    collectedAt: "2026-08-24T12:00:00.000Z",
+    expected: false,
+  },
+  {
+    name: "next Daily starts exactly at the previous end",
+    publishedAt: expectedScope.endAt,
+    collectedAt: expectedScope.startAt,
+    expected: false,
+  },
+];
+checks.push({
+  name: "Daily membership depends only on the published_at half-open interval",
+  passed: publicationFixtures.every(
+    (fixture) =>
+      isPublishedAtInScope(fixture.publishedAt, scope) === fixture.expected,
+  ),
+  detail: publicationFixtures,
+});
+
+const retryExecutionTimes = [
+  "2026-08-25T01:00:00.000Z",
+  "2026-08-25T06:00:00.000Z",
+  "2026-08-27T06:00:00.000Z",
+];
+checks.push({
+  name: "late retry and backfill keep the same publication membership",
+  passed: retryExecutionTimes.every((time) => {
+    const retryScope = resolveDailyScope("2026-08-25", new Date(time));
+    return publicationFixtures.every(
+      (fixture) =>
+        isPublishedAtInScope(fixture.publishedAt, retryScope) === fixture.expected,
+    );
+  }),
 });
 
 const stage3Env = buildDailyStepEnv({
@@ -118,7 +181,9 @@ checks.push({
   name: "Stage 3 and Stage 4 receive the current Daily runtime lineage",
   passed:
     stage3Env.STAGE3_STAGE2_RUN_DIR === "runtime/stage2/current" &&
-    stage4Env.STAGE4_STAGE3_RUN_DIR === "runtime/stage3/current",
+    stage4Env.STAGE4_STAGE3_RUN_DIR === "runtime/stage3/current" &&
+    stage3Env.DAILY_PUBLISHED_SCOPE_START_AT === expectedScope.startAt &&
+    stage3Env.DAILY_PUBLISHED_SCOPE_END_AT === expectedScope.endAt,
   detail: { stage3Env, stage4Env },
 });
 
@@ -135,4 +200,15 @@ function createCapturingQueryable(queries: CapturedQuery[]): Pick<Pool, "query">
       return { rows: [] };
     }) as Pick<Pool, "query">["query"],
   };
+}
+
+function isPublishedAtInScope(
+  publishedAt: string | null,
+  scopeValue: { startAt: string; endAt: string },
+): boolean {
+  if (publishedAt === null) {
+    return false;
+  }
+  const timestamp = Date.parse(publishedAt);
+  return timestamp >= Date.parse(scopeValue.startAt) && timestamp < Date.parse(scopeValue.endAt);
 }

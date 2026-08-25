@@ -1,3 +1,7 @@
+/**
+ * Stage 3 Workflow job：消费 Stage 2 runtime，完成 Event、Digest 与 Long-form 排名及去重。
+ * 该阶段把可复现的输入/诊断写入 runtime，并在单个事务内持久化排名。
+ */
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Pool, PoolClient } from "pg";
@@ -32,7 +36,7 @@ import type {
 import { inferSciencePublication } from "./science-publication.js";
 import { resolveStageLlmModel } from "./llm-client.js";
 import { normalizeArticleUrl } from "./url-normalization.js";
-import type { CollectedAtScope } from "../lib/daily-scope.js";
+import type { PublishedAtScope } from "../lib/daily-scope.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
 
@@ -108,8 +112,8 @@ type Stage3IdMap = {
 
 export type Stage3JobOptions = {
   stage2RunDir?: string;
-  collectedWithinHours?: number;
-  collectedAtScope?: CollectedAtScope;
+  publishedWithinHours?: number;
+  publishedAtScope?: PublishedAtScope;
   eventTopN?: number;
   model?: string;
   rootDir?: string;
@@ -145,6 +149,10 @@ const CATEGORY_ORDER = [
 const CROSS_CHANNEL_DUPLICATE_REASON =
   "normalized_url matches a selected Top N Event article URL";
 
+/**
+ * 执行 Stage 3，并优先使用 Daily 传入的 Stage 2 run 与 published_at scope。
+ * 单独运行时仍允许回退到最近成功的 Stage 2 artifact。
+ */
 export async function processStage3(
   pool: Pool,
   options: Stage3JobOptions = {},
@@ -159,7 +167,7 @@ export async function processStage3(
   const longFormDir = join(runDir, "long-form");
   const model = resolveStageLlmModel("stage3", options.model);
   const eventTopN = options.eventTopN ?? DEFAULT_EVENT_TOP_N;
-  const collectedWithinHours = options.collectedWithinHours ?? DEFAULT_LOOKBACK_HOURS;
+  const publishedWithinHours = options.publishedWithinHours ?? DEFAULT_LOOKBACK_HOURS;
 
   await mkdir(eventsDir, { recursive: true });
   await mkdir(dedupDir, { recursive: true });
@@ -195,14 +203,14 @@ export async function processStage3(
     const digestRows = await loadStage3RankingRows(
       pool,
       "digest",
-      collectedWithinHours,
-      options.collectedAtScope,
+      publishedWithinHours,
+      options.publishedAtScope,
     );
     const longFormRows = await loadStage3RankingRows(
       pool,
       "long_form",
-      collectedWithinHours,
-      options.collectedAtScope,
+      publishedWithinHours,
+      options.publishedAtScope,
     );
     const digestRecords = buildDigestRecords(digestRows);
     const longFormRecords = buildLongFormRecords(longFormRows);
@@ -330,7 +338,7 @@ export async function processStage3(
       finishedAt: new Date(),
       model,
       status: "success",
-      collectedWithinHours,
+      publishedWithinHours,
       eventGroupCount,
       eventSelectedCount,
       crossChannelRemovedCount,
@@ -371,7 +379,7 @@ export async function processStage3(
       finishedAt: new Date(),
       model,
       status: "failed",
-      collectedWithinHours,
+      publishedWithinHours,
       eventGroupCount,
       eventSelectedCount,
       crossChannelRemovedCount,
@@ -406,6 +414,7 @@ export async function processStage3(
   }
 }
 
+/** 加载指定或最近成功的 Stage 2 runtime，建立 Stage 2→3 的可追踪输入 lineage。 */
 export async function loadStage2RunForStage3(
   rootDir: string,
   stage2RunDirOption?: string,
@@ -538,18 +547,19 @@ function validateStage2IdMap(input: Stage2Input, idMap: Stage2IdMap) {
   }
 }
 
+/** 读取某一频道的 Stage 3 排名候选，并按原始文章采集时间限定 Daily 输入范围。 */
 export async function loadStage3RankingRows(
   queryable: Queryable,
   routing: "digest" | "long_form",
-  collectedWithinHours: number,
-  collectedAtScope?: CollectedAtScope,
+  publishedWithinHours: number,
+  publishedAtScope?: PublishedAtScope,
 ): Promise<RankingCandidateRow[]> {
-  const collectedAtPredicate = collectedAtScope
-    ? "ra.collected_at >= $2::timestamptz and ra.collected_at < $3::timestamptz"
-    : "ra.collected_at >= now() - ($2::int * interval '1 hour')";
-  const values: Array<number | string> = collectedAtScope
-    ? [routing, collectedAtScope.startAt, collectedAtScope.endAt]
-    : [routing, collectedWithinHours];
+  const publishedAtPredicate = publishedAtScope
+    ? "ra.published_at >= $2::timestamptz and ra.published_at < $3::timestamptz"
+    : "ra.published_at >= now() - ($2::int * interval '1 hour')";
+  const values: Array<number | string> = publishedAtScope
+    ? [routing, publishedAtScope.startAt, publishedAtScope.endAt]
+    : [routing, publishedWithinHours];
   const result = await queryable.query<RankingCandidateRow>(
     `
       select
@@ -565,10 +575,10 @@ export async function loadStage3RankingRows(
       join sources s on s.id = ra.source_id
       where pc.routing = $1
         and ra.stage1_status = 'selected'
-        and ${collectedAtPredicate}
+        and ${publishedAtPredicate}
       order by
         pc.category,
-        coalesce(ra.published_at, ra.collected_at) desc,
+        ra.published_at desc,
         s.name,
         pc.id
     `,
@@ -902,6 +912,10 @@ async function loadArticleUrls(
   return new Map(result.rows.map((row) => [row.processedContentId, row.url]));
 }
 
+/**
+ * 移除与已选 Top Event 指向同一规范化 URL 的 Digest/Long-form。
+ * 这样最终 Brief 不会在多个频道重复呈现同一篇原始报道。
+ */
 function applyCrossChannelDedup(options: {
   digestRecords: DigestRecord[];
   longFormRecords: LongFormRecord[];
@@ -1212,7 +1226,7 @@ async function writeRunJson(
     finishedAt: Date;
     model: string;
     status: "success" | "failed";
-    collectedWithinHours: number;
+    publishedWithinHours: number;
     eventGroupCount: number;
     eventSelectedCount: number;
     crossChannelRemovedCount: number;
@@ -1236,7 +1250,7 @@ async function writeRunJson(
     started_at: value.startedAt.toISOString(),
     finished_at: value.finishedAt.toISOString(),
     model: value.model,
-    collected_within_hours: value.collectedWithinHours,
+    published_within_hours: value.publishedWithinHours,
     event_group_count: value.eventGroupCount,
     event_selected_count: value.eventSelectedCount,
     cross_channel_removed_count: value.crossChannelRemovedCount,

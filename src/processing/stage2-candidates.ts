@@ -1,5 +1,9 @@
+/**
+ * 为 Stage 2 准备 Event 候选与临时 ID 映射。
+ * 候选通过 raw_articles.published_at 归属，因此 Daily scope 能与 Stage 1/3 保持一致。
+ */
 import type { Pool, PoolClient } from "pg";
-import type { CollectedAtScope } from "../lib/daily-scope.js";
+import type { PublishedAtScope } from "../lib/daily-scope.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
 
@@ -36,20 +40,21 @@ export type PreparedStage2Input = {
 
 const DEFAULT_STAGE2_LOOKBACK_HOURS = 24;
 
+/** 加载已被 Stage 1 选中且 routing 为 event 的候选，支持固定 Daily scope。 */
 export async function loadStage2EventCandidates(
   queryable: Queryable,
   options: {
-    collectedWithinHours?: number;
-    collectedAtScope?: CollectedAtScope;
+    publishedWithinHours?: number;
+    publishedAtScope?: PublishedAtScope;
   } = {},
 ): Promise<Stage2CandidateRow[]> {
-  const collectedWithinHours = options.collectedWithinHours ?? DEFAULT_STAGE2_LOOKBACK_HOURS;
-  const collectedAtPredicate = options.collectedAtScope
-    ? "ra.collected_at >= $1::timestamptz and ra.collected_at < $2::timestamptz"
-    : "ra.collected_at >= now() - ($1::int * interval '1 hour')";
-  const values: Array<number | string> = options.collectedAtScope
-    ? [options.collectedAtScope.startAt, options.collectedAtScope.endAt]
-    : [collectedWithinHours];
+  const publishedWithinHours = options.publishedWithinHours ?? DEFAULT_STAGE2_LOOKBACK_HOURS;
+  const publishedAtPredicate = options.publishedAtScope
+    ? "ra.published_at >= $1::timestamptz and ra.published_at < $2::timestamptz"
+    : "ra.published_at >= now() - ($1::int * interval '1 hour')";
+  const values: Array<number | string> = options.publishedAtScope
+    ? [options.publishedAtScope.startAt, options.publishedAtScope.endAt]
+    : [publishedWithinHours];
   const result = await queryable.query<Stage2CandidateRow>(
     `
       select
@@ -66,9 +71,9 @@ export async function loadStage2EventCandidates(
       join sources s on s.id = ra.source_id
       where pc.routing = 'event'
         and ra.stage1_status = 'selected'
-        and ${collectedAtPredicate}
+        and ${publishedAtPredicate}
       order by
-        coalesce(ra.published_at, ra.collected_at) desc,
+        ra.published_at desc,
         s.name,
         pc.id
     `,
@@ -78,6 +83,7 @@ export async function loadStage2EventCandidates(
   return result.rows;
 }
 
+/** 构造给模型的紧凑输入，并保留 temp_id 到 processed_content_id 的可追溯映射。 */
 export function prepareStage2Input(rows: Stage2CandidateRow[]): PreparedStage2Input {
   const input: Stage2Input = {
     event_candidates: rows.map((row, index) => ({

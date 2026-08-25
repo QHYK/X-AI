@@ -1,3 +1,7 @@
+/**
+ * Stage 3 排名写入规则。
+ * AI rank 可更新，而人工改写过的 display rank 必须保留，避免 workflow 覆盖人工排序。
+ */
 import type { Pool, PoolClient } from "pg";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
@@ -48,6 +52,7 @@ export function nextDisplayRankForStaleClear(
   return oldDisplayRank;
 }
 
+/** 在调用方事务中写入最新排名并清除本 scope 内过期 AI 排名。 */
 export async function persistStage3Ranks(
   client: Queryable,
   plan: Stage3PersistencePlan,

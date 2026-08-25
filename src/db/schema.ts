@@ -1,3 +1,8 @@
+/**
+ * X-AI-field 的 Drizzle 数据模型定义。
+ *
+ * 描述采集输入、Stage 处理结果、最终 Event 和反馈之间的持久化关系及基础索引。
+ */
 import { sql } from "drizzle-orm";
 import {
   boolean,

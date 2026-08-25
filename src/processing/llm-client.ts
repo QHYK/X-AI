@@ -1,3 +1,8 @@
+/**
+ * Stage 1–4 共用的 LLM Provider 适配层。
+ *
+ * 统一模型/凭据解析、Responses 与 Chat Completions 差异，并在调试时输出已脱敏的请求诊断。
+ */
 import OpenAI from "openai";
 import { Agent, fetch as undiciFetch } from "undici";
 
@@ -130,6 +135,7 @@ export function resolveLlmModel(model?: string, provider = resolveLlmProvider())
   return model ?? resolveModel(provider);
 }
 
+/** 解析 Stage 专属 Provider，未配置时使用系统默认映射。 */
 export function resolveStageLlmProvider(stage: LlmStage): LlmProvider {
   const environmentName = `${stage.toUpperCase()}_LLM_PROVIDER`;
   return resolveLlmProvider(
@@ -153,6 +159,10 @@ export function assertStageLlmConfiguration(stage: LlmStage): LlmConfig {
   });
 }
 
+/**
+ * 创建统一的最小 Responses 接口。
+ * 非 OpenAI Provider 经 Chat Completions 适配，调用方无需了解协议差异。
+ */
 export function createLlmClient(options: LlmClientOptions = {}) {
   const config = resolveLlmConfig({ provider: options.provider });
   const dispatcher = new Agent({

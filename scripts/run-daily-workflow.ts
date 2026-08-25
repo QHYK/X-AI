@@ -71,7 +71,7 @@ async function main() {
   await writeRun(runPath, run);
   console.log(`[daily] Runtime artifact: ${runPath}`);
   console.log(
-    `[daily] Daily ${scope.dailyDate}: ${scope.startAt} <= collected_at < ${scope.endAt} (${scope.timezone})`,
+    `[daily] Daily ${scope.dailyDate}: ${scope.startAt} <= published_at < ${scope.endAt} (${scope.timezone})`,
   );
 
   for (const name of STEPS) {

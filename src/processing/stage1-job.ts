@@ -1,3 +1,7 @@
+/**
+ * Stage 1 Workflow job：加载可重试原始文章、分批调用模型并写入处理结果。
+ * 通过 raw_articles 状态与 processed_contents 的唯一约束保证重复运行安全。
+ */
 import type { Pool, PoolClient, QueryResult } from "pg";
 import {
   runStage1BatchLlm,
@@ -11,15 +15,15 @@ import type {
   Stage1Routing,
 } from "./stage1-contract.js";
 import { resolveStageLlmModel } from "./llm-client.js";
-import type { CollectedAtScope } from "../lib/daily-scope.js";
+import type { PublishedAtScope } from "../lib/daily-scope.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
 
 export type Stage1JobOptions = Stage1LlmOptions & {
   limit?: number;
   concurrency?: number;
-  collectedWithinHours?: number;
-  collectedAtScope?: CollectedAtScope;
+  publishedWithinHours?: number;
+  publishedAtScope?: PublishedAtScope;
   batchSize?: number;
   batchMaxContentChars?: number;
   batchMaxTotalChars?: number;
@@ -40,7 +44,7 @@ export type Stage1JobSummary = {
   startedAt: string;
   finishedAt: string;
   model: string;
-  collectedWithinHours: number | null;
+  publishedWithinHours: number | null;
   scopeStartAt: string | null;
   scopeEndAt: string | null;
   requestedLimit: number | null;
@@ -79,18 +83,19 @@ export const DEFAULT_STAGE1_BATCH_SIZE = 8;
 export const DEFAULT_STAGE1_BATCH_MAX_CONTENT_CHARS = 12_000;
 export const DEFAULT_STAGE1_BATCH_MAX_TOTAL_CHARS = 40_000;
 
+/** 执行一次 Stage 1，支持默认滑动窗口或 Daily 传入的固定 published_at scope。 */
 export async function processStage1Batch(
   pool: Pool,
   options: Stage1JobOptions = {},
 ): Promise<Stage1JobSummary> {
   const startedAt = new Date();
-  const collectedWithinHours = options.collectedWithinHours ?? DEFAULT_STAGE1_LOOKBACK_HOURS;
+  const publishedWithinHours = options.publishedWithinHours ?? DEFAULT_STAGE1_LOOKBACK_HOURS;
   const concurrency = Math.max(1, options.concurrency ?? DEFAULT_STAGE1_CONCURRENCY);
   const batchConfig = resolveStage1BatchConfig(options);
   const articles = await loadPendingStage1Articles(pool, {
     limit: options.limit,
-    collectedWithinHours,
-    collectedAtScope: options.collectedAtScope,
+    publishedWithinHours,
+    publishedAtScope: options.publishedAtScope,
   });
   const batches = createStage1MicroBatches(articles, batchConfig);
 
@@ -104,9 +109,9 @@ export async function processStage1Batch(
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
     model: resolveStageLlmModel("stage1", options.model),
-    collectedWithinHours: options.collectedAtScope ? null : collectedWithinHours,
-    scopeStartAt: options.collectedAtScope?.startAt ?? null,
-    scopeEndAt: options.collectedAtScope?.endAt ?? null,
+    publishedWithinHours: options.publishedAtScope ? null : publishedWithinHours,
+    scopeStartAt: options.publishedAtScope?.startAt ?? null,
+    scopeEndAt: options.publishedAtScope?.endAt ?? null,
     requestedLimit: options.limit ?? null,
     loadedCount: articles.length,
     selectedCount: results.filter((result) => result.status === "selected").length,
@@ -155,6 +160,10 @@ export function resolveStage1BatchConfig(
   };
 }
 
+/**
+ * 依据文章正文大小拆分 micro-batch。
+ * 长文独立处理，避免它挤占普通文章的上下文预算并影响批次稳定性。
+ */
 export function createStage1MicroBatches(
   articles: Stage1ArticleRow[],
   config: Stage1BatchConfig,
@@ -207,23 +216,24 @@ export function stage1ArticleContentLength(article: Stage1ArticleRow): number {
   return article.contentText?.trim().length ?? 0;
 }
 
+/** 读取 pending 与 failed 文章；selected/ignored 是终态，不会在重跑中重新处理。 */
 export async function loadPendingStage1Articles(
   queryable: Queryable,
   options: {
     limit?: number;
-    collectedWithinHours?: number;
-    collectedAtScope?: CollectedAtScope;
+    publishedWithinHours?: number;
+    publishedAtScope?: PublishedAtScope;
   } = {},
 ): Promise<Stage1ArticleRow[]> {
-  const collectedWithinHours = options.collectedWithinHours ?? DEFAULT_STAGE1_LOOKBACK_HOURS;
-  const collectedAtPredicate = options.collectedAtScope
-    ? "ra.collected_at >= $1::timestamptz and ra.collected_at < $2::timestamptz"
-    : "ra.collected_at >= now() - ($1::int * interval '1 hour')";
-  const limitParameter = options.collectedAtScope ? 3 : 2;
+  const publishedWithinHours = options.publishedWithinHours ?? DEFAULT_STAGE1_LOOKBACK_HOURS;
+  const publishedAtPredicate = options.publishedAtScope
+    ? "ra.published_at >= $1::timestamptz and ra.published_at < $2::timestamptz"
+    : "ra.published_at >= now() - ($1::int * interval '1 hour')";
+  const limitParameter = options.publishedAtScope ? 3 : 2;
   const limitClause = options.limit ? `limit $${limitParameter}` : "";
-  const values: Array<number | string> = options.collectedAtScope
-    ? [options.collectedAtScope.startAt, options.collectedAtScope.endAt]
-    : [collectedWithinHours];
+  const values: Array<number | string> = options.publishedAtScope
+    ? [options.publishedAtScope.startAt, options.publishedAtScope.endAt]
+    : [publishedWithinHours];
   if (options.limit) {
     values.push(options.limit);
   }
@@ -249,10 +259,10 @@ export async function loadPendingStage1Articles(
       from raw_articles ra
       join sources s on s.id = ra.source_id
       where ra.stage1_status in ('pending', 'failed')
-        and ${collectedAtPredicate}
+        and ${publishedAtPredicate}
       order by
         case when s.priority = 'High' then 0 when s.priority = 'Medium' then 1 else 2 end,
-        coalesce(ra.published_at, ra.collected_at) desc,
+        ra.published_at desc,
         ra.id
       ${limitClause}
     `,
@@ -479,6 +489,10 @@ function readPositiveInteger(
   return parsed;
 }
 
+/**
+ * 原子语义上先以唯一 raw_article_id 尝试插入结果，再更新 Stage 1 状态。
+ * conflict do nothing 使已持久化文章在重跑时不会产生重复 processed_contents。
+ */
 export async function persistStage1Selected(
   queryable: Queryable,
   rawArticleId: string,
