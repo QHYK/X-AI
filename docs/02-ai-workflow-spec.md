@@ -160,3 +160,15 @@ Long-form   → 全局排序：什么最值得投入阅读时间？
 - Eval / Prompt refinement
 
 当前不是 Daily Workflow 的阻塞步骤。
+
+---
+
+## Manual Model Evaluation MVP
+
+Model Evaluation 是与正式 Pipeline 隔离的人工实验旁路，不属于 Daily Workflow。当前仅覆盖
+Stage 1、Stage 2、Stage 3 Event / Digest / Long-form：同一 Stage 先冻结生产输入，再以同一
+Prompt 和 Structured Output contract 分别调用多个模型。它用于观察 routing、event merge 和
+ranking 分歧，不做自动评分、模型选择或 Stage 4 Evaluation。
+
+Evaluation 输出只保存到独立 Evaluation Tables，不会更新 `processed_contents`、`events`、
+`event_review_items`、`feedback` 或正式 Rank。

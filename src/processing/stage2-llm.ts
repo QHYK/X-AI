@@ -4,8 +4,10 @@
  */
 import {
   createLlmClient,
+  resolveLlmModel,
   resolveStageLlmModel,
   resolveStageLlmProvider,
+  type LlmProvider,
 } from "./llm-client.js";
 import {
   stage2OutputJsonSchema,
@@ -19,6 +21,7 @@ import {
 } from "../prompts/stage2-event-merge.js";
 
 export type Stage2LlmOptions = {
+  provider?: LlmProvider;
   model?: string;
   timeoutMs?: number;
   maxRetries?: number;
@@ -71,8 +74,12 @@ export async function runStage2MergeLlm(
   input: Stage2Input,
   options: Stage2LlmOptions = {},
 ): Promise<Stage2LlmResult> {
-  const provider = resolveStageLlmProvider("stage2");
-  const model = resolveStageLlmModel("stage2", options.model);
+  const provider = options.provider ?? resolveStageLlmProvider("stage2");
+  const model = options.model ?? (
+    options.provider
+      ? resolveLlmModel(undefined, provider)
+      : resolveStageLlmModel("stage2")
+  );
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });

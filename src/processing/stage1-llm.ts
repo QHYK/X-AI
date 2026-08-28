@@ -18,11 +18,14 @@ import {
 } from "../prompts/stage1-content-understanding.js";
 import {
   createLlmClient,
+  resolveLlmModel,
   resolveStageLlmModel,
   resolveStageLlmProvider,
+  type LlmProvider,
 } from "./llm-client.js";
 
 export type Stage1LlmOptions = {
+  provider?: LlmProvider;
   model?: string;
   timeoutMs?: number;
   maxRetries?: number;
@@ -79,9 +82,27 @@ export async function runStage1BatchLlm(
     throw new Error("Stage 1 LLM batch must contain at least one article.");
   }
 
-  const input = buildStage1BatchInput(articles);
-  const provider = resolveStageLlmProvider("stage1");
-  const model = resolveStageLlmModel("stage1", options.model);
+  return runStage1BatchLlmForInput(buildStage1BatchInput(articles), options);
+}
+
+/**
+ * 使用已冻结的 Stage 1 batch 输入执行正式的 Prompt、LLM 与校验流程。
+ * Evaluation 通过此入口避免重新读取数据库或复制生产调用逻辑。
+ */
+export async function runStage1BatchLlmForInput(
+  input: Stage1BatchInput,
+  options: Stage1LlmOptions = {},
+): Promise<Stage1LlmResult> {
+  if (input.articles.length === 0) {
+    throw new Error("Stage 1 LLM batch must contain at least one article.");
+  }
+
+  const provider = options.provider ?? resolveStageLlmProvider("stage1");
+  const model = options.model ?? (
+    options.provider
+      ? resolveLlmModel(undefined, provider)
+      : resolveStageLlmModel("stage1")
+  );
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
@@ -115,7 +136,7 @@ export async function runStage1BatchLlm(
               ],
             },
           ],
-          max_output_tokens: MAX_OUTPUT_TOKENS_PER_ARTICLE * articles.length,
+          max_output_tokens: MAX_OUTPUT_TOKENS_PER_ARTICLE * input.articles.length,
           store: false,
           text: {
             format: {

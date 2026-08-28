@@ -144,7 +144,7 @@ export function resolveStageLlmProvider(stage: LlmStage): LlmProvider {
 }
 
 export function resolveStageLlmModel(stage: LlmStage, model?: string): string {
-  return model ?? resolveProviderModel(resolveStageLlmProvider(stage));
+  return model ?? resolveProviderLlmModel(resolveStageLlmProvider(stage));
 }
 
 export function assertLlmConfiguration(provider?: LlmProvider): LlmConfig {
@@ -510,10 +510,11 @@ function resolveModel(provider: LlmProvider): string {
   if (process.env.LLM_MODEL) {
     return process.env.LLM_MODEL;
   }
-  return resolveProviderModel(provider);
+  return resolveProviderLlmModel(provider);
 }
 
-function resolveProviderModel(provider: LlmProvider): string {
+/** 解析 Provider 专属 model，忽略仅供通用诊断使用的 LLM_MODEL。 */
+export function resolveProviderLlmModel(provider: LlmProvider): string {
   if (provider === "openai") {
     return process.env.OPENAI_MODEL ?? DEFAULT_MODELS.openai;
   }

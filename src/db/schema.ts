@@ -171,6 +171,60 @@ export const feedback = pgTable("feedback", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** 人工触发的模型评测所冻结的 Stage 输入；与正式业务表完全隔离。 */
+export const evaluationInputs = pgTable(
+  "evaluation_inputs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    dailyDate: date("daily_date").notNull(),
+    stage: text("stage").notNull(),
+    inputJson: jsonb("input_json").notNull(),
+    inputHash: text("input_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("evaluation_inputs_daily_stage_idx").on(table.dailyDate, table.stage),
+  ],
+);
+
+/** 同一冻结输入可由多个 Provider / Model 独立执行，失败不会影响其他 Run。 */
+export const evaluationRuns = pgTable(
+  "evaluation_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    evaluationInputId: uuid("evaluation_input_id")
+      .notNull()
+      .references(() => evaluationInputs.id),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    status: text("status").notNull(),
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    durationMs: integer("duration_ms"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("evaluation_runs_input_idx").on(table.evaluationInputId)],
+);
+
+/** 保存已通过当前 Stage Structured Output 校验的模型结果，不映射到正式内容表。 */
+export const evaluationOutputs = pgTable(
+  "evaluation_outputs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    evaluationRunId: uuid("evaluation_run_id")
+      .notNull()
+      .references(() => evaluationRuns.id, { onDelete: "cascade" }),
+    itemKey: text("item_key"),
+    outputJson: jsonb("output_json").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("evaluation_outputs_run_idx").on(table.evaluationRunId)],
+);
+
 export type Source = typeof sources.$inferSelect;
 export type NewSource = typeof sources.$inferInsert;
 export type RawArticle = typeof rawArticles.$inferSelect;
@@ -183,3 +237,9 @@ export type EventReviewItem = typeof eventReviewItems.$inferSelect;
 export type NewEventReviewItem = typeof eventReviewItems.$inferInsert;
 export type Feedback = typeof feedback.$inferSelect;
 export type NewFeedback = typeof feedback.$inferInsert;
+export type EvaluationInput = typeof evaluationInputs.$inferSelect;
+export type NewEvaluationInput = typeof evaluationInputs.$inferInsert;
+export type EvaluationRun = typeof evaluationRuns.$inferSelect;
+export type NewEvaluationRun = typeof evaluationRuns.$inferInsert;
+export type EvaluationOutput = typeof evaluationOutputs.$inferSelect;
+export type NewEvaluationOutput = typeof evaluationOutputs.$inferInsert;

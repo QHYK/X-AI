@@ -133,6 +133,24 @@ Human Review 位于初始 Stage 4 后：保存 Event 排名会同步 `event_revi
 `events.display_rank`。新的最终 Top 15 若缺少最终 Event，则仅对该 Event 按需执行 Stage 4；
 已有 enrichment 直接复用。LLM 失败时不提交本次排序，用户主动移动仍按原规则记录 feedback。
 
+## Manual Model Evaluation（旁路）
+
+Model Evaluation 不在上图的 Production Daily Pipeline 中，也不会由 Cron / Daily 自动触发。
+人工 CLI 对指定 Daily 的单一 Stage 构造一次 Frozen Input，保存后分别调用 DeepSeek、Kimi 等
+Evaluation Model：
+
+```text
+Production DB / successful Stage 3 runtime
+  ↓ (construct once)
+evaluation_inputs (same input_hash / input ID)
+  ↓
+evaluation_runs (one per model) → evaluation_outputs (validated JSON)
+```
+
+Stage 1 使用相同 Raw Articles，Stage 2 使用指定日期正式 Stage 1 的 Event Candidates，Stage 3
+Event / Digest / Long-form 分别读取同一次正式 Stage 3 run 的对应输入。Evaluation 只写独立表，
+不会修改正式内容、Event、Review、Feedback 或 Rank；Stage 4 不参与该 MVP。
+
 ## 数据最终去向
 
 ```text

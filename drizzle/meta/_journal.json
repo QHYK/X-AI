@@ -43,6 +43,13 @@
       "when": 1787923116602,
       "tag": "0005_tiresome_vulcan",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787928030283,
+      "tag": "0006_closed_nighthawk",
+      "breakpoints": true
     }
   ]
 }

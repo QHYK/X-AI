@@ -28,6 +28,8 @@ processed_contents
 Stage 3 Event Ranking → event_review_items
 
 feedback
+
+evaluation_inputs → evaluation_runs → evaluation_outputs
 ```
 
 - `sources`：Source List 与采集配置
@@ -36,6 +38,7 @@ feedback
 - `events`：Stage 4 生成的最终 Event，一个 Event 可以关联多篇 Event Candidate。
 - `event_review_items`：Stage 3 Event Top 50 的历史 Ranking Review snapshot。
 - `feedback`：人工 Ranking 修正记录｜False Positive｜False Negative｜Ranking Error
+- `evaluation_*`：人工 Model Evaluation 的冻结输入、独立模型运行和 Structured Output；不关联或回写正式业务表。
 
 ### 1.2 Processing Layer
 
@@ -355,7 +358,37 @@ display_rank 更新
 feedback 写入修改记录
 ```
 
-### 3.7 Initial Indexes
+### 3.7 `evaluation_inputs` / `evaluation_runs` / `evaluation_outputs`
+
+Model Evaluation 使用三张独立表保存人工实验：
+
+```text
+evaluation_inputs
+  id, daily_date, stage, input_json, input_hash, created_at
+  ↓
+evaluation_runs
+  id, evaluation_input_id, provider, model, prompt_version, status, error,
+  started_at, completed_at, duration_ms, input_tokens, output_tokens, created_at
+  ↓
+evaluation_outputs
+  id, evaluation_run_id, item_key, output_json, created_at
+```
+
+- `evaluation_inputs.input_json` 是一次评测开始时构造的完整 Frozen Stage Input；同一次
+  Evaluation 的所有 Model Run 必须引用同一个 input ID。`input_hash` 是稳定 JSON + SHA-256，
+  用于人工核对输入一致性，不作为复杂内容寻址或缓存机制。
+- `stage` 当前仅支持 `stage1`、`stage2`、`stage3_event`、`stage3_digest`、
+  `stage3_long_form`。Digest 的每个 Category output 使用 `item_key = category`。
+- Run status 为 `running` / `success` / `failed`；一个模型失败不影响其他 Run。Provider 未提供
+  token metadata 时 token 字段为 NULL。
+- `evaluation_outputs.output_json` 只保存已通过当前 Stage contract 校验的 Structured Output。
+  删除一个 Run 会 cascade 删除其 outputs；删除 Run 不会删除 shared input，也不会 cascade 到任何 Production Table。
+
+Evaluation 只允许 CLI 等人工入口触发，不加入 `npm run daily`、Cron、Scheduler 或正式
+Orchestrator。它绝不写 `processed_contents`、`events`、`event_review_items`、`feedback`、
+`ai_rank` 或 `display_rank`；Stage 4 不参加多模型 Evaluation。
+
+### 3.8 Initial Indexes
 
 MVP 只建立明确需要的索引：
 ```text
@@ -377,6 +410,10 @@ event_review_items(daily_date)
 event_review_items(review_run_id, event_temp_id) UNIQUE
 event_review_items(review_run_id, ai_rank) UNIQUE
 event_review_items(review_run_id, display_rank) UNIQUE
+
+evaluation_inputs(daily_date, stage)
+evaluation_runs(evaluation_input_id)
+evaluation_outputs(evaluation_run_id)
 ```
 
 Source Digest 查询后续如有性能需求，再增加：
@@ -684,6 +721,17 @@ PATCH /api/review/long-form/ranking
 + **Stage 2**: 当前 Raw Article 标记 `failed`, 可独立重试, 不重跑已成功文章
 + **Stage 3**: 只重跑失败的 Channel / Category
 + **Stage 4**: 重试当前任务
+
+### 4.10.1 Manual Model Evaluation
+
+人工执行 `npm run eval:stage1`、`eval:stage2`、`eval:stage3:event`、
+`eval:stage3:digest` 或 `eval:stage3:long-form` 时，Evaluation Service 先从 Production DB
+或对应成功 Stage 3 runtime 构造一次 Frozen Input，随后才创建多个 Model Run。Stage 1 保留
+当前 micro-batch 输入边界；Stage 2 使用该 Daily 的已选 Event Candidates；Stage 3 使用指定
+日期最近一次成功正式 Stage 3 runtime 中已经去重后的 Event、Digest 分类和 Long-form 输入。
+
+所有模型读取同一 `evaluation_input_id`，但每个 Run 独立保存 success / failed、耗时、可用 token
+和输出。Evaluation 不启动或重跑任何正式 Job，不进入 Daily lineage，也不创建新的 runtime artifact。
 
 ### 4.11 Idempotency 幂等性
 

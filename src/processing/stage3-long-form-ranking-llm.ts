@@ -4,8 +4,10 @@
  */
 import {
   createLlmClient,
+  resolveLlmModel,
   resolveStageLlmModel,
   resolveStageLlmProvider,
+  type LlmProvider,
 } from "./llm-client.js";
 import {
   parseAndValidateStage3RankingOutput,
@@ -22,9 +24,16 @@ import {
 } from "../prompts/stage3-long-form-ranking.js";
 
 export type Stage3LongFormRankingLlmOptions = {
+  provider?: LlmProvider;
   model?: string;
   timeoutMs?: number;
   maxRetries?: number;
+};
+
+export type Stage3LongFormRankingTokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
 };
 
 export type Stage3LongFormRankingSuccess = {
@@ -37,6 +46,7 @@ export type Stage3LongFormRankingSuccess = {
   responseId: string;
   attempts: number;
   elapsedMs: number;
+  tokenUsage: Stage3LongFormRankingTokenUsage | null;
   rawOutputText: string;
 };
 
@@ -48,6 +58,7 @@ export type Stage3LongFormRankingFailure = {
   promptVersion: string;
   attempts: number;
   elapsedMs: number;
+  tokenUsage: Stage3LongFormRankingTokenUsage | null;
   error: string;
   rawOutputText: string | null;
 };
@@ -65,13 +76,23 @@ export async function runStage3LongFormRankingLlm(
   input: Stage3LongFormRankingInput,
   options: Stage3LongFormRankingLlmOptions = {},
 ): Promise<Stage3LongFormRankingResult> {
-  const provider = resolveStageLlmProvider("stage3");
-  const model = resolveStageLlmModel("stage3", options.model);
+  const provider = options.provider ?? resolveStageLlmProvider("stage3");
+  const model = options.model ?? (
+    options.provider
+      ? resolveLlmModel(undefined, provider)
+      : resolveStageLlmModel("stage3")
+  );
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const expectedIds = input.candidates.map((candidate) => candidate.id);
+  const tokenUsage: Stage3LongFormRankingTokenUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+  };
+  let hasTokenUsage = false;
 
   let rawOutputText: string | null = null;
   let lastError = "Unknown Stage 3 Long-form Ranking LLM failure.";
@@ -114,6 +135,12 @@ export async function runStage3LongFormRankingLlm(
           },
         );
 
+        if (response.usage) {
+          tokenUsage.inputTokens += response.usage.input_tokens;
+          tokenUsage.outputTokens += response.usage.output_tokens;
+          tokenUsage.totalTokens += response.usage.total_tokens;
+          hasTokenUsage = true;
+        }
         rawOutputText = response.output_text;
         const validation = parseAndValidateStage3RankingOutput(rawOutputText);
         if (!validation.success) {
@@ -149,6 +176,7 @@ export async function runStage3LongFormRankingLlm(
           responseId: response.id,
           attempts: attempt,
           elapsedMs: Date.now() - startedAt,
+          tokenUsage: hasTokenUsage ? tokenUsage : null,
           rawOutputText,
         };
       } catch (error) {
@@ -172,6 +200,7 @@ export async function runStage3LongFormRankingLlm(
       promptVersion: STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
       attempts: attemptsUsed,
       elapsedMs: Date.now() - startedAt,
+      tokenUsage: hasTokenUsage ? tokenUsage : null,
       error: lastError,
       rawOutputText,
     };

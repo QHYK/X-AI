@@ -4,8 +4,10 @@
  */
 import {
   createLlmClient,
+  resolveLlmModel,
   resolveStageLlmModel,
   resolveStageLlmProvider,
+  type LlmProvider,
 } from "./llm-client.js";
 import {
   deduplicateStage3EventRankingOutput,
@@ -25,6 +27,7 @@ import {
 } from "../prompts/stage3-event-ranking.js";
 
 export type Stage3EventRankingLlmOptions = {
+  provider?: LlmProvider;
   model?: string;
   timeoutMs?: number;
   maxRetries?: number;
@@ -77,8 +80,12 @@ export async function runStage3EventRankingLlm(
   input: Stage3EventRankingInput,
   options: Stage3EventRankingLlmOptions = {},
 ): Promise<Stage3EventRankingResult> {
-  const provider = resolveStageLlmProvider("stage3");
-  const model = resolveStageLlmModel("stage3", options.model);
+  const provider = options.provider ?? resolveStageLlmProvider("stage3");
+  const model = options.model ?? (
+    options.provider
+      ? resolveLlmModel(undefined, provider)
+      : resolveStageLlmModel("stage3")
+  );
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });

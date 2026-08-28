@@ -4,8 +4,10 @@
  */
 import {
   createLlmClient,
+  resolveLlmModel,
   resolveStageLlmModel,
   resolveStageLlmProvider,
+  type LlmProvider,
 } from "./llm-client.js";
 import {
   parseAndValidateStage3DigestOrderedIdsOutput,
@@ -29,6 +31,7 @@ import {
 } from "../prompts/stage3-digest-repair.js";
 
 export type Stage3DigestRankingLlmOptions = {
+  provider?: LlmProvider;
   model?: string;
   timeoutMs?: number;
   maxRetries?: number;
@@ -125,8 +128,12 @@ export async function runStage3DigestRankingLlm(
   input: Stage3DigestRankingInput,
   options: Stage3DigestRankingLlmOptions = {},
 ): Promise<Stage3DigestRankingResult> {
-  const provider = resolveStageLlmProvider("stage3");
-  const model = resolveStageLlmModel("stage3", options.model);
+  const provider = options.provider ?? resolveStageLlmProvider("stage3");
+  const model = options.model ?? (
+    options.provider
+      ? resolveLlmModel(undefined, provider)
+      : resolveStageLlmModel("stage3")
+  );
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });

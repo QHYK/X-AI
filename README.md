@@ -19,6 +19,7 @@ X-AI-field 是一个 AI 驱动的信息筛选系统：持续收集可信信息�
 - X-field Daily Brief 页面
 - 09:00 Asia/Shanghai Cron
 - Human Review：Event / Long-form Ranking Review + Feedback
+- Manual Model Evaluation MVP（Stage 1–3，冻结输入，多模型离线比较）
 
 ## Daily Brief
 
@@ -125,11 +126,19 @@ npm run process:stage2                   # Stage 2: Merge Event and write runtim
 npm run process:stage3                   # Stage 3: Channel rank, exact dedup and persist
 npm run process:stage4                   # Stage 4: enrich Events and persist events
 
+# Human-triggered, isolated Model Evaluation (never runs as part of `daily`)
+npm run eval:stage1 -- --date=2026-08-28
+npm run eval:stage2 -- --date=2026-08-28
+npm run eval:stage3:event -- --date=2026-08-28
+npm run eval:stage3:digest -- --date=2026-08-28
+npm run eval:stage3:long-form -- --date=2026-08-28
+
 #### Tests and Diagnostics
 # npm run test:stage3-persistence          # Validate Stage 3 display_rank protection rules
 # npm run test:stage4-event-date           # Validate deterministic event_date 推导
 # npm run test:stage4-persistence          # 验证 Stage 4 跨日 append、同日 rebuild 和 rollback
 npm run test:content-completion-runtime  # 验证 Completion 统计与 Dashboard runtime 读取
+npm run test:model-evaluation             # 验证冻结输入、独立 model run 与 Production 隔离
 npm run test:openai                      # Structured-output provider smoke testsmoke test
 npm run test:deepseek
 npm run test:kimi
@@ -154,6 +163,20 @@ Daily 内部使用 `DAILY_PUBLISHED_SCOPE_START_AT` / `DAILY_PUBLISHED_SCOPE_END
 `runtime/content-completion/<timestamp>/run.json`，记录候选总量、实际选中量、
 成功/失败/skip、结束后的 remaining backlog、LIMIT 和 duration。
 Stage 4 persistence 会使用最近一次成功 runtime artifacts 识别同一 `event_date` scope 的上一轮输出，因此不要随意删除仍参与 rebuild/recovery 的 Stage 4 runtime 目录。
+
+### Model Evaluation
+
+Model Evaluation 是人工触发的离线实验工具，不属于 `npm run daily`、Cron 或 Production
+Workflow。它只评测 Stage 1、Stage 2、Stage 3 Event / Digest / Long-form：先把指定
+Daily 的实际 Stage 输入保存到 `evaluation_inputs`，再让每个模型的 `evaluation_runs`
+引用同一个冻结输入，并把已验证 Structured Output 写入 `evaluation_outputs`。
+
+默认运行当前 Evaluation 配置中的 DeepSeek 与 Kimi；可用
+`--provider=deepseek` 限定一个 Provider，`--model=...` 需要同时提供单一 `--provider`。
+配置读取现有 `DEEPSEEK_*` / `KIMI_*` 环境变量；可选 `EVALUATION_PROVIDERS=deepseek,kimi`
+控制默认 Provider 列表。Evaluation 不写 `processed_contents`、`events`、Review 或 Feedback，
+也不修改任何正式 Rank。`sql/evaluation/` 提供 Routing、Merge、Event Top 15 / Rank
+Difference 与运行性能的人工比较 SQL。
 
 ### Production
 

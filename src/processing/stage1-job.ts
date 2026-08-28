@@ -272,6 +272,47 @@ export async function loadPendingStage1Articles(
   return result.rows;
 }
 
+/**
+ * 为人工 Evaluation 加载指定 Daily scope 的全部原始文章。
+ * 它只复用 Stage 1 的输入行结构，不读取或修改 stage1_status，因此不会影响正式重跑队列。
+ */
+export async function loadStage1EvaluationArticles(
+  queryable: Queryable,
+  publishedAtScope: PublishedAtScope,
+): Promise<Stage1ArticleRow[]> {
+  const result = await queryable.query<Stage1ArticleQueryRow>(
+    `
+      select
+        ra.id,
+        ra.title,
+        ra.url,
+        ra.author,
+        ra.content_text as "contentText",
+        ra.published_at as "publishedAt",
+        ra.source_tags as "sourceTags",
+        s.name as "sourceName",
+        s.category as "sourceCategory",
+        s.source_type as "sourceType",
+        s.priority as "sourcePriority",
+        s.event_candidate as "eventCandidate",
+        s.source_digest_candidate as "sourceDigestCandidate",
+        s.availability as "sourceAvailability",
+        s.language as "sourceLanguage"
+      from raw_articles ra
+      join sources s on s.id = ra.source_id
+      where ra.published_at >= $1::timestamptz
+        and ra.published_at < $2::timestamptz
+      order by
+        case when s.priority = 'High' then 0 when s.priority = 'Medium' then 1 else 2 end,
+        ra.published_at desc,
+        ra.id
+    `,
+    [publishedAtScope.startAt, publishedAtScope.endAt],
+  );
+
+  return result.rows;
+}
+
 async function processStage1MicroBatch(
   pool: Pool,
   articles: Stage1ArticleRow[],
