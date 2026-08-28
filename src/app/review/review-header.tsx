@@ -25,7 +25,7 @@ export function ReviewHeader(props: {
       <nav className={styles.nav} aria-label="Review navigation">
         <a className={props.active === "events" ? styles.active : undefined} href={`./events?date=${props.dailyDate}`}>Event Ranking</a>
         <a className={props.active === "long-form" ? styles.active : undefined} href={`./long-form?date=${props.dailyDate}`}>Long-form Ranking</a>
-        <a href="./dashboard">Dashboard</a>
+        <a href="../dashboard">Dashboard</a>
       </nav>
     </>
   );
