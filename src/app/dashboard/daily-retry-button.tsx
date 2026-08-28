@@ -30,7 +30,7 @@ export function DailyRetryButton({ dailyDate, initiallyRunning }: DailyRetryButt
 
     setError(null);
     try {
-      const response = await fetch("/api/dashboard/daily/retry", { method: "POST" });
+      const response = await fetch("./api/dashboard/daily/retry", { method: "POST" });
       const result: { status?: string; message?: string } = await response.json();
       if (!response.ok || result.status === "failed") {
         throw new Error(result.message ?? "Failed to start Daily Workflow.");

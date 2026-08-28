@@ -6,6 +6,7 @@ import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
 import { processStage3 } from "../src/processing/stage3-job.js";
 
 const inheritedDailyScope = readPublishedAtScopeFromEnv(process.env);
+const inheritedDailyDate = process.env.DAILY_DATE;
 const inheritedStage2RunDir = process.env.STAGE3_STAGE2_RUN_DIR;
 const inheritedRunPointer = process.env.DAILY_STAGE_RUN_POINTER;
 
@@ -38,6 +39,7 @@ async function main() {
       ),
       publishedAtScope: inheritedDailyScope ?? readPublishedAtScopeFromEnv(process.env),
       eventTopN: parseOptionalPositiveInt(process.env.STAGE3_EVENT_TOP_N),
+      dailyDate: inheritedDailyDate,
     });
     await writeRunPointer(result.runDir);
 

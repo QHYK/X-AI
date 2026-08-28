@@ -161,7 +161,7 @@ Original Links
 + 证据质量；
 
 
-## Human Review [Planned]
+## Human Review v1
 
 ```
 AI Pipeline
@@ -172,12 +172,14 @@ Publish
 ↓
 Human Review
 ```
-人工操作不影响发布流程，人工可进行的操作包括：
-+ False Positive - 删除；
-+ Ranking Error - 调整排序；
-+ Classification Error - 修改分类；
-+ False Negative - 补充遗漏。
-不人工重新生产摘要。
+Human Review v1 已实现 Event 与 Long-form Ranking Review：
++ 调整 `display_rank`，永久保留 AI 原始 `ai_rank`；
++ Event 使用最新 Stage 3 Top 50 ranking snapshot，正式展示 cutoff 为 Top 15；
++ Long-form 使用指定 Daily 已参与排名的全部内容，正式展示 cutoff 为 Top 10；
++ 用户主动移动且跨越 cutoff 时分别记录 False Positive / False Negative；未跨越 cutoff 的主动调整记录 Ranking Error；
++ 被其他 Item 挤动的被动 rank 变化不代表人工判断，不写 Feedback。
+
+Review 在 Publish 后进行，不重新调用 LLM、Stage 4 或 Daily Workflow，也不重新生产摘要。
 
 
 ## Success Metrics

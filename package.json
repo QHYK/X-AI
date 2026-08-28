@@ -27,6 +27,7 @@
     "test:dashboard-daily-scope": "tsx scripts/test-dashboard-daily-scope.ts",
     "test:daily-workflow-retry": "tsx scripts/test-daily-workflow-retry.ts",
     "test:stage1-persistence": "tsx scripts/test-stage1-persistence.ts",
+    "test:ranking-review": "tsx scripts/test-ranking-review.ts",
     "test:content-completion-runtime": "tsx scripts/test-content-completion-runtime.ts",
     "test:openai": "tsx scripts/test-openai-call.ts openai",
     "test:deepseek": "tsx scripts/test-openai-call.ts deepseek",
@@ -34,6 +35,9 @@
     "recover:stage4-events:dry-run": "tsx scripts/dry-run-stage4-event-recovery.ts"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@mozilla/readability": "^0.6.0",
     "csv-parse": "^7.0.2",
     "drizzle-orm": "^0.45.2",

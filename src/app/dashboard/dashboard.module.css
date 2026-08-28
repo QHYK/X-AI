@@ -59,6 +59,24 @@
   white-space: nowrap;
 }
 
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.headerActions > a {
+  padding: 9px 11px;
+  border: 1px solid #cad2ce;
+  border-radius: 8px;
+  background: #fff;
+  color: #34433c;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
 .summaryGrid,
 .detailGrid,
 .stageGrid {

@@ -29,6 +29,13 @@
       "when": 1787589955849,
       "tag": "0003_clear_yellowjacket",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787915374221,
+      "tag": "0004_furry_typhoid_mary",
+      "breakpoints": true
     }
   ]
 }

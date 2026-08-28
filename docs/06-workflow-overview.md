@@ -73,7 +73,8 @@ flowchart LR
     EC --> S2["[AI] Stage 2<br/>事件合并"]
     S2 --> EG["[运行时] Event Groups"]
     EG --> ER["[AI] Stage 3<br/>Event Ranking"]
-    ER --> TOP["[代码] Top N Events"]
+    ER --> ERDB["[DB] Event Top 50<br/>Review Snapshot"]
+    ER --> TOP["[代码] Top 15 Events"]
 
     TOP --> XD["[代码] Cross-channel Exact Dedup"]
     D --> XD
@@ -101,7 +102,10 @@ flowchart LR
     CRON["[计划] 09:00 Cron"] --> ORCH["[代码] Daily Workflow Orchestrator"]
     ORCH -. "触发" .-> C
 
-    UI -. "未来" .-> FB["[计划] Human Review / Feedback"]
+    ERDB --> FB["[后台] Event Ranking Review"]
+    PDB --> LFR["[后台] Long-form Ranking Review"]
+    FB --> FDB["[DB] display_rank + feedback"]
+    LFR --> FDB
 ```
 
 Daily Orchestrator 在启动时按 Asia/Shanghai 09:00 boundary 固定一次
@@ -123,6 +127,9 @@ Stage 2  Event Candidates：判断哪些报道属于同一现实事件
 Stage 3  各 Channel：决定相对重要性 / 阅读价值
 Stage 4  Top Events：生成最终事件内容，必要时补充 Web Search
 ```
+
+Stage 3 Event Ranking 每次成功后将完整 Top 50（不足时保存全部）写成新的 UUID Review snapshot。Event 正式 cutoff 为 Top 15；Long-form 正式 cutoff 为 Top 10。
+Human Review 在 Stage 4 后进行，只更新 `display_rank` 并记录用户主动移动产生的 feedback.
 
 ## 数据最终去向
 

@@ -18,9 +18,7 @@ X-AI-field 是一个 AI 驱动的信息筛选系统：持续收集可信信息�
 - Internal Dashboard `/dashboard`
 - X-field Daily Brief 页面
 - 09:00 Asia/Shanghai Cron
-
-下一步：
-- 增加 Review / feedback workflow
+- Human Review：Event / Long-form Ranking Review + Feedback
 
 ## Daily Brief
 
@@ -64,14 +62,11 @@ Daily Brief API
 | Stage 3 | OpenAI |
 | Stage 4 | OpenAI |
 
-## Human Feedback
+## Human Review / Feedback
 
 支持人工：
-* 删除 False Positive
-* 补充 False Negative
-* 调整 Ranking
-* 修改 Classification
-
+* Event Ranking Review
+* Long-form Ranking Review
 人工反馈用于后续 Eval 和 Prompt 优化。
 
 ## Tech Stack
@@ -198,20 +193,22 @@ Inspiration 通过关联 Raw Article 归属；Event 只要有一条 scope 内的
 Daily，且只返回一次。retry / backfill 不改变 Daily membership，`published_at IS NULL` 的文章
 不属于任何 Daily；`created_at` 也不用于 Brief 日期归属。
 
-## Internal Dashboard
+## Internal Dashboard / Human Review
 
 启动 `npm run dev` 后访问：
 
 ```text
 http://localhost:3000/dashboard
+http://localhost:3000/review/events
+http://localhost:3000/review/long-form
 ```
 
 - 页面需要可用的 `DATABASE_URL`，默认展示最近 7 天的数据量与 Daily Workflow 运行情况。
-- 数据库是业务数据 Source of Truth；所有每日统计按 `raw_articles.published_at` 的
-  `Asia/Shanghai` 09:00 Daily boundary 计算。
+- 数据库是业务数据 Source of Truth；所有每日统计按 `raw_articles.published_at` 的 `Asia/Shanghai` 09:00 Daily boundary 计算。
 - `runtime/content-completion/` 补充每天最新一次 Completion success/selected、remaining backlog、duration 和 Date Details 计数。
 - `runtime/stage1~4/` 只补充运行指标，例如 LLM calls、retry、实际记录的 token、duration、Stage 2/3/4 的中间与结果数量。
 - 某个字段没有时显示 `N/A`，不会估算或写入新的 metrics 数据。
+- Dashboard 顶部提供 Event / Long-form Review 入口。Review 页面默认使用最近已结束的 09:00 Daily date，也可通过日期控件查看其他日期。
 
 ## Documentation
 

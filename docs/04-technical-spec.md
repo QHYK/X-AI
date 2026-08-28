@@ -25,6 +25,8 @@ processed_contents
     ├── Long-form
     └── Inspiration
 
+Stage 3 Event Ranking → event_review_items
+
 feedback
 ```
 
@@ -32,7 +34,8 @@ feedback
 - `raw_articles`：Collector 标准化后的原始内容
 - `processed_contents`：Stage 1 保留的内容；Ignore 不入库
 - `events`：Stage 4 生成的最终 Event，一个 Event 可以关联多篇 Event Candidate。
-- `feedback`：未来人工修正记录｜False Positive｜False Negative｜Ranking Error｜Classification Error
+- `event_review_items`：Stage 3 Event Top 50 的历史 Ranking Review snapshot。
+- `feedback`：人工 Ranking 修正记录｜False Positive｜False Negative｜Ranking Error
 
 ### 1.2 Processing Layer
 
@@ -73,7 +76,7 @@ Inspiration 不需要 AI 排序。
 
 #### Top N Selection
 由代码根据产品配置选择最终展示内容，不由 LLM 决定。
-- Events: Top 8–12
+- Events: Top 10
 - Source Digest: Top N by Category
 - Long-form: Top N
 
@@ -107,10 +110,7 @@ Today's Events + Source Digests contents + Long-form contents + Inspiration cont
 并按照 `display_rank` 返回
 
 后台人工操作包括：
-* 删除 / 恢复内容；
-* 修改分类；
-* 调整 `display_rank`；
-* 补充遗漏内容。
+* Review Event / Long-form Ranking；
 人工操作同时写入 `feedback`。
 
 ---
@@ -306,13 +306,32 @@ created_at, updated_at
 
 `external_context`：未发生真实 Web Search 时为 `NULL`；发生搜索时保存真实 provenance URLs 和简短 summary。
 
-### 3.5 `feedback`
+### 3.5 `event_review_items`
+
+保存 Stage 3 每次成功 Event Ranking 返回的完整 Top 50（不足 50 时保存全部）。
+每次运行创建新的 UUID `review_run_id` snapshot，历史 snapshot 保留；Review 默认读取指定
+`daily_date` 最新 snapshot。该表不是新的 Event Domain Model，不复制 Stage 4 完整内容。
+
+| Field                | Type        | Constraint / Notes                     |
+| -------------------- | ----------- | -------------------------------------- |
+| `id`                 | uuid        | Primary Key                            |
+| `review_run_id`      | uuid        | NOT NULL，标识一次 snapshot            |
+| `daily_date`         | date        | NOT NULL                               |
+| `event_temp_id`      | text        | NOT NULL，当前 Stage 3 run 内临时 ID   |
+| `event_hint`         | text        | NOT NULL                               |
+| `ai_rank`            | integer     | NOT NULL，人工不可覆盖                 |
+| `display_rank`       | integer     | NOT NULL，Review 当前排序              |
+| `member_content_ids` | uuid[]      | NOT NULL，关联 `processed_contents.id` |
+| `created_at`         | timestamptz | NOT NULL                               |
+| `updated_at`         | timestamptz | NOT NULL                               |
+
+### 3.6 `feedback`
 当前保留简单结构，结构未来根据实际 Feedback / Eval 需求再调整。
 
 | Field           | Type        | Constraint / Notes        |
 | --------------- | ----------- | ------------------------- |
 | `id`            | uuid        | Primary Key               |
-| `target_type`   | text        | event / processed_content |
+| `target_type`   | text        | event_review_item / processed_content |
 | `target_id`     | uuid        | NOT NULL                  |
 | `feedback_type` | text        | NOT NULL                  |
 | `before_value`  | jsonb       | nullable                  |
@@ -325,7 +344,6 @@ created_at, updated_at
 ranking_error
 false_positive
 false_negative
-classification_error
 ```
 
 人工修改 Ranking 时：
@@ -335,7 +353,7 @@ display_rank 更新
 feedback 写入修改记录
 ```
 
-### 3.6 Initial Indexes
+### 3.7 Initial Indexes
 
 MVP 只建立明确需要的索引：
 ```text
@@ -351,6 +369,11 @@ processed_contents(display_rank)
 
 events(event_date)
 events(display_rank)
+
+event_review_items(daily_date)
+event_review_items(review_run_id, event_temp_id) UNIQUE
+event_review_items(review_run_id, ai_rank) UNIQUE
+event_review_items(review_run_id, display_rank) UNIQUE
 ```
 
 Source Digest 查询后续如有性能需求，再增加：
@@ -558,6 +581,8 @@ Event Groups
   ↓
 Event Ranking
   ↓
+DB Event Top 50 Review Snapshot
+  ↓
 Code Top N
   ↓
 Cross-channel exact dedup → 排除已经被 Selected Events 覆盖的 exact duplicate
@@ -572,7 +597,7 @@ Digest Ranking by Category + Long-form Ranking
 - Exact dedup 仅处理确定的同一原文，使用 normalized URL，不做语义去重。
 - Digest / Long-form rank 写入 `processed_contents.ai_rank`。
 - `display_rank` 默认跟随 AI；若已人工修改则普通重跑不覆盖。
-- Event rank 保留到 Stage 4 创建最终 Event 时写入 `events`。
+- Event 完整 Top 50 rank 先写入新的 DB Review snapshot；Top 15 继续由 Stage 4 创建最终 Event 时写入 `events`。
 
 Stage 3 完成后：
 - Source Digest / Long-form:
@@ -580,7 +605,7 @@ Stage 3 完成后：
   首次排序时设置 `display_rank = ai_rank`。
 
 - Event Groups:
-  Ranking 作为当前 Workflow 的中间结果保留。
+  完整 Event Ranking（最多 50）创建新的 `event_review_items` snapshot。
   Stage 4 创建最终 Event 时，将对应 `ai_rank` / `display_rank`
   一并写入 `events`。
 
@@ -614,7 +639,35 @@ Stage 4 完成后：
 3. 保存最终 Event rank / display_rank
 不创建 `event_articles`。
 
-### 4.9 Failure Handling
+### 4.9 Human Review v1
+
+Human Review 位于 Publish 之后，不阻塞 Daily Workflow：
+
+```text
+AI Pipeline → Publish → Event / Long-form Ranking Review
+```
+
+- Event Review 默认读取指定 `daily_date` 最新 `event_review_items.review_run_id`；
+- Long-form Review 读取同一 `raw_articles.published_at` Daily scope 内所有 `ai_rank IS NOT NULL` 内容；
+- drag / Move to N 只修改前端 local state，`Save Changes` 才提交完整顺序；
+- Save 在单一 transaction 内校验 scope、完整 ID 集合、重复 ID 和连续 rank，更新全部受影响
+  `display_rank`，仅为 `touchedIds` 中最终 rank 改变的 Item 写 feedback；
+- Event cutoff 为 15，Long-form cutoff 为 10；跨入 cutoff 为 `false_negative`，跨出为
+  `false_positive`，未跨越为 `ranking_error`；
+- Human Review 不重新调用 LLM、Stage 4 或 Daily Workflow。
+
+Classification Editing 与 Model Evaluation 不在 v1 范围。
+
+内部 API：
+
+```text
+GET   /api/review/events?date=YYYY-MM-DD
+PATCH /api/review/events/ranking
+GET   /api/review/long-form?date=YYYY-MM-DD
+PATCH /api/review/long-form/ranking
+```
+
+### 4.10 Failure Handling
 只处理明确的常见失败，不建立复杂 Workflow Engine。
 
 + **Collector**: Source 独立失败, 记录错误, 重试该 Source, 不影响其他 Source Collection
@@ -623,7 +676,7 @@ Stage 4 完成后：
 + **Stage 3**: 只重跑失败的 Channel / Category
 + **Stage 4**: 重试当前任务
 
-### 4.10 Idempotency 幂等性
+### 4.11 Idempotency 幂等性
 
 Daily Workflow 必须可以安全重复执行。
 

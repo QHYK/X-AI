@@ -152,12 +152,11 @@ Long-form   → 全局排序：什么最值得投入阅读时间？
 
 ---
 
-## Feedback Loop — Planned
+## Feedback Loop — v1
 
 人工反馈Input & 用途：
-- False Positive / False Negative
-- Ranking Error
-- Classification Error
+- Event / Long-form Ranking Error(False Positive / False Negative)
+<!-- - Classification Error -->
 - Eval / Prompt refinement
 
 当前不是 Daily Workflow 的阻塞步骤。

@@ -126,6 +126,37 @@ export const processedContents = pgTable(
   ],
 );
 
+/** Stage 3 Event Ranking 的可审核 snapshot item；不复制最终 Event 内容。 */
+export const eventReviewItems = pgTable(
+  "event_review_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    reviewRunId: uuid("review_run_id").notNull(),
+    dailyDate: date("daily_date").notNull(),
+    eventTempId: text("event_temp_id").notNull(),
+    eventHint: text("event_hint").notNull(),
+    aiRank: integer("ai_rank").notNull(),
+    displayRank: integer("display_rank").notNull(),
+    memberContentIds: uuid("member_content_ids").array().notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    index("event_review_items_daily_date_idx").on(table.dailyDate),
+    uniqueIndex("event_review_items_run_temp_unique").on(
+      table.reviewRunId,
+      table.eventTempId,
+    ),
+    uniqueIndex("event_review_items_run_ai_rank_unique").on(
+      table.reviewRunId,
+      table.aiRank,
+    ),
+    uniqueIndex("event_review_items_run_display_rank_unique").on(
+      table.reviewRunId,
+      table.displayRank,
+    ),
+  ],
+);
+
 export const feedback = pgTable("feedback", {
   id: uuid("id").primaryKey().defaultRandom(),
   targetType: text("target_type").notNull(),
@@ -145,5 +176,7 @@ export type ProcessedContent = typeof processedContents.$inferSelect;
 export type NewProcessedContent = typeof processedContents.$inferInsert;
 export type Event = typeof events.$inferSelect;
 export type NewEvent = typeof events.$inferInsert;
+export type EventReviewItem = typeof eventReviewItems.$inferSelect;
+export type NewEventReviewItem = typeof eventReviewItems.$inferInsert;
 export type Feedback = typeof feedback.$inferSelect;
 export type NewFeedback = typeof feedback.$inferInsert;

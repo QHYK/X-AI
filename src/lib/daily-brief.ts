@@ -10,6 +10,10 @@ import {
   type DailyScope,
   type PublishedAtScope,
 } from "./daily-scope.js";
+import {
+  DEFAULT_EVENT_TOP_N,
+  LONG_FORM_DISPLAY_CUTOFF,
+} from "./ranking-config.js";
 
 export type DailyBriefOptions = {
   publishedAtScope?: PublishedAtScope;
@@ -224,7 +228,7 @@ async function loadEvents(
       where ${scopePredicate}
         and coalesce(display_rank, ai_rank) is not null
       order by coalesce(display_rank, ai_rank) asc, created_at asc, id asc
-      limit 10
+      limit ${DEFAULT_EVENT_TOP_N}
     `,
     scopeValues(range, publishedAtScope),
   );
@@ -354,7 +358,7 @@ async function loadLongFormItems(
         and coalesce(pc.display_rank, pc.ai_rank) is not null
         and ${publishedAtScopePredicate(publishedAtScope, "pc.created_at", "ra")}
       order by coalesce(pc.display_rank, pc.ai_rank) asc, pc.created_at asc, pc.id asc
-      limit 10
+      limit ${LONG_FORM_DISPLAY_CUTOFF}
     `,
     scopeValues(range, publishedAtScope),
   );

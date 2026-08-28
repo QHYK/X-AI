@@ -2,6 +2,7 @@
  * Stage 3 Workflow job：消费 Stage 2 runtime，完成 Event、Digest 与 Long-form 排名及去重。
  * 该阶段把可复现的输入/诊断写入 runtime，并在单个事务内持久化排名。
  */
+import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Pool, PoolClient } from "pg";
@@ -42,6 +43,12 @@ import { inferSciencePublication } from "./science-publication.js";
 import { resolveStageLlmModel } from "./llm-client.js";
 import { normalizeArticleUrl } from "./url-normalization.js";
 import type { PublishedAtScope } from "../lib/daily-scope.js";
+import { resolveDailyScope } from "../lib/daily-scope.js";
+import { EVENT_DISPLAY_CUTOFF } from "../lib/ranking-config.js";
+import {
+  buildEventReviewSnapshotItems,
+  persistEventReviewSnapshot,
+} from "./event-review-persistence.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
 
@@ -122,6 +129,7 @@ export type Stage3JobOptions = {
   eventTopN?: number;
   model?: string;
   rootDir?: string;
+  dailyDate?: string;
 };
 
 export type Stage3JobResult = {
@@ -139,10 +147,10 @@ export type Stage3JobResult = {
   retryCount: number;
   llmDurationMs: number;
   persistence: Stage3PersistenceResult | null;
+  eventReviewRunId: string | null;
 };
 
 const DEFAULT_LOOKBACK_HOURS = 24;
-const DEFAULT_EVENT_TOP_N = 15;
 const CATEGORY_ORDER = [
   "Company",
   "Finance & Economy",
@@ -171,8 +179,9 @@ export async function processStage3(
   const digestDir = join(runDir, "digest");
   const longFormDir = join(runDir, "long-form");
   const model = resolveStageLlmModel("stage3", options.model);
-  const eventTopN = options.eventTopN ?? DEFAULT_EVENT_TOP_N;
+  const eventTopN = options.eventTopN ?? EVENT_DISPLAY_CUTOFF;
   const publishedWithinHours = options.publishedWithinHours ?? DEFAULT_LOOKBACK_HOURS;
+  const dailyDate = options.dailyDate ?? resolveDailyScope(undefined, startedAt).dailyDate;
 
   await mkdir(eventsDir, { recursive: true });
   await mkdir(dedupDir, { recursive: true });
@@ -191,6 +200,7 @@ export async function processStage3(
   let retryCount = 0;
   let llmDurationMs = 0;
   let persistence: Stage3PersistenceResult | null = null;
+  let eventReviewRunId: string | null = null;
   let persistenceStatus: "not_started" | "success" | "failed" = "not_started";
   let error: string | null = null;
 
@@ -227,6 +237,18 @@ export async function processStage3(
     llmDurationMs += eventRanking.durationMs;
     await writeJson(join(eventsDir, "ranking-output.json"), eventRanking.output);
     await writeJson(join(eventsDir, "ranking-diagnostics.json"), eventRanking.diagnostics);
+
+    eventReviewRunId = randomUUID();
+    await persistEventReviewSnapshot(
+      pool,
+      buildEventReviewSnapshotItems({
+        reviewRunId: eventReviewRunId,
+        dailyDate,
+        rankingOutput: eventRanking.output,
+        eventInput: eventBundle.input,
+        eventIdMap: eventBundle.idMap,
+      }),
+    );
 
     const selectedEvents = selectTopEvents({
       rankingOutput: eventRanking.output,
@@ -342,6 +364,8 @@ export async function processStage3(
       startedAt,
       finishedAt: new Date(),
       model,
+      dailyDate,
+      eventReviewRunId,
       status: "success",
       publishedWithinHours,
       eventGroupCount,
@@ -374,6 +398,7 @@ export async function processStage3(
       retryCount,
       llmDurationMs,
       persistence,
+      eventReviewRunId,
     };
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
@@ -383,6 +408,8 @@ export async function processStage3(
       startedAt,
       finishedAt: new Date(),
       model,
+      dailyDate,
+      eventReviewRunId,
       status: "failed",
       publishedWithinHours,
       eventGroupCount,
@@ -415,6 +442,7 @@ export async function processStage3(
       retryCount,
       llmDurationMs,
       persistence,
+      eventReviewRunId,
     };
   }
 }
@@ -1230,6 +1258,8 @@ async function writeRunJson(
     startedAt: Date;
     finishedAt: Date;
     model: string;
+    dailyDate: string;
+    eventReviewRunId: string | null;
     status: "success" | "failed";
     publishedWithinHours: number;
     eventGroupCount: number;
@@ -1255,6 +1285,8 @@ async function writeRunJson(
     started_at: value.startedAt.toISOString(),
     finished_at: value.finishedAt.toISOString(),
     model: value.model,
+    daily_date: value.dailyDate,
+    event_review_run_id: value.eventReviewRunId,
     prompt_versions: {
       event: STAGE3_EVENT_RANKING_PROMPT_VERSION,
       digest: STAGE3_DIGEST_RANKING_PROMPT_VERSION,

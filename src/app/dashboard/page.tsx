@@ -50,7 +50,11 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             最近 7 个已完成 Daily scope · 09:00 boundary（{data.timezone}）
           </p>
         </div>
-        <div className={styles.today}>Latest Daily · {data.latestDailyDate}</div>
+        <div className={styles.headerActions}>
+          <a href={`./review/events?date=${data.latestDailyDate}`}>Event Review</a>
+          <a href={`./review/long-form?date=${data.latestDailyDate}`}>Long-form Review</a>
+          <div className={styles.today}>Latest Daily · {data.latestDailyDate}</div>
+        </div>
       </header>
 
       <section className={styles.summaryGrid} aria-label="Database totals">
