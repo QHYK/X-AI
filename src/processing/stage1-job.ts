@@ -313,6 +313,43 @@ export async function loadStage1EvaluationArticles(
   return result.rows;
 }
 
+/**
+ * 按已记录的原始文章顺序重建人工 Evaluation 的 Stage 1 输入。
+ * Evaluation 只保存 source id reference；这里继续复用正式 Stage 1 的字段映射，避免两套 builder 漂移。
+ */
+export async function loadStage1EvaluationArticlesByIds(
+  queryable: Queryable,
+  rawArticleIds: string[],
+): Promise<Stage1ArticleRow[]> {
+  if (rawArticleIds.length === 0) return [];
+  const result = await queryable.query<Stage1ArticleQueryRow>(
+    `
+      select
+        ra.id,
+        ra.title,
+        ra.url,
+        ra.author,
+        ra.content_text as "contentText",
+        ra.published_at as "publishedAt",
+        ra.source_tags as "sourceTags",
+        s.name as "sourceName",
+        s.category as "sourceCategory",
+        s.source_type as "sourceType",
+        s.priority as "sourcePriority",
+        s.event_candidate as "eventCandidate",
+        s.source_digest_candidate as "sourceDigestCandidate",
+        s.availability as "sourceAvailability",
+        s.language as "sourceLanguage"
+      from raw_articles ra
+      join sources s on s.id = ra.source_id
+      where ra.id = any($1::uuid[])
+      order by array_position($1::uuid[], ra.id)
+    `,
+    [rawArticleIds],
+  );
+  return result.rows;
+}
+
 async function processStage1MicroBatch(
   pool: Pool,
   articles: Stage1ArticleRow[],

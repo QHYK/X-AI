@@ -5,8 +5,9 @@ export function ReviewHeader(props: {
   title: string;
   description: string;
   dailyDate: string;
-  action: string;
-  active: "events" | "long-form";
+  action?: string;
+  active: "events" | "long-form" | "models";
+  showDateControl?: boolean;
 }) {
   return (
     <>
@@ -16,15 +17,16 @@ export function ReviewHeader(props: {
           <h1>{props.title}</h1>
           <p>{props.description}</p>
         </div>
-        <form action={props.action} className={styles.dateForm}>
+        {props.showDateControl !== false ? <form action={props.action} className={styles.dateForm}>
           <label htmlFor="review-date">Daily date</label>
           <input id="review-date" name="date" type="date" defaultValue={props.dailyDate} />
           <button type="submit">View</button>
-        </form>
+        </form> : null}
       </header>
       <nav className={styles.nav} aria-label="Review navigation">
         <a className={props.active === "events" ? styles.active : undefined} href={`./events?date=${props.dailyDate}`}>Event Ranking</a>
         <a className={props.active === "long-form" ? styles.active : undefined} href={`./long-form?date=${props.dailyDate}`}>Long-form Ranking</a>
+        <a className={props.active === "models" ? styles.active : undefined} href={`./models?date=${props.dailyDate}`}>Model Evaluation</a>
         <a href="../dashboard">Dashboard</a>
       </nav>
     </>

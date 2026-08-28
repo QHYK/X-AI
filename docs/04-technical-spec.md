@@ -374,9 +374,9 @@ evaluation_outputs
   id, evaluation_run_id, item_key, output_json, created_at
 ```
 
-- `evaluation_inputs.input_json` 是一次评测开始时构造的完整 Frozen Stage Input；同一次
-  Evaluation 的所有 Model Run 必须引用同一个 input ID。`input_hash` 是稳定 JSON + SHA-256，
-  用于人工核对输入一致性，不作为复杂内容寻址或缓存机制。
+- Stage 2/3 的 `evaluation_inputs.input_json` 是完整 Frozen Stage Input；Stage 1 只保存
+  `raw_articles` ID 列表与既有 micro-batch 配置，并在执行/展示时确定性重建。
+  同一次 Evaluation 的所有 Model Run 必须引用同一个 input ID。`input_hash` 是稳定 JSON + SHA-256，用于人工核对输入一致性，不作为复杂内容寻址或缓存机制。
 - `stage` 当前仅支持 `stage1`、`stage2`、`stage3_event`、`stage3_digest`、
   `stage3_long_form`。Digest 的每个 Category output 使用 `item_key = category`。
 - Run status 为 `running` / `success` / `failed`；一个模型失败不影响其他 Run。Provider 未提供
@@ -387,6 +387,9 @@ evaluation_outputs
 Evaluation 只允许 CLI 等人工入口触发，不加入 `npm run daily`、Cron、Scheduler 或正式
 Orchestrator。它绝不写 `processed_contents`、`events`、`event_review_items`、`feedback`、
 `ai_rank` 或 `display_rank`；Stage 4 不参加多模型 Evaluation。
+Dashboard API 会先创建持久化的 `running` runs，再用固定 detached CLI 执行；读取页面 polling
+`evaluation_runs` 的状态。当前运行时是长期运行的 Node server，独立子进程不依赖原 HTTP 请求；
+同一 Daily + Stage 已有 running run 时拒绝重复触发。
 
 ### 3.8 Initial Indexes
 
@@ -724,14 +727,16 @@ PATCH /api/review/long-form/ranking
 
 ### 4.10.1 Manual Model Evaluation
 
-人工执行 `npm run eval:stage1`、`eval:stage2`、`eval:stage3:event`、
-`eval:stage3:digest` 或 `eval:stage3:long-form` 时，Evaluation Service 先从 Production DB
-或对应成功 Stage 3 runtime 构造一次 Frozen Input，随后才创建多个 Model Run。Stage 1 保留
-当前 micro-batch 输入边界；Stage 2 使用该 Daily 的已选 Event Candidates；Stage 3 使用指定
-日期最近一次成功正式 Stage 3 runtime 中已经去重后的 Event、Digest 分类和 Long-form 输入。
-
-所有模型读取同一 `evaluation_input_id`，但每个 Run 独立保存 success / failed、耗时、可用 token
-和输出。Evaluation 不启动或重跑任何正式 Job，不进入 Daily lineage，也不创建新的 runtime artifact。
+人工执行 `npm run eval:stage1`、`eval:stage2`、`eval:stage3:event`、`eval:stage3:digest` 或 `eval:stage3:long-form` 时，
+Evaluation Service 先从 Production DB 或对应成功 Stage 3 runtime 构造一次 Frozen Input，随后才创建多个 Model Run。
+Stage 1 保留当前 micro-batch 输入边界；
+Stage 2 使用该 Daily 的已选 Event Candidates；
+Stage 3 使用指定日期最近一次成功正式 Stage 3 runtime 中已经去重后的 Event、Digest 分类和 Long-form 输入。
+所有模型读取同一 `evaluation_input_id`，但每个 Run 独立保存 success / failed、耗时、可用 token 和输出。
+Evaluation 不启动或重跑任何正式 Job，不进入 Daily lineage，也不创建新的 runtime artifact。
+`review/models` 通过薄 API 读取或手动触发这项 service；读取时固定选择最近一次
+`evaluation_inputs`，只取该 input 下每个模型的最新 Run，禁止跨 input 比较。该 UI 为 Observation
+工具，不修改任何 Production 表、Daily 结果或人工 Feedback；Stage 4 不参与。
 
 ### 4.11 Idempotency 幂等性
 

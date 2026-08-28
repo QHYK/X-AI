@@ -151,6 +151,14 @@ Stage 1 使用相同 Raw Articles，Stage 2 使用指定日期正式 Stage 1 的
 Event / Digest / Long-form 分别读取同一次正式 Stage 3 run 的对应输入。Evaluation 只写独立表，
 不会修改正式内容、Event、Review、Feedback 或 Rank；Stage 4 不参与该 MVP。
 
+Dashboard 手动触发时先持久化同一比较 identity 下的 `evaluation_runs.status = running`，再通过
+detached Evaluation CLI 执行。
+
+`review/models` 提供相同旁路的人工入口。页面加载只读取已有 Evaluation；只有点击 Run Evaluation
+才会调用 Evaluation Service。页面始终将同一 `evaluation_input_id` 下的最新模型 Runs 进行比较，
+因此不会把不同时间冻结的输入拼接成一次模型差异。它是 Observation / Comparison Tool，不会把结果
+应用回 Production。
+
 ## 数据最终去向
 
 ```text

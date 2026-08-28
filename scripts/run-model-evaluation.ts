@@ -9,6 +9,7 @@ import { Pool } from "pg";
 import { resolveEvaluationModels } from "../src/lib/evaluation-model-config.js";
 import {
   isEvaluationStage,
+  resumeEvaluation,
   runEvaluation,
   type EvaluationStage,
 } from "../src/lib/model-evaluation.js";
@@ -28,12 +29,14 @@ async function main() {
     ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined,
   });
   try {
-    const result = await runEvaluation({
-      pool,
-      date: options.date,
-      stage: options.stage,
-      models: resolveEvaluationModels({ provider: options.provider, model: options.model }),
-    });
+    const result = options.inputId
+      ? await resumeEvaluation({ pool, evaluationInputId: options.inputId })
+      : await runEvaluation({
+        pool,
+        date: options.date as string,
+        stage: options.stage,
+        models: resolveEvaluationModels({ provider: options.provider, model: options.model }),
+      });
     console.log(JSON.stringify(result, null, 2));
     if (result.runs.some((run) => run.status === "failed")) {
       process.exitCode = 1;
@@ -44,10 +47,11 @@ async function main() {
 }
 
 export function parseEvaluationCliArguments(args: string[]): {
-  date: string;
+  date?: string;
   stage: EvaluationStage;
   provider?: string;
   model?: string;
+  inputId?: string;
 } {
   const values = new Map<string, string>();
   for (const argument of args) {
@@ -56,7 +60,7 @@ export function parseEvaluationCliArguments(args: string[]): {
       throw new Error(`Unsupported argument "${argument}". Use --date=YYYY-MM-DD and optional --provider / --model.`);
     }
     const [, key, value] = match;
-    if (!key || !value || !["date", "stage", "provider", "model"].includes(key)) {
+    if (!key || !value || !["date", "stage", "provider", "model", "input-id"].includes(key)) {
       throw new Error(`Unsupported argument "${argument}".`);
     }
     if (values.has(key)) {
@@ -66,8 +70,9 @@ export function parseEvaluationCliArguments(args: string[]): {
   }
   const date = values.get("date");
   const stage = values.get("stage");
-  if (!date || !stage) {
-    throw new Error("--date=YYYY-MM-DD and --stage are required.");
+  const inputId = values.get("input-id");
+  if (!stage || (!date && !inputId)) {
+    throw new Error("--stage=... and either --date=YYYY-MM-DD or --input-id=... are required.");
   }
   if (!isEvaluationStage(stage)) {
     throw new Error(`Unsupported Evaluation stage "${stage}".`);
@@ -77,6 +82,7 @@ export function parseEvaluationCliArguments(args: string[]): {
     stage,
     provider: values.get("provider"),
     model: values.get("model"),
+    inputId,
   };
 }
 

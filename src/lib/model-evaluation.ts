@@ -17,7 +17,9 @@ import { buildStage1BatchInput, type Stage1BatchInput } from "../processing/stag
 import {
   createStage1MicroBatches,
   loadStage1EvaluationArticles,
+  loadStage1EvaluationArticlesByIds,
   resolveStage1BatchConfig,
+  type Stage1BatchConfig,
 } from "../processing/stage1-job.js";
 import { runStage1BatchLlmForInput } from "../processing/stage1-llm.js";
 import { prepareStage2Input, loadStage2EventCandidates, type Stage2IdMap, type Stage2Input } from "../processing/stage2-candidates.js";
@@ -51,6 +53,13 @@ export type EvaluationInputRecord = {
 
 export type EvaluationRunRecord = { id: string };
 
+type StoredEvaluationRun = {
+  id: string;
+  provider: string;
+  model: string;
+  startedAt: Date | string;
+};
+
 export type EvaluationStorage = {
   createInput(input: Omit<EvaluationInputRecord, "id">): Promise<EvaluationInputRecord>;
   createRun(input: {
@@ -69,6 +78,8 @@ export type EvaluationStorage = {
   }): Promise<void>;
   failRun(input: { id: string; completedAt: string; durationMs: number; error: string }): Promise<void>;
   createOutputs(outputs: Array<{ evaluationRunId: string; itemKey: string | null; outputJson: unknown }>): Promise<void>;
+  loadInput?(id: string): Promise<EvaluationInputRecord | null>;
+  loadRunningRuns?(evaluationInputId: string): Promise<StoredEvaluationRun[]>;
 };
 
 export type EvaluationRunSummary = {
@@ -106,6 +117,13 @@ type Stage1FrozenInput = {
   }>;
 };
 
+/** Stage 1 只记录不可变 Raw Article 的 identity 与现有 batch 配置，不复制正文。 */
+export type Stage1EvaluationInputReference = {
+  source: "raw_articles";
+  raw_article_ids: string[];
+  batch_config: Stage1BatchConfig;
+};
+
 type Stage2FrozenInput = {
   input: Stage2Input;
   id_map: Stage2IdMap;
@@ -141,11 +159,30 @@ export type RunEvaluationOptions = {
   }) => Promise<EvaluationExecution>;
 };
 
+export type PreparedEvaluation = {
+  evaluationInput: EvaluationInputRecord;
+  dailyDate: string;
+  stage: EvaluationStage;
+  models: Array<{ model: EvaluationModel; run: EvaluationRunRecord; startedAt: string }>;
+  storage: EvaluationStorage;
+  pool: Pool;
+  execute?: RunEvaluationOptions["execute"];
+};
+
 /**
  * 运行一次人工触发的 Stage-isolated Evaluation。
  * 先固定输入、再逐个模型执行；单个模型失败只更新其 own run，不会回滚其他模型结果。
  */
 export async function runEvaluation(options: RunEvaluationOptions): Promise<EvaluationSummary> {
+  const prepared = await prepareEvaluation(options);
+  return executePreparedEvaluation(prepared);
+}
+
+/**
+ * 在 LLM 调用前持久化比较 identity 与全部 running run。
+ * HTTP 触发器可在此安全返回，再由 detached CLI 继续执行同一批已创建的 run。
+ */
+export async function prepareEvaluation(options: RunEvaluationOptions): Promise<PreparedEvaluation> {
   if (options.models.length === 0) {
     throw new Error("Model Evaluation requires at least one model.");
   }
@@ -165,9 +202,7 @@ export async function runEvaluation(options: RunEvaluationOptions): Promise<Eval
     inputJson: frozenInput,
     inputHash,
   });
-  const execute = options.execute ?? executeFrozenEvaluation;
-  const runs: EvaluationRunSummary[] = [];
-
+  const models: PreparedEvaluation["models"] = [];
   for (const model of options.models) {
     const startedAt = new Date();
     const run = await storage.createRun({
@@ -177,20 +212,47 @@ export async function runEvaluation(options: RunEvaluationOptions): Promise<Eval
       promptVersion: promptVersionForEvaluationStage(options.stage),
       startedAt: startedAt.toISOString(),
     });
+    models.push({ model, run, startedAt: startedAt.toISOString() });
+  }
+
+  return {
+    evaluationInput,
+    dailyDate: scope.dailyDate,
+    stage: options.stage,
+    models,
+    storage,
+    pool: options.pool,
+    execute: options.execute,
+  };
+}
+
+/** 执行已持久化的 running runs；每个模型独立结束，失败不会回滚其它模型的输出。 */
+export async function executePreparedEvaluation(prepared: PreparedEvaluation): Promise<EvaluationSummary> {
+  const runs: EvaluationRunSummary[] = [];
+  let frozenInput: unknown;
+  try {
+    frozenInput = await resolveExecutionInput(prepared.pool, prepared.stage, prepared.evaluationInput.inputJson);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await failPreparedEvaluation(prepared.storage, prepared.models, message);
+    return evaluationSummary(prepared, prepared.models.map(({ model, run }) => ({
+      provider: model.provider,
+      model: model.model,
+      runId: run.id,
+      status: "failed" as const,
+      error: message,
+    })));
+  }
+  const execute = prepared.execute ?? executeFrozenEvaluation;
+  for (const { model, run, startedAt } of prepared.models) {
     try {
-      const execution = await execute({
-        stage: options.stage,
-        frozenInput,
-        model,
-      });
+      const execution = await execute({ stage: prepared.stage, frozenInput, model });
       const completedAt = new Date();
-      await storage.createOutputs(
-        execution.outputs.map((output) => ({ ...output, evaluationRunId: run.id })),
-      );
-      await storage.completeRun({
+      await prepared.storage.createOutputs(execution.outputs.map((output) => ({ ...output, evaluationRunId: run.id })));
+      await prepared.storage.completeRun({
         id: run.id,
         completedAt: completedAt.toISOString(),
-        durationMs: completedAt.getTime() - startedAt.getTime(),
+        durationMs: durationSince(startedAt, completedAt),
         inputTokens: execution.inputTokens,
         outputTokens: execution.outputTokens,
       });
@@ -198,21 +260,53 @@ export async function runEvaluation(options: RunEvaluationOptions): Promise<Eval
     } catch (error) {
       const completedAt = new Date();
       const message = error instanceof Error ? error.message : String(error);
-      await storage.failRun({
-        id: run.id,
-        completedAt: completedAt.toISOString(),
-        durationMs: completedAt.getTime() - startedAt.getTime(),
-        error: message,
-      });
+      await prepared.storage.failRun({ id: run.id, completedAt: completedAt.toISOString(), durationMs: durationSince(startedAt, completedAt), error: message });
       runs.push({ provider: model.provider, model: model.model, runId: run.id, status: "failed", error: message });
     }
   }
+  return evaluationSummary(prepared, runs);
+}
+
+/**
+ * Detached CLI 从数据库恢复尚未完成的模型 run。
+ * Stage 2/3 直接读取 Frozen Input；Stage 1 则由轻量 Raw Article reference 重新构造相同 batch。
+ */
+export async function resumeEvaluation(input: {
+  pool: Pool;
+  evaluationInputId: string;
+  storage?: EvaluationStorage;
+  execute?: RunEvaluationOptions["execute"];
+}): Promise<EvaluationSummary> {
+  const storage = input.storage ?? createPostgresEvaluationStorage(input.pool);
+  if (!storage.loadInput || !storage.loadRunningRuns) {
+    throw new Error("Evaluation storage cannot resume persisted runs.");
+  }
+  const evaluationInput = await storage.loadInput(input.evaluationInputId);
+  if (!evaluationInput) throw new Error(`Evaluation input ${input.evaluationInputId} was not found.`);
+  const pendingRuns = await storage.loadRunningRuns(evaluationInput.id);
+  const prepared: PreparedEvaluation = {
+    evaluationInput,
+    dailyDate: evaluationInput.dailyDate,
+    stage: evaluationInput.stage,
+    models: pendingRuns.map((run) => ({
+      model: { provider: run.provider as EvaluationModel["provider"], model: run.model },
+      run: { id: run.id },
+      startedAt: toIso(run.startedAt),
+    })),
+    storage,
+    pool: input.pool,
+    execute: input.execute,
+  };
+  return executePreparedEvaluation(prepared);
+}
+
+function evaluationSummary(prepared: PreparedEvaluation, runs: EvaluationRunSummary[]): EvaluationSummary {
 
   return {
-    evaluationInputId: evaluationInput.id,
-    inputHash,
-    dailyDate: scope.dailyDate,
-    stage: options.stage,
+    evaluationInputId: prepared.evaluationInput.id,
+    inputHash: prepared.evaluationInput.inputHash,
+    dailyDate: prepared.dailyDate,
+    stage: prepared.stage,
     runs,
   };
 }
@@ -252,14 +346,11 @@ export async function buildFrozenEvaluationInput(input: {
   switch (input.stage) {
     case "stage1": {
       const articles = await loadStage1EvaluationArticles(input.pool, scope);
-      const batches = createStage1MicroBatches(articles, resolveStage1BatchConfig());
       return {
-        batches: batches.map((batch, index) => ({
-          item_key: `batch-${String(index + 1).padStart(3, "0")}`,
-          raw_article_ids: batch.map((article) => article.id),
-          input: buildStage1BatchInput(batch),
-        })),
-      } satisfies Stage1FrozenInput;
+        source: "raw_articles",
+        raw_article_ids: articles.map((article) => article.id),
+        batch_config: resolveStage1BatchConfig(),
+      } satisfies Stage1EvaluationInputReference;
     }
     case "stage2": {
       const candidates = await loadStage2EventCandidates(input.pool, { publishedAtScope: scope });
@@ -321,7 +412,90 @@ export function createPostgresEvaluationStorage(pool: Pool): EvaluationStorage {
         );
       }
     },
+    async loadInput(id) {
+      const result = await pool.query<EvaluationInputRecord>(
+        `select id, daily_date::text as "dailyDate", stage, input_json as "inputJson", input_hash as "inputHash"
+           from evaluation_inputs
+          where id = $1`,
+        [id],
+      );
+      return result.rows[0] ?? null;
+    },
+    async loadRunningRuns(evaluationInputId) {
+      const result = await pool.query<StoredEvaluationRun>(
+        `select id, provider, model, started_at as "startedAt"
+           from evaluation_runs
+          where evaluation_input_id = $1 and status = 'running'
+          order by created_at asc, id asc`,
+        [evaluationInputId],
+      );
+      return result.rows;
+    },
   };
+}
+
+/** 将 Stage 1 的轻量 Raw Article reference 重建为正式 Stage 1 相同的 micro-batch 输入。 */
+export async function reconstructStage1EvaluationInput(
+  pool: Pick<Pool, "query">,
+  reference: Stage1EvaluationInputReference,
+): Promise<Stage1FrozenInput> {
+  const articles = await loadStage1EvaluationArticlesByIds(pool, reference.raw_article_ids);
+  if (articles.length !== reference.raw_article_ids.length) {
+    throw new Error("One or more Raw Articles for this Stage 1 Evaluation are no longer available.");
+  }
+  const batches = createStage1MicroBatches(articles, reference.batch_config);
+  return {
+    batches: batches.map((batch, index) => ({
+      item_key: `batch-${String(index + 1).padStart(3, "0")}`,
+      raw_article_ids: batch.map((article) => article.id),
+      input: buildStage1BatchInput(batch),
+    })),
+  };
+}
+
+async function resolveExecutionInput(pool: Pick<Pool, "query">, stage: EvaluationStage, inputJson: unknown): Promise<unknown> {
+  if (stage === "stage1" && isStage1EvaluationInputReference(inputJson)) {
+    return reconstructStage1EvaluationInput(pool, inputJson);
+  }
+  return inputJson;
+}
+
+export function isStage1EvaluationInputReference(value: unknown): value is Stage1EvaluationInputReference {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const input = value as Record<string, unknown>;
+  const config = input.batch_config;
+  return input.source === "raw_articles"
+    && Array.isArray(input.raw_article_ids)
+    && input.raw_article_ids.every((id) => typeof id === "string")
+    && Boolean(config)
+    && typeof config === "object"
+    && typeof (config as Stage1BatchConfig).batchSize === "number"
+    && typeof (config as Stage1BatchConfig).batchMaxContentChars === "number"
+    && typeof (config as Stage1BatchConfig).batchMaxTotalChars === "number";
+}
+
+/** 在 detached process 无法启动时，将本次已经持久化的 running runs 终结为 failed。 */
+export async function failPreparedEvaluation(
+  storage: EvaluationStorage,
+  runs: PreparedEvaluation["models"],
+  error: string,
+) {
+  const completedAt = new Date();
+  await Promise.all(runs.map(({ run, startedAt }) => storage.failRun({
+    id: run.id,
+    completedAt: completedAt.toISOString(),
+    durationMs: durationSince(startedAt, completedAt),
+    error,
+  })));
+}
+
+function durationSince(startedAt: string, completedAt: Date): number {
+  const started = Date.parse(startedAt);
+  return Number.isNaN(started) ? 0 : Math.max(0, completedAt.getTime() - started);
+}
+
+function toIso(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : value;
 }
 
 async function executeFrozenEvaluation(input: {

@@ -156,20 +156,19 @@ STAGE1_PUBLISHED_WITHIN_HOURS=24 npm run process:stage1
 STAGE3_EVENT_TOP_N=10 npm run process:stage3
 STAGE4_CONCURRENCY=3 npm run process:stage4
 ```
-Daily 内部使用 `DAILY_PUBLISHED_SCOPE_START_AT` / `DAILY_PUBLISHED_SCOPE_END_AT`
-传递固定 scope；旧 `DAILY_SCOPE_START_AT` / `DAILY_SCOPE_END_AT` 仅作为部署兼容 alias。
+Daily 内部使用 `DAILY_PUBLISHED_SCOPE_START_AT` / `DAILY_PUBLISHED_SCOPE_END_AT` 传递固定 scope；
+旧 `DAILY_SCOPE_START_AT` / `DAILY_SCOPE_END_AT` 仅作为部署兼容 alias。
 `runtime/` 保存运行时 input/output/debug artifacts，并被 Git 忽略。
-每次 `npm run complete:content` 会写入
-`runtime/content-completion/<timestamp>/run.json`，记录候选总量、实际选中量、
-成功/失败/skip、结束后的 remaining backlog、LIMIT 和 duration。
+每次 `npm run complete:content` 会写入 `runtime/content-completion/<timestamp>/run.json`，记录候选总量、实际选中量、成功/失败/skip、结束后的 remaining backlog、LIMIT 和 duration。
 Stage 4 persistence 会使用最近一次成功 runtime artifacts 识别同一 `event_date` scope 的上一轮输出，因此不要随意删除仍参与 rebuild/recovery 的 Stage 4 runtime 目录。
 
 ### Model Evaluation
 
 Model Evaluation 是人工触发的离线实验工具，不属于 `npm run daily`、Cron 或 Production
 Workflow。它只评测 Stage 1、Stage 2、Stage 3 Event / Digest / Long-form：先把指定
-Daily 的实际 Stage 输入保存到 `evaluation_inputs`，再让每个模型的 `evaluation_runs`
-引用同一个冻结输入，并把已验证 Structured Output 写入 `evaluation_outputs`。
+Stage 2/3 的实际 Stage 输入保存为 `evaluation_inputs` Frozen Input；Stage 1 只保存不可变
+Raw Article ID 与 batch 配置，并在执行/查看时用同一 Stage 1 builder 重建输入。每个模型的
+`evaluation_runs` 引用同一个比较 identity，并把已验证 Structured Output 写入 `evaluation_outputs`。
 
 默认运行当前 Evaluation 配置中的 DeepSeek 与 Kimi；可用
 `--provider=deepseek` 限定一个 Provider，`--model=...` 需要同时提供单一 `--provider`。
@@ -177,6 +176,14 @@ Daily 的实际 Stage 输入保存到 `evaluation_inputs`，再让每个模型�
 控制默认 Provider 列表。Evaluation 不写 `processed_contents`、`events`、Review 或 Feedback，
 也不修改任何正式 Rank。`sql/evaluation/` 提供 Routing、Merge、Event Top 15 / Rank
 Difference 与运行性能的人工比较 SQL。
+
+内部观察页面位于 `review/models`：人工选择 Daily、Stage 和当前启用的模型后，页面才会调用
+Evaluation Service。它只比较同一个 Frozen Input 下各模型的最新 Run，展示 Stage 1 routing/category
+分歧、Stage 2 Event Groups，以及 Stage 3 排名差异；不会自动运行、不会参与 Daily，也不会修改
+任何 Production 结果。读取接口为 `api/evaluation?date=...&stage=...`，手动触发接口为
+`api/evaluation/run`。
+Run API 会先持久化 `running` runs，再以 detached CLI 在当前长期运行的 Node server 上继续执行，
+因此浏览器刷新或关闭不会中断评测；页面会 polling 持久化状态直到各模型结束。
 
 ### Production
 
