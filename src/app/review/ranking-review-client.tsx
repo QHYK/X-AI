@@ -260,8 +260,8 @@ function EventContent({ item, rank, cutoff }: { item: EventReviewItem; rank: num
         <>
           <h2>{finalEvent.titleZh}</h2>
           <p className={styles.summary}>{finalEvent.summaryZh}</p>
-          <TagLine label="Tags" values={[...finalEvent.tagsZh, ...finalEvent.tags]} />
-          <TagLine label="Entities" values={[...finalEvent.entitiesZh, ...finalEvent.entities]} />
+          <TagLine label="Tags" values={[...finalEvent.tagsZh]} />
+          <TagLine label="Entities" values={[...finalEvent.entitiesZh]} />
         </>
       ) : (
         <>
@@ -269,7 +269,7 @@ function EventContent({ item, rank, cutoff }: { item: EventReviewItem; rank: num
           <p className={styles.fallback}>Stage 4 content unavailable; showing Event Group candidates.</p>
         </>
       )}
-      <div className={styles.candidates}>
+      {/* <div className={styles.candidates}>
         {item.candidates.map((candidate) => (
           <section key={candidate.id}>
             <div className={styles.sourceLine}>
@@ -283,7 +283,7 @@ function EventContent({ item, rank, cutoff }: { item: EventReviewItem; rank: num
             {!finalEvent ? <TagLine label="Entities" values={[...candidate.entitiesZh, ...candidate.entities]} /> : null}
           </section>
         ))}
-      </div>
+      </div> */}
     </div>
   );
 }
