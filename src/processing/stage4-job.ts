@@ -5,17 +5,15 @@
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Pool } from "pg";
-import {
-  STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
-  type Stage4EventEnrichmentInput,
-} from "../prompts/stage4-event-enrichment.js";
-import type { Stage4EventEnrichmentOutput } from "./stage4-contract.js";
-import { deriveEventDate, type EventDateDerivation } from "./event-date.js";
+import { STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION } from "../prompts/stage4-event-enrichment.js";
 import { resolveStageLlmModel } from "./llm-client.js";
 import {
-  runStage4EventEnrichmentLlm,
-  type Stage4WebSearchToolUsage,
-} from "./stage4-llm.js";
+  enrichStage4Event,
+  loadStage4SourceCandidates,
+  prepareStage4Event,
+  type EnrichedStage4Event,
+  Stage4EnrichmentError,
+} from "./stage4-event-processing.js";
 import {
   persistStage4Events,
   type Stage4EventToPersist,
@@ -24,6 +22,7 @@ import {
 
 type Stage3RunArtifact = {
   status?: string;
+  event_review_run_id?: string | null;
 };
 
 type SelectedStage3Event = {
@@ -42,26 +41,6 @@ type SelectedStage3Event = {
 type Stage3SelectedEventsArtifact = {
   events: SelectedStage3Event[];
   idMap: Record<string, string[]>;
-};
-
-type SourceDetailRow = {
-  processedContentId: string;
-  entities: string[] | null;
-  url: string | null;
-  publishedAt: Date | null;
-};
-
-type EnrichedEvent = {
-  eventGroupId: string;
-  rank: number;
-  processedContentIds: string[];
-  input: Stage4EventEnrichmentInput;
-  eventDate: EventDateDerivation;
-  publishedAtValues: Array<Date | null>;
-  output: Stage4EventEnrichmentOutput;
-  toolUsage: Stage4WebSearchToolUsage;
-  attempts: number;
-  elapsedMs: number;
 };
 
 type PreviousStage4PersistenceArtifact = {
@@ -144,6 +123,7 @@ export async function processStage4(
 
   try {
     sourceStage3RunDir = await loadLatestSuccessfulStage3RunDir(rootDir, options.stage3RunDir);
+    const stage3Run = await readJson<Stage3RunArtifact>(join(sourceStage3RunDir, "run.json"));
     const selected = await readJson<Stage3SelectedEventsArtifact>(
       join(sourceStage3RunDir, "events/selected.json"),
     );
@@ -155,67 +135,67 @@ export async function processStage4(
     associationCoverage.duplicateProcessedContentIds =
       allProcessedContentIds.length - new Set(allProcessedContentIds).size;
 
-    const sourceDetails = await loadSourceDetails(pool, allProcessedContentIds);
-    const eventInputs = selected.events.map((event) => ({
-      event,
-      processedContentIds: selected.idMap[event.id] ?? [],
-      input: buildInput(event, selected.idMap[event.id] ?? [], sourceDetails),
-      eventDate: deriveEventDate({
-        publishedAtValues: (selected.idMap[event.id] ?? []).map(
-          (processedContentId) => sourceDetails.get(processedContentId)?.publishedAt ?? null,
-        ),
-        workflowRunTimestamp: startedAt,
-      }),
-      publishedAtValues: (selected.idMap[event.id] ?? []).map(
-        (processedContentId) => sourceDetails.get(processedContentId)?.publishedAt ?? null,
+    const reviewItemIds = await loadEventReviewItemIds(
+      pool,
+      stage3Run.event_review_run_id ?? null,
+      selected.events.map((event) => event.id),
+    );
+    const sourceCandidates = await loadStage4SourceCandidates(pool, allProcessedContentIds);
+    const eventInputs = selected.events.map((event) =>
+      prepareStage4Event(
+        {
+          eventGroupId: event.id,
+          eventReviewItemId: reviewItemIds.get(event.id) ?? null,
+          eventHint: event.event_hint,
+          aiRank: event.rank,
+          displayRank: event.rank,
+          processedContentIds: selected.idMap[event.id] ?? [],
+        },
+        sourceCandidates,
+        startedAt,
       ),
-    }));
+    );
 
     for (const item of eventInputs) {
-      const eventDir = join(eventsDir, item.event.id);
+      const eventDir = join(eventsDir, item.group.eventGroupId);
       await mkdir(eventDir, { recursive: true });
       await writeJson(join(eventDir, "input.json"), item.input);
       await writeJson(join(eventDir, "mapping.json"), {
-        event_group_id: item.event.id,
-        rank: item.event.rank,
+        event_group_id: item.group.eventGroupId,
+        event_review_item_id: item.group.eventReviewItemId,
+        rank: item.group.displayRank,
         event_date: item.eventDate.eventDate,
         event_date_source: item.eventDate.source,
         published_at_values: item.publishedAtValues.map((value) => value?.toISOString() ?? null),
-        processed_content_ids: item.processedContentIds,
+        processed_content_ids: item.group.processedContentIds,
       });
     }
 
     const enriched = await mapWithConcurrency(eventInputs, concurrency, async (item) => {
-      const result = await runStage4EventEnrichmentLlm(item.input, { model });
-      const eventDir = join(eventsDir, item.event.id);
-      llmCalls += 1;
-      retryCount += result.success ? result.attempts - 1 : Math.max(0, result.attempts - 1);
-      llmDurationMs += result.elapsedMs;
-
-      if (!result.success) {
+      const eventDir = join(eventsDir, item.group.eventGroupId);
+      try {
+        const result = await enrichStage4Event(item, { model });
+        llmCalls += 1;
+        retryCount += result.llm.attempts - 1;
+        llmDurationMs += result.llm.elapsedMs;
+        await writeJson(join(eventDir, "output.json"), result.output);
+        await writeJson(join(eventDir, "raw-output.json"), result.llm.rawStructuredOutput);
+        await writeJson(join(eventDir, "tool-usage.json"), result.toolUsage);
+        return result;
+      } catch (caught) {
+        const error = caught instanceof Error ? caught.message : String(caught);
+        if (caught instanceof Stage4EnrichmentError) {
+          llmCalls += 1;
+          retryCount += Math.max(0, caught.attempts - 1);
+          llmDurationMs += caught.elapsedMs;
+        }
         await writeJson(join(eventDir, "failure.json"), {
-          error: result.error,
-          attempts: result.attempts,
-          raw_output_text: result.rawOutputText,
+          error,
+          attempts: caught instanceof Stage4EnrichmentError ? caught.attempts : null,
+          raw_output_text: caught instanceof Stage4EnrichmentError ? caught.rawOutputText : null,
         });
-        throw new Error(`Stage 4 enrichment failed for ${item.event.id}: ${result.error}`);
+        throw caught;
       }
-
-      await writeJson(join(eventDir, "output.json"), result.output);
-      await writeJson(join(eventDir, "raw-output.json"), result.rawStructuredOutput);
-      await writeJson(join(eventDir, "tool-usage.json"), result.toolUsage);
-      return {
-        eventGroupId: item.event.id,
-        rank: item.event.rank,
-        processedContentIds: item.processedContentIds,
-        input: item.input,
-        eventDate: item.eventDate,
-        publishedAtValues: item.publishedAtValues,
-        output: result.output,
-        toolUsage: result.toolUsage,
-        attempts: result.attempts,
-        elapsedMs: result.elapsedMs,
-      };
     });
 
     enrichmentSuccessCount = enriched.length;
@@ -241,8 +221,10 @@ export async function processStage4(
       previous_created_event_ids: previousCreatedEventIds,
       events: persistencePlan.events.map((event) => ({
         event_group_id: event.eventGroupId,
+        event_review_item_id: event.eventReviewItemId,
         processed_content_ids: event.processedContentIds,
-        rank: event.rank,
+        ai_rank: event.aiRank,
+        display_rank: event.displayRank,
         event_date: event.eventDate,
       })),
     });
@@ -410,6 +392,35 @@ async function assertSuccessfulStage3Run(runDir: string): Promise<void> {
 }
 
 /**
+ * 新 Stage 3 runtime 会携带 snapshot UUID；据此把选中的 temp id 映射为稳定的 Review item ID。
+ * 旧 artifact 不具备此字段时返回空映射，保留 migration 前数据的兼容路径。
+ */
+async function loadEventReviewItemIds(
+  pool: Pool,
+  reviewRunId: string | null,
+  eventTempIds: string[],
+): Promise<Map<string, string>> {
+  if (!reviewRunId || eventTempIds.length === 0) {
+    return new Map();
+  }
+
+  const result = await pool.query<{ id: string; event_temp_id: string }>(
+    `
+      select id, event_temp_id
+      from event_review_items
+      where review_run_id = $1::uuid
+        and event_temp_id = any($2::text[])
+    `,
+    [reviewRunId, eventTempIds],
+  );
+  const ids = new Map(result.rows.map((row) => [row.event_temp_id, row.id]));
+  if (ids.size !== eventTempIds.length) {
+    throw new Error("Stage 3 Review snapshot is missing one or more selected Event Groups.");
+  }
+  return ids;
+}
+
+/**
  * 收集同一 event_date 范围的旧 Event ID 以供重建清理。
  * 只从成功 run 的 persistence plan 取 ID，避免扩展到无关历史 Event。
  */
@@ -494,67 +505,13 @@ async function loadScopedPreviousCreatedEventIds(
   return ids;
 }
 
-async function loadSourceDetails(
-  pool: Pool,
-  processedContentIds: string[],
-): Promise<Map<string, SourceDetailRow>> {
-  if (processedContentIds.length === 0) {
-    return new Map();
-  }
-
-  const result = await pool.query<SourceDetailRow>(
-    `
-      select
-        pc.id as "processedContentId",
-        pc.entities,
-        ra.url,
-        ra.published_at as "publishedAt"
-      from processed_contents pc
-      join raw_articles ra on ra.id = pc.raw_article_id
-      where pc.id = any($1::uuid[])
-    `,
-    [processedContentIds],
-  );
-
-  return new Map(result.rows.map((row) => [row.processedContentId, row]));
-}
-
-function buildInput(
-  selectedEvent: SelectedStage3Event,
-  processedContentIds: string[],
-  sourceDetails: Map<string, SourceDetailRow>,
-): Stage4EventEnrichmentInput {
-  if (processedContentIds.length !== selectedEvent.sources.length) {
-    throw new Error(
-      `Selected event ${selectedEvent.id} source count does not match processed_content id-map.`,
-    );
-  }
-
+function toEventToPersist(enriched: EnrichedStage4Event): Stage4EventToPersist {
   return {
-    event_hint: selectedEvent.event_hint,
-    sources: selectedEvent.sources.map((source, index) => {
-      const processedContentId = processedContentIds[index];
-      const details = sourceDetails.get(processedContentId);
-      if (!details) {
-        throw new Error(`Missing DB details for processed_content ${processedContentId}.`);
-      }
-
-      return {
-        title: source.title,
-        summary: source.summary,
-        entities: details.entities ?? [],
-        source: source.source,
-        url: details.url,
-      };
-    }),
-  };
-}
-
-function toEventToPersist(enriched: EnrichedEvent): Stage4EventToPersist {
-  return {
-    eventGroupId: enriched.eventGroupId,
-    processedContentIds: enriched.processedContentIds,
-    rank: enriched.rank,
+    eventGroupId: enriched.group.eventGroupId,
+    eventReviewItemId: enriched.group.eventReviewItemId,
+    processedContentIds: enriched.group.processedContentIds,
+    aiRank: enriched.group.aiRank,
+    displayRank: enriched.group.displayRank,
     eventDate: enriched.eventDate.eventDate,
     output: enriched.output,
   };

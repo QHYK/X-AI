@@ -76,7 +76,7 @@ Inspiration 不需要 AI 排序。
 
 #### Top N Selection
 由代码根据产品配置选择最终展示内容，不由 LLM 决定。
-- Events: Top 10
+- Events: Top 15
 - Source Digest: Top N by Category
 - Long-form: Top N
 
@@ -84,8 +84,8 @@ Inspiration 不需要 AI 排序。
 只处理经过 Stage 3 Ranking 和 Top N Selection 后入选的 Event Groups。
 每个 Selected Event Group 独立调用 LLM，可以有限并发执行。
 
-单个 Event 失败不应影响其他 Event 的处理。
-只有 Stage 4 成功完成的 Event 才写入 `events` 表。
+当前常规 Stage 4 会在所有 Selected Event enrichment 成功后以单一 transaction 写入 `events`，
+避免半套新旧最终 Event。只有 Stage 4 成功完成的 Event 才写入 `events` 表。
 
 `event_date` 不由 LLM 输出。Application Code 从组成该 Event 的
 source articles 的 `raw_articles.published_at` 确定性推导：
@@ -277,6 +277,7 @@ tags, tags_zh,
 entities, entities_zh,
 summary, summary_zh,
 source_perspectives, external_context,
+event_review_item_id,
 ai_rank, display_rank,
 created_at, updated_at
 ```
@@ -295,6 +296,7 @@ created_at, updated_at
 | `summary_zh`              | text        | NOT NULL           |
 | `source_perspectives`     | jsonb       | NOT NULL           |
 | `external_context`        | jsonb       | nullable           |
+| `event_review_item_id`    | uuid        | nullable，FK → `event_review_items.id`；新 Event 的明确 Review 关联 |
 | `ai_rank`                 | integer     | nullable           |
 | `display_rank`            | integer     | nullable           |
 | `created_at`              | timestamptz | NOT NULL           |
@@ -369,6 +371,7 @@ processed_contents(display_rank)
 
 events(event_date)
 events(display_rank)
+events(event_review_item_id) UNIQUE
 
 event_review_items(daily_date)
 event_review_items(review_run_id, event_temp_id) UNIQUE
@@ -607,7 +610,7 @@ Stage 3 完成后：
 - Event Groups:
   完整 Event Ranking（最多 50）创建新的 `event_review_items` snapshot。
   Stage 4 创建最终 Event 时，将对应 `ai_rank` / `display_rank`
-  一并写入 `events`。
+  与 `event_review_item_id` 一并写入 `events`。
 
 人工修改只改变 `display_rank`
 Inspiration 不需要 AI Ranking。
@@ -654,7 +657,13 @@ AI Pipeline → Publish → Event / Long-form Ranking Review
   `display_rank`，仅为 `touchedIds` 中最终 rank 改变的 Item 写 feedback；
 - Event cutoff 为 15，Long-form cutoff 为 10；跨入 cutoff 为 `false_negative`，跨出为
   `false_positive`，未跨越为 `ranking_error`；
-- Human Review 不重新调用 LLM、Stage 4 或 Daily Workflow。
+- Event Review 保存会同步该 snapshot 的 `events.display_rank`，`/api/brief` 仍只读取 `events`；
+  被移出 Top 15 的 Event 保留 enrichment，之后再次进入时可复用；
+- 最终 Top 15 中没有对应最终 Event 的 Item 会在 transaction 外按需执行单个 Stage 4 enrichment，
+  成功后才在短 transaction 内创建 Event、同步所有已有 Event rank、更新 Review rank 和写 feedback；
+  enrichment 失败则不提交本次排序；
+- 正常 Stage 4 和 Review 按需 enrichment 复用相同 Prompt、LLM、Structured Output validation 与
+  Event persistence；不重跑完整 Stage 4 或 Daily Workflow。
 
 Classification Editing 与 Model Evaluation 不在 v1 范围。
 

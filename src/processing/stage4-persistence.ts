@@ -9,8 +9,10 @@ type Queryable = Pick<Pool | PoolClient, "query">;
 
 export type Stage4EventToPersist = {
   eventGroupId: string;
+  eventReviewItemId: string | null;
   processedContentIds: string[];
-  rank: number;
+  aiRank: number;
+  displayRank: number;
   eventDate: string;
   output: Stage4EventEnrichmentOutput;
 };
@@ -108,6 +110,7 @@ export async function persistStage4Events(
           summary_zh,
           source_perspectives,
           external_context,
+          event_review_item_id,
           ai_rank,
           display_rank
         )
@@ -123,8 +126,9 @@ export async function persistStage4Events(
           $9,
           $10::jsonb,
           $11::jsonb,
-          $12,
-          $12
+          $12::uuid,
+          $13,
+          $14
         )
         returning id
       `,
@@ -140,7 +144,9 @@ export async function persistStage4Events(
         event.output.event_summary_zh,
         JSON.stringify(event.output.source_perspectives),
         toExternalContextJson(event.output),
-        event.rank,
+        event.eventReviewItemId,
+        event.aiRank,
+        event.displayRank,
       ],
     );
     const eventId = insertResult.rows[0]?.id;

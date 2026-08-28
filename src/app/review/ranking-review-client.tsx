@@ -32,14 +32,12 @@ import styles from "./review.module.css";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-const X_AI_API_BASE_URL = process.env.X_AI_API_BASE_URL ?? "/ai";
-
 export function EventRankingReview({ data }: { data: EventReviewData }) {
   return (
     <RankingEditor
       dailyDate={data.dailyDate}
       cutoff={data.cutoff}
-      endpoint={`${X_AI_API_BASE_URL}/api/review/events/ranking`}
+      endpoint="../../api/review/events/ranking"
       reviewRunId={data.reviewRunId}
       initialItems={data.items}
       renderContent={(item, rank) => <EventContent item={item} rank={rank} cutoff={data.cutoff} />}
@@ -52,7 +50,7 @@ export function LongFormRankingReview({ data }: { data: LongFormReviewData }) {
     <RankingEditor
       dailyDate={data.dailyDate}
       cutoff={data.cutoff}
-      endpoint={`${X_AI_API_BASE_URL}/api/review/long-form/ranking`}
+      endpoint="../../api/review/long-form/ranking"
       initialItems={data.items}
       renderContent={(item, rank) => <LongFormContent item={item} rank={rank} />}
     />
@@ -78,6 +76,7 @@ function RankingEditor<T extends { id: string; aiRank: number; displayRank: numb
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
+
   const meaningfulTouchedIds = useMemo(
     () =>
       [...touchedIds].filter((id) => {
@@ -143,6 +142,8 @@ function RankingEditor<T extends { id: string; aiRank: number; displayRank: numb
       setTouchedIds(new Set());
       setSaveState("saved");
       setMessage(`Saved. ${result.feedbackCount ?? 0} feedback record(s) created.`);
+      // 新补齐的 Event enrichment 只能由服务端查询得到，保存后重新加载同一相对地址。
+      window.location.reload();
     } catch (error) {
       setSaveState("error");
       setMessage(error instanceof Error ? error.message : "Failed to save ranking changes.");
@@ -267,23 +268,23 @@ function EventContent({ item, rank, cutoff }: { item: EventReviewItem; rank: num
         <>
           <h2>{item.eventHint}</h2>
           <p className={styles.fallback}>Stage 4 content unavailable; showing Event Group candidates.</p>
+          <div className={styles.candidates}>
+            {item.candidates.map((candidate) => (
+              <section key={candidate.id}>
+                <div className={styles.sourceLine}>
+                  <strong>{candidate.source}</strong>
+                  {candidate.url ? <a href={candidate.url} target="_blank" rel="noreferrer">Original ↗</a> : null}
+                </div>
+                <h3>{candidate.title}</h3>
+                {!finalEvent && candidate.titleZh ? <p className={styles.titleZh}>{candidate.titleZh}</p> : null}
+                {!finalEvent && candidate.summaryZh ? <p>{candidate.summaryZh}</p> : null}
+                {!finalEvent ? <TagLine label="Tags" values={candidate.tags} /> : null}
+                {!finalEvent ? <TagLine label="Entities" values={[...candidate.entitiesZh, ...candidate.entities]} /> : null}
+              </section>
+            ))}
+          </div>
         </>
       )}
-      {/* <div className={styles.candidates}>
-        {item.candidates.map((candidate) => (
-          <section key={candidate.id}>
-            <div className={styles.sourceLine}>
-              <strong>{candidate.source}</strong>
-              {candidate.url ? <a href={candidate.url} target="_blank" rel="noreferrer">Original ↗</a> : null}
-            </div>
-            <h3>{candidate.title}</h3>
-            {!finalEvent && candidate.titleZh ? <p className={styles.titleZh}>{candidate.titleZh}</p> : null}
-            {!finalEvent && candidate.summaryZh ? <p>{candidate.summaryZh}</p> : null}
-            {!finalEvent ? <TagLine label="Tags" values={candidate.tags} /> : null}
-            {!finalEvent ? <TagLine label="Entities" values={[...candidate.entitiesZh, ...candidate.entities]} /> : null}
-          </section>
-        ))}
-      </div> */}
     </div>
   );
 }

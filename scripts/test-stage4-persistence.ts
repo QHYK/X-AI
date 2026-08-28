@@ -156,8 +156,10 @@ function sampleEvents(
 ): Stage4EventToPersist[] {
   return Array.from({ length: EVENT_COUNT }, (_, index) => ({
     eventGroupId: `${prefix}_${index + 1}`,
+    eventReviewItemId: null,
     processedContentIds: [processedContentIds[index % processedContentIds.length]],
-    rank: index + 1,
+    aiRank: index + 1,
+    displayRank: index + 1,
     eventDate,
     output: sampleOutput(`${prefix}_${index + 1}`),
   }));

@@ -91,6 +91,7 @@ type CandidateRow = {
 
 type FinalEventRow = {
   id: string;
+  event_review_item_id: string | null;
   title_zh: string;
   summary_zh: string;
   tags: string[] | null;
@@ -142,6 +143,27 @@ export async function getEventReviewData(
     `,
     [reviewRunId, dailyDate],
   );
+  const directFinalEventResult = await pool.query<FinalEventRow>(
+    `
+      select
+        id,
+        event_review_item_id,
+        title_zh,
+        summary_zh,
+        tags,
+        tags_zh,
+        entities,
+        entities_zh
+      from events
+      where event_review_item_id = any($1::uuid[])
+    `,
+    [snapshot.rows.map((row) => row.id)],
+  );
+  const directFinalEventByReviewItemId = new Map(
+    directFinalEventResult.rows.flatMap((row) =>
+      row.event_review_item_id ? [[row.event_review_item_id, row]] : [],
+    ),
+  );
   const memberIds = [...new Set(snapshot.rows.flatMap((row) => row.member_content_ids))];
   const candidateResult = memberIds.length
     ? await pool.query<CandidateRow>(
@@ -174,7 +196,7 @@ export async function getEventReviewData(
     ? await Promise.all([
         pool.query<FinalEventRow>(
           `
-            select id, title_zh, summary_zh, tags, tags_zh, entities, entities_zh
+            select id, event_review_item_id, title_zh, summary_zh, tags, tags_zh, entities, entities_zh
             from events
             where id = any($1::uuid[])
           `,
@@ -223,11 +245,12 @@ export async function getEventReviewData(
       });
       const linkedEventIds = [...new Set(candidates.flatMap((item) => item.eventId ? [item.eventId] : []))];
       const linkedEventId = linkedEventIds.length === 1 ? linkedEventIds[0] : null;
-      // Stage 3 重跑后的旧 event_id 只有在完整成员集合仍完全一致时才可视为对应 Stage 4 Event。
+      // 新数据优先使用明确外键；旧数据仅在完整成员集合仍完全一致时才作为安全 fallback。
       const final =
-        linkedEventId && sameIds(memberIdsByEventId.get(linkedEventId) ?? [], row.member_content_ids)
+        directFinalEventByReviewItemId.get(row.id) ??
+        (linkedEventId && sameIds(memberIdsByEventId.get(linkedEventId) ?? [], row.member_content_ids)
           ? finalEventById.get(linkedEventId)
-          : undefined;
+          : undefined);
       return {
         id: row.id,
         eventTempId: row.event_temp_id,

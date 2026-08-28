@@ -29,7 +29,7 @@
              ↓            │        │           │
       [AI] Event Rank     │        │           │
              ↓            │        │           │
-       [Code] Top 10      │        │           │
+       [Code] Top 15      │        │           │
              ↓            │        │           │
       [AI] Stage 4        │        │           │
        Enrichment         │        │           │
@@ -129,7 +129,9 @@ Stage 4  Top Events：生成最终事件内容，必要时补充 Web Search
 ```
 
 Stage 3 Event Ranking 每次成功后将完整 Top 50（不足时保存全部）写成新的 UUID Review snapshot。Event 正式 cutoff 为 Top 15；Long-form 正式 cutoff 为 Top 10。
-Human Review 在 Stage 4 后进行，只更新 `display_rank` 并记录用户主动移动产生的 feedback.
+Human Review 位于初始 Stage 4 后：保存 Event 排名会同步 `event_review_items.display_rank` 与
+`events.display_rank`。新的最终 Top 15 若缺少最终 Event，则仅对该 Event 按需执行 Stage 4；
+已有 enrichment 直接复用。LLM 失败时不提交本次排序，用户主动移动仍按原规则记录 feedback。
 
 ## 数据最终去向
 

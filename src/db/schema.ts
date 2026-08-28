@@ -69,6 +69,37 @@ export const rawArticles = pgTable(
   ],
 );
 
+/** Stage 3 Event Ranking 的可审核 snapshot item；不复制最终 Event 内容。 */
+export const eventReviewItems = pgTable(
+  "event_review_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    reviewRunId: uuid("review_run_id").notNull(),
+    dailyDate: date("daily_date").notNull(),
+    eventTempId: text("event_temp_id").notNull(),
+    eventHint: text("event_hint").notNull(),
+    aiRank: integer("ai_rank").notNull(),
+    displayRank: integer("display_rank").notNull(),
+    memberContentIds: uuid("member_content_ids").array().notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    index("event_review_items_daily_date_idx").on(table.dailyDate),
+    uniqueIndex("event_review_items_run_temp_unique").on(
+      table.reviewRunId,
+      table.eventTempId,
+    ),
+    uniqueIndex("event_review_items_run_ai_rank_unique").on(
+      table.reviewRunId,
+      table.aiRank,
+    ),
+    uniqueIndex("event_review_items_run_display_rank_unique").on(
+      table.reviewRunId,
+      table.displayRank,
+    ),
+  ],
+);
+
 export const events = pgTable(
   "events",
   {
@@ -84,6 +115,8 @@ export const events = pgTable(
     summaryZh: text("summary_zh").notNull(),
     sourcePerspectives: jsonb("source_perspectives").notNull(),
     externalContext: jsonb("external_context"),
+    // 新生成的最终 Event 指向其确切的 Stage 3 Review snapshot item，避免依赖成员集合猜测关联。
+    eventReviewItemId: uuid("event_review_item_id").references(() => eventReviewItems.id),
     aiRank: integer("ai_rank"),
     displayRank: integer("display_rank"),
     ...timestamps,
@@ -91,6 +124,7 @@ export const events = pgTable(
   (table) => [
     index("events_event_date_idx").on(table.eventDate),
     index("events_display_rank_idx").on(table.displayRank),
+    uniqueIndex("events_event_review_item_id_unique").on(table.eventReviewItemId),
   ],
 );
 
@@ -122,37 +156,6 @@ export const processedContents = pgTable(
     check(
       "processed_contents_routing_check",
       sql`${table.routing} in ('event', 'digest', 'long_form', 'inspiration')`,
-    ),
-  ],
-);
-
-/** Stage 3 Event Ranking 的可审核 snapshot item；不复制最终 Event 内容。 */
-export const eventReviewItems = pgTable(
-  "event_review_items",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    reviewRunId: uuid("review_run_id").notNull(),
-    dailyDate: date("daily_date").notNull(),
-    eventTempId: text("event_temp_id").notNull(),
-    eventHint: text("event_hint").notNull(),
-    aiRank: integer("ai_rank").notNull(),
-    displayRank: integer("display_rank").notNull(),
-    memberContentIds: uuid("member_content_ids").array().notNull(),
-    ...timestamps,
-  },
-  (table) => [
-    index("event_review_items_daily_date_idx").on(table.dailyDate),
-    uniqueIndex("event_review_items_run_temp_unique").on(
-      table.reviewRunId,
-      table.eventTempId,
-    ),
-    uniqueIndex("event_review_items_run_ai_rank_unique").on(
-      table.reviewRunId,
-      table.aiRank,
-    ),
-    uniqueIndex("event_review_items_run_display_rank_unique").on(
-      table.reviewRunId,
-      table.displayRank,
     ),
   ],
 );

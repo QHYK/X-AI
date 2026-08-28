@@ -166,11 +166,11 @@ Original Links
 ```
 AI Pipeline
 ↓
-Draft Brief
-↓
-Publish
+AI 初始 Daily Brief
 ↓
 Human Review
+↓
+Final Daily Brief
 ```
 Human Review v1 已实现 Event 与 Long-form Ranking Review：
 + 调整 `display_rank`，永久保留 AI 原始 `ai_rank`；
@@ -179,7 +179,8 @@ Human Review v1 已实现 Event 与 Long-form Ranking Review：
 + 用户主动移动且跨越 cutoff 时分别记录 False Positive / False Negative；未跨越 cutoff 的主动调整记录 Ranking Error；
 + 被其他 Item 挤动的被动 rank 变化不代表人工判断，不写 Feedback。
 
-Review 在 Publish 后进行，不重新调用 LLM、Stage 4 或 Daily Workflow，也不重新生产摘要。
+Event Review 保存后会将人工 `display_rank` 同步到最终 `events.display_rank`，使 Final Daily Brief 立即采用人工顺序。若最终 Top 15 有此前从未 enrichment 的 Event，只为该 Event 按需调用一次 Stage 4。Stage 4 失败时
+不保存此次 Review 排名。
 
 
 ## Success Metrics

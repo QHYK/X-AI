@@ -2,9 +2,17 @@
 import { getDatabasePool } from "@/db/index.js";
 import { parseBriefDate } from "@/lib/brief-date.js";
 import {
+  getEventReviewEnrichmentRequests,
   ReviewValidationError,
   saveEventReviewRanking,
 } from "@/lib/ranking-review.js";
+import {
+  enrichStage4Event,
+  loadStage4SourceCandidates,
+  prepareStage4Event,
+  Stage4EnrichmentError,
+  type EnrichedStage4Event,
+} from "@/processing/stage4-event-processing.js";
 
 export const runtime = "nodejs";
 
@@ -12,11 +20,30 @@ export async function PATCH(request: Request): Promise<Response> {
   try {
     const body: unknown = await request.json();
     const input = parseRequest(body);
-    const result = await saveEventReviewRanking(getDatabasePool(), input);
+    const pool = getDatabasePool();
+    // 先在 transaction 外完成可能耗时的 enrichment；失败时不会写入任何 Review 或最终 Brief 排名。
+    const enrichmentRequests = await getEventReviewEnrichmentRequests(pool, input);
+    const sourceCandidates = await loadStage4SourceCandidates(
+      pool,
+      [...new Set(enrichmentRequests.flatMap((item) => item.processedContentIds))],
+    );
+    const enrichedEvents: EnrichedStage4Event[] = [];
+    for (const item of enrichmentRequests) {
+      enrichedEvents.push(
+        await enrichStage4Event(prepareStage4Event(item, sourceCandidates, new Date())),
+      );
+    }
+    const result = await saveEventReviewRanking(pool, { ...input, enrichedEvents });
     return Response.json({ status: "saved", ...result });
   } catch (error) {
     if (error instanceof ReviewValidationError) {
       return Response.json({ error: error.message }, { status: 400 });
+    }
+    if (error instanceof Stage4EnrichmentError) {
+      return Response.json(
+        { error: `${error.message} Review ranking was not saved.` },
+        { status: 502 },
+      );
     }
     console.error("Failed to save Event Ranking Review.", error);
     return Response.json({ error: "Failed to save Event Ranking Review." }, { status: 500 });

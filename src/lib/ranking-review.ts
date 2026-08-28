@@ -9,6 +9,13 @@ import {
   EVENT_DISPLAY_CUTOFF,
   LONG_FORM_DISPLAY_CUTOFF,
 } from "./ranking-config.js";
+import type { EnrichedStage4Event, Stage4EventGroup } from "../processing/stage4-event-processing.js";
+import {
+  persistStage4Events,
+  type Stage4EventToPersist,
+} from "../processing/stage4-persistence.js";
+
+type Queryable = Pick<Pool | PoolClient, "query">;
 
 export type RankingFeedbackType = "ranking_error" | "false_positive" | "false_negative";
 
@@ -34,6 +41,51 @@ export type RankingChangeSet = {
   changes: RankingChange[];
   feedback: RankingFeedbackChange[];
 };
+
+type EventReviewRow = RankingRow & {
+  eventHint: string;
+  memberContentIds: string[];
+};
+
+type EventReviewLinks = {
+  eventIdByReviewItemId: Map<string, string>;
+  legacyLinks: Array<{ reviewItemId: string; eventId: string }>;
+};
+
+/** 在 transaction 外预检最终 Top 15，返回需要按需执行 Stage 4 的 Event Group。 */
+export async function getEventReviewEnrichmentRequests(
+  pool: Pool,
+  input: {
+    dailyDate: string;
+    reviewRunId: string;
+    orderedIds: string[];
+    touchedIds: string[];
+  },
+): Promise<Stage4EventGroup[]> {
+  const rows = await loadEventReviewRows(pool, input, false);
+  const changeSet = buildRankingChangeSet({
+    currentRows: rows,
+    orderedIds: input.orderedIds,
+    touchedIds: input.touchedIds,
+    cutoff: EVENT_DISPLAY_CUTOFF,
+  });
+  const links = await loadEventReviewLinks(pool, rows, false);
+
+  return changeSet.changes
+    .filter((change) => change.nextDisplayRank <= EVENT_DISPLAY_CUTOFF)
+    .filter((change) => !links.eventIdByReviewItemId.has(change.id))
+    .map((change) => {
+      const row = rows.find((candidate) => candidate.id === change.id)!;
+      return {
+        eventGroupId: row.id,
+        eventReviewItemId: row.id,
+        eventHint: row.eventHint,
+        aiRank: row.aiRank,
+        displayRank: change.nextDisplayRank,
+        processedContentIds: row.memberContentIds,
+      };
+    });
+}
 
 export class ReviewValidationError extends Error {}
 
@@ -115,34 +167,57 @@ export async function saveEventReviewRanking(
     reviewRunId: string;
     orderedIds: string[];
     touchedIds: string[];
+    enrichedEvents?: EnrichedStage4Event[];
   },
-): Promise<{ updatedCount: number; feedbackCount: number }> {
+): Promise<{
+  updatedCount: number;
+  feedbackCount: number;
+  eventsUpdated: number;
+  eventsCreated: number;
+}> {
   return withTransaction(pool, async (client) => {
-    const result = await client.query<{
-      id: string;
-      ai_rank: number;
-      display_rank: number;
-    }>(
-      `
-        select id, ai_rank, display_rank
-        from event_review_items
-        where review_run_id = $1::uuid
-          and daily_date = $2::date
-        order by display_rank, id
-        for update
-      `,
-      [input.reviewRunId, input.dailyDate],
-    );
+    const rows = await loadEventReviewRows(client, input, true);
     const changeSet = buildRankingChangeSet({
-      currentRows: result.rows.map((row) => ({
-        id: row.id,
-        aiRank: row.ai_rank,
-        displayRank: row.display_rank,
-      })),
+      currentRows: rows,
       orderedIds: input.orderedIds,
       touchedIds: input.touchedIds,
       cutoff: EVENT_DISPLAY_CUTOFF,
     });
+    const links = await loadEventReviewLinks(client, rows, true);
+    await backfillLegacyEventReviewLinks(client, links.legacyLinks);
+
+    const missingTopIds = changeSet.changes
+      .filter((change) => change.nextDisplayRank <= EVENT_DISPLAY_CUTOFF)
+      .filter((change) => !links.eventIdByReviewItemId.has(change.id))
+      .map((change) => change.id);
+    const enrichedByReviewItemId = new Map(
+      (input.enrichedEvents ?? []).flatMap((event) =>
+        event.group.eventReviewItemId ? [[event.group.eventReviewItemId, event]] : [],
+      ),
+    );
+    if (!sameIdSet(missingTopIds, [...enrichedByReviewItemId.keys()])) {
+      throw new ReviewValidationError(
+        "Review ranking changed while enrichment was in progress. Reload and save again.",
+      );
+    }
+
+    let eventsCreated = 0;
+    if (missingTopIds.length > 0) {
+      const persisted = await persistStage4Events(client, {
+        previousCreatedEventIds: [],
+        events: missingTopIds.map((reviewItemId) =>
+          toReviewStage4EventToPersist(enrichedByReviewItemId.get(reviewItemId)!),
+        ),
+      });
+      eventsCreated = persisted.createdEventIds.length;
+      for (const reviewItemId of missingTopIds) {
+        const eventId = persisted.eventGroupToEventId[reviewItemId];
+        if (!eventId) {
+          throw new Error(`Stage 4 persistence did not create Event for Review item ${reviewItemId}.`);
+        }
+        links.eventIdByReviewItemId.set(reviewItemId, eventId);
+      }
+    }
 
     // 唯一索引下先移到负数空间，再写连续正 rank，避免交换时的中间 collision。
     await client.query(
@@ -155,12 +230,181 @@ export async function saveEventReviewRanking(
       [input.reviewRunId, input.dailyDate],
     );
     await persistDisplayRanks(client, "event_review_items", changeSet.changes);
+    let eventsUpdated = 0;
+    for (const change of changeSet.changes) {
+      const eventId = links.eventIdByReviewItemId.get(change.id);
+      if (!eventId) {
+        continue;
+      }
+      const update = await client.query(
+        `update events set display_rank = $2, updated_at = now() where id = $1::uuid`,
+        [eventId, change.nextDisplayRank],
+      );
+      eventsUpdated += update.rowCount ?? 0;
+    }
     await persistFeedback(client, "event_review_item", changeSet.feedback);
     return {
       updatedCount: changeSet.changes.length,
       feedbackCount: changeSet.feedback.length,
+      eventsUpdated,
+      eventsCreated,
     };
   });
+}
+
+/** 读取指定 snapshot 的完整排序项；保存时以 row lock 固定短 transaction 内的基线。 */
+async function loadEventReviewRows(
+  queryable: Queryable,
+  input: { dailyDate: string; reviewRunId: string },
+  lockRows: boolean,
+): Promise<EventReviewRow[]> {
+  const result = await queryable.query<{
+    id: string;
+    ai_rank: number;
+    display_rank: number;
+    event_hint: string;
+    member_content_ids: string[];
+  }>(
+    `
+      select id, ai_rank, display_rank, event_hint, member_content_ids
+      from event_review_items
+      where review_run_id = $1::uuid
+        and daily_date = $2::date
+      order by display_rank, id
+      ${lockRows ? "for update" : ""}
+    `,
+    [input.reviewRunId, input.dailyDate],
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    aiRank: row.ai_rank,
+    displayRank: row.display_rank,
+    eventHint: row.event_hint,
+    memberContentIds: row.member_content_ids,
+  }));
+}
+
+/**
+ * 优先按显式 event_review_item_id 建立关联；旧数据仅在完整成员集合唯一匹配时作为 fallback。
+ * 保存时会把这种确定性 fallback 补写成正式关联，之后不再依赖成员集合推断。
+ */
+async function loadEventReviewLinks(
+  queryable: Queryable,
+  rows: EventReviewRow[],
+  lockEvents: boolean,
+): Promise<EventReviewLinks> {
+  if (rows.length === 0) {
+    return { eventIdByReviewItemId: new Map(), legacyLinks: [] };
+  }
+  const reviewItemIds = rows.map((row) => row.id);
+  const memberContentIds = [...new Set(rows.flatMap((row) => row.memberContentIds))];
+  const lockClause = lockEvents ? "for update of e" : "";
+  const direct = await queryable.query<{ id: string; event_review_item_id: string }>(
+    `
+      select e.id, e.event_review_item_id
+      from events e
+      where e.event_review_item_id = any($1::uuid[])
+      ${lockClause}
+    `,
+    [reviewItemIds],
+  );
+  const eventIdByReviewItemId = new Map(
+    direct.rows.map((row) => [row.event_review_item_id, row.id]),
+  );
+  if (memberContentIds.length === 0) {
+    return { eventIdByReviewItemId, legacyLinks: [] };
+  }
+
+  const legacyCandidates = await queryable.query<{ id: string }>(
+    `
+      select e.id
+      from events e
+      join processed_contents pc on pc.event_id = e.id
+      where e.event_review_item_id is null
+        and pc.id = any($1::uuid[])
+      ${lockClause}
+    `,
+    [memberContentIds],
+  );
+  const candidateEventIds = [...new Set(legacyCandidates.rows.map((row) => row.id))];
+  if (candidateEventIds.length === 0) {
+    return { eventIdByReviewItemId, legacyLinks: [] };
+  }
+  const members = await queryable.query<{ event_id: string; id: string }>(
+    `
+      select event_id, id
+      from processed_contents
+      where event_id = any($1::uuid[])
+      order by event_id, id
+    `,
+    [candidateEventIds],
+  );
+  const memberIdsByEvent = new Map<string, string[]>();
+  for (const member of members.rows) {
+    const ids = memberIdsByEvent.get(member.event_id) ?? [];
+    ids.push(member.id);
+    memberIdsByEvent.set(member.event_id, ids);
+  }
+
+  const legacyLinks: EventReviewLinks["legacyLinks"] = [];
+  for (const row of rows) {
+    if (eventIdByReviewItemId.has(row.id)) {
+      continue;
+    }
+    const exactMatches = candidateEventIds.filter((eventId) =>
+      sameIdSet(memberIdsByEvent.get(eventId) ?? [], row.memberContentIds),
+    );
+    if (exactMatches.length === 1) {
+      eventIdByReviewItemId.set(row.id, exactMatches[0]);
+      legacyLinks.push({ reviewItemId: row.id, eventId: exactMatches[0] });
+    }
+  }
+  return { eventIdByReviewItemId, legacyLinks };
+}
+
+/** 首次 Review 保存时，将唯一的 legacy 成员匹配转成明确外键。 */
+async function backfillLegacyEventReviewLinks(
+  client: Pick<PoolClient, "query">,
+  links: EventReviewLinks["legacyLinks"],
+): Promise<void> {
+  for (const link of links) {
+    const result = await client.query(
+      `
+        update events
+        set event_review_item_id = $2::uuid, updated_at = now()
+        where id = $1::uuid
+          and event_review_item_id is null
+      `,
+      [link.eventId, link.reviewItemId],
+    );
+    if ((result.rowCount ?? 0) !== 1) {
+      throw new ReviewValidationError("A legacy Event association changed; reload and save again.");
+    }
+  }
+}
+
+function toReviewStage4EventToPersist(event: EnrichedStage4Event): Stage4EventToPersist {
+  const reviewItemId = event.group.eventReviewItemId;
+  if (!reviewItemId) {
+    throw new Error("Review-triggered Stage 4 enrichment requires an event_review_item_id.");
+  }
+  return {
+    eventGroupId: reviewItemId,
+    eventReviewItemId: reviewItemId,
+    processedContentIds: event.group.processedContentIds,
+    aiRank: event.group.aiRank,
+    displayRank: event.group.displayRank,
+    eventDate: event.eventDate.eventDate,
+    output: event.output,
+  };
+}
+
+function sameIdSet(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  const sortedRight = [...right].sort();
+  return [...left].sort().every((id, index) => id === sortedRight[index]);
 }
 
 /** 保存一个 Daily scope 内所有已参与排名的 Long-form 新顺序。 */
