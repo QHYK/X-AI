@@ -18,6 +18,13 @@ export type EvaluationRunRequest = {
   providers: string[];
 };
 
+/** 解析取消请求。客户端只能声明持久化 run ID，进程 PID 始终由服务端从数据库读取。 */
+export function parseEvaluationCancelRequest(body: unknown): { runId: string } {
+  const runId = isRecord(body) && typeof body.run_id === "string" ? body.run_id : undefined;
+  if (!runId || !isUuid(runId)) throw new Error("run_id must be a UUID.");
+  return { runId };
+}
+
 /** 解析不可信的 HTTP body，只允许当前 Evaluation 配置中启用的 Provider 被手动执行。 */
 export function parseEvaluationRunRequest(
   body: unknown,
@@ -59,4 +66,8 @@ export async function startEvaluationFromRequest(input: {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

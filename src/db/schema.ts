@@ -205,6 +205,8 @@ export const evaluationRuns = pgTable(
     durationMs: integer("duration_ms"),
     inputTokens: integer("input_tokens"),
     outputTokens: integer("output_tokens"),
+    // detached CLI 以该 PID 作为独立 process group leader；仅内部 Cancel API 使用，前端不会接触 PID。
+    processPid: integer("process_pid"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("evaluation_runs_input_idx").on(table.evaluationInputId)],

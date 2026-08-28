@@ -55,6 +55,7 @@ export type EvaluationRunRecord = { id: string };
 
 type StoredEvaluationRun = {
   id: string;
+  evaluationInputId: string;
   provider: string;
   model: string;
   startedAt: Date | string;
@@ -77,9 +78,11 @@ export type EvaluationStorage = {
     outputTokens: number | null;
   }): Promise<void>;
   failRun(input: { id: string; completedAt: string; durationMs: number; error: string }): Promise<void>;
+  setRunProcessPid?(input: { id: string; pid: number }): Promise<void>;
   createOutputs(outputs: Array<{ evaluationRunId: string; itemKey: string | null; outputJson: unknown }>): Promise<void>;
   loadInput?(id: string): Promise<EvaluationInputRecord | null>;
   loadRunningRuns?(evaluationInputId: string): Promise<StoredEvaluationRun[]>;
+  loadRunningRun?(id: string): Promise<StoredEvaluationRun | null>;
 };
 
 export type EvaluationRunSummary = {
@@ -300,6 +303,36 @@ export async function resumeEvaluation(input: {
   return executePreparedEvaluation(prepared);
 }
 
+/** 供每个 detached CLI process group 恢复其单一 model run，避免取消一个模型影响其它模型。 */
+export async function resumeEvaluationRun(input: {
+  pool: Pool;
+  evaluationRunId: string;
+  storage?: EvaluationStorage;
+  execute?: RunEvaluationOptions["execute"];
+}): Promise<EvaluationSummary> {
+  const storage = input.storage ?? createPostgresEvaluationStorage(input.pool);
+  if (!storage.loadInput || !storage.loadRunningRun) {
+    throw new Error("Evaluation storage cannot resume a persisted run.");
+  }
+  const pendingRun = await storage.loadRunningRun(input.evaluationRunId);
+  if (!pendingRun) throw new Error(`Evaluation run ${input.evaluationRunId} is not running.`);
+  const evaluationInput = await storage.loadInput(pendingRun.evaluationInputId);
+  if (!evaluationInput) throw new Error(`Evaluation input ${pendingRun.evaluationInputId} was not found.`);
+  return executePreparedEvaluation({
+    evaluationInput,
+    dailyDate: evaluationInput.dailyDate,
+    stage: evaluationInput.stage,
+    models: [{
+      model: { provider: pendingRun.provider as EvaluationModel["provider"], model: pendingRun.model },
+      run: { id: pendingRun.id },
+      startedAt: toIso(pendingRun.startedAt),
+    }],
+    storage,
+    pool: input.pool,
+    execute: input.execute,
+  });
+}
+
 function evaluationSummary(prepared: PreparedEvaluation, runs: EvaluationRunSummary[]): EvaluationSummary {
 
   return {
@@ -390,16 +423,16 @@ export function createPostgresEvaluationStorage(pool: Pool): EvaluationStorage {
       await pool.query(
         `update evaluation_runs
          set status = 'success', completed_at = $2::timestamptz, duration_ms = $3,
-             input_tokens = $4, output_tokens = $5, error = null
-         where id = $1`,
+             input_tokens = $4, output_tokens = $5, error = null, process_pid = null
+         where id = $1 and status = 'running'`,
         [input.id, input.completedAt, input.durationMs, input.inputTokens, input.outputTokens],
       );
     },
     async failRun(input) {
       await pool.query(
         `update evaluation_runs
-         set status = 'failed', completed_at = $2::timestamptz, duration_ms = $3, error = $4
-         where id = $1`,
+         set status = 'failed', completed_at = $2::timestamptz, duration_ms = $3, error = $4, process_pid = null
+         where id = $1 and status = 'running'`,
         [input.id, input.completedAt, input.durationMs, input.error],
       );
     },
@@ -412,6 +445,12 @@ export function createPostgresEvaluationStorage(pool: Pool): EvaluationStorage {
         );
       }
     },
+    async setRunProcessPid(input) {
+      await pool.query(
+        `update evaluation_runs set process_pid = $2 where id = $1 and status = 'running'`,
+        [input.id, input.pid],
+      );
+    },
     async loadInput(id) {
       const result = await pool.query<EvaluationInputRecord>(
         `select id, daily_date::text as "dailyDate", stage, input_json as "inputJson", input_hash as "inputHash"
@@ -423,13 +462,22 @@ export function createPostgresEvaluationStorage(pool: Pool): EvaluationStorage {
     },
     async loadRunningRuns(evaluationInputId) {
       const result = await pool.query<StoredEvaluationRun>(
-        `select id, provider, model, started_at as "startedAt"
+        `select id, evaluation_input_id as "evaluationInputId", provider, model, started_at as "startedAt"
            from evaluation_runs
           where evaluation_input_id = $1 and status = 'running'
           order by created_at asc, id asc`,
         [evaluationInputId],
       );
       return result.rows;
+    },
+    async loadRunningRun(id) {
+      const result = await pool.query<StoredEvaluationRun>(
+        `select id, evaluation_input_id as "evaluationInputId", provider, model, started_at as "startedAt"
+           from evaluation_runs
+          where id = $1 and status = 'running'`,
+        [id],
+      );
+      return result.rows[0] ?? null;
     },
   };
 }

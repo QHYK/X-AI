@@ -257,6 +257,8 @@
 .runStatus > span { color: #356047; font-weight: 800; text-transform: capitalize; }
 .runStatus small { color: #6b7771; }
 .runStatus p { margin: 4px 0 0; overflow-wrap: anywhere; }
+.runStatus button { width: fit-content; min-height: 28px; padding: 0 9px; border: 1px solid #c5cfca; border-radius: 7px; background: #fff; color: #24322b; cursor: pointer; font: inherit; font-size: 0.72rem; font-weight: 750; }
+.runStatus button:disabled { cursor: default; opacity: 0.5; }
 
 .evaluationResults { display: grid; gap: 14px; }
 .resultToolbar { align-items: center; }

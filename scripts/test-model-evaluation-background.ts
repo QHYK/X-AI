@@ -14,6 +14,7 @@ type Check = { name: string; passed: boolean };
 const checks: Check[] = [];
 
 class FakeChildProcess extends EventEmitter {
+  constructor(readonly pid: number) { super(); }
   unrefCalled = false;
   unref() { this.unrefCalled = true; return this; }
 }
@@ -40,11 +41,12 @@ checks.push({
   passed: JSON.stringify(storageState.inputs[0]?.inputJson).includes("raw_article_ids") && !JSON.stringify(storageState.inputs[0]?.inputJson).includes("content_text"),
 });
 
-const child = new FakeChildProcess();
-const started = startDetachedEvaluation(prepared, { spawn: () => child as never });
+const spawnedChildren = [new FakeChildProcess(41001), new FakeChildProcess(41002)];
+const children = [...spawnedChildren];
+const started = await startDetachedEvaluation(prepared, { spawn: () => children.shift() as never });
 checks.push({
-  name: "Detached starter returns immediately without awaiting Evaluation execution",
-  passed: started.status === "started" && child.unrefCalled,
+  name: "Detached starter gives every model an independent detached process and returns before Evaluation execution",
+  passed: started.status === "started" && children.length === 0 && storageState.processPids.length === 2 && spawnedChildren.every((child) => child.unrefCalled),
 });
 
 const executionPrepared = await prepareEvaluation({
@@ -71,7 +73,7 @@ checks.push({
 
 const resumeState = createStorage();
 resumeState.input = { id: "resume-input", dailyDate: "2026-08-28", stage: "stage2", inputJson: { input: { event_candidates: [] }, id_map: {} }, inputHash: "fixture" };
-resumeState.pending = [{ id: "resume-run", provider: "deepseek", model: "fixture", startedAt: "2026-08-28T00:00:00.000Z" }];
+resumeState.pending = [{ id: "resume-run", evaluationInputId: "resume-input", provider: "deepseek", model: "fixture", startedAt: "2026-08-28T00:00:00.000Z" }];
 const resumed = await resumeEvaluation({
   pool: {} as never,
   evaluationInputId: "resume-input",
@@ -117,6 +119,22 @@ checks.push({
   passed: runningReview.runs[0]?.status === "running" && runningReview.stage2?.length === 0,
 });
 
+const cancelledReview = await getEvaluationReviewData({
+  query: async (text: string) => {
+    if (text.includes("from evaluation_inputs")) {
+      return { rows: [{ id: "cancelled-input", dailyDate: "2026-08-28", stage: "stage2", inputJson: { input: { event_candidates: [] }, id_map: {} }, inputHash: "fixture", createdAt: "2026-08-28T00:00:00.000Z" }] };
+    }
+    if (text.includes("from evaluation_runs")) {
+      return { rows: [{ id: "cancelled-run", provider: "deepseek", model: "fixture", status: "cancelled", error: "Cancelled by user.", startedAt: "2026-08-28T00:00:00.000Z", completedAt: "2026-08-28T00:00:02.000Z", durationMs: 2_000, inputTokens: null, outputTokens: null }] };
+    }
+    throw new Error("No outputs are queried for a cancelled run.");
+  },
+} as never, "2026-08-28", "stage2");
+checks.push({
+  name: "Read API data retains a persisted cancelled run after a page reload",
+  passed: cancelledReview.runs[0]?.status === "cancelled" && cancelledReview.runs[0]?.completedAt !== null,
+});
+
 for (const check of checks) console.log(`${check.passed ? "PASS" : "FAIL"} ${check.name}`);
 if (checks.some((check) => !check.passed)) process.exitCode = 1;
 
@@ -147,19 +165,22 @@ function createStorage(): {
   completed: string[];
   failed: string[];
   input: { id: string; dailyDate: string; stage: "stage2"; inputJson: unknown; inputHash: string } | null;
-  pending: Array<{ id: string; provider: string; model: string; startedAt: string }>;
+  pending: Array<{ id: string; evaluationInputId: string; provider: string; model: string; startedAt: string }>;
+  processPids: Array<{ id: string; pid: number }>;
 } {
   const inputs: Array<{ id: string; dailyDate: string; stage: "stage1" | "stage2"; inputJson: unknown; inputHash: string }> = [];
   const runs: Array<{ id: string; evaluationInputId: string }> = [];
   const completed: string[] = [];
   const failed: string[] = [];
+  const processPids: Array<{ id: string; pid: number }> = [];
   const state = {
     inputs,
     runs,
     completed,
     failed,
+    processPids,
     input: null as { id: string; dailyDate: string; stage: "stage2"; inputJson: unknown; inputHash: string } | null,
-    pending: [] as Array<{ id: string; provider: string; model: string; startedAt: string }>,
+    pending: [] as Array<{ id: string; evaluationInputId: string; provider: string; model: string; startedAt: string }>,
     storage: undefined as unknown as EvaluationStorage,
   };
   let inputNumber = 1;
@@ -177,6 +198,7 @@ function createStorage(): {
     },
     async completeRun(input) { completed.push(input.id); },
     async failRun(input) { failed.push(input.id); },
+    async setRunProcessPid(input) { processPids.push(input); },
     async createOutputs() {},
     async loadInput() { return state.input; },
     async loadRunningRuns() { return state.pending; },

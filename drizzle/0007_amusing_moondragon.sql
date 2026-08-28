@@ -1,0 +1,1 @@
+ALTER TABLE "evaluation_runs" ADD COLUMN "process_pid" integer;

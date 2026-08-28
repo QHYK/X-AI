@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation.js";
 import type { EvaluationModel } from "@/lib/evaluation-model-config.js";
+import { evaluationApiUrl } from "@/lib/evaluation-api-url.js";
 import type { EvaluationReviewData, EvaluationRunView, Stage1EvaluationItem } from "@/lib/evaluation-review.js";
 import type { EvaluationStage } from "@/lib/model-evaluation.js";
 import styles from "./review.module.css";
@@ -28,6 +29,7 @@ export function ModelEvaluationReview(props: {
   const [stage, setStage] = useState<EvaluationStage>(props.data.stage);
   const [providers, setProviders] = useState(props.models.map((model) => model.provider));
   const [running, setRunning] = useState(false);
+  const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [stage1Mode, setStage1Mode] = useState<"disagreements" | "all">("disagreements");
   const router = useRouter();
@@ -38,7 +40,7 @@ export function ModelEvaluationReview(props: {
     let cancelled = false;
     const poll = async () => {
       try {
-        const response = await fetch(`../api/evaluation?date=${encodeURIComponent(data.dailyDate)}&stage=${encodeURIComponent(data.stage)}`);
+        const response = await fetch(evaluationApiUrl("", new URLSearchParams({ date: data.dailyDate, stage: data.stage })));
         if (!response.ok) return;
         const next = await response.json() as EvaluationReviewData;
         if (cancelled) return;
@@ -60,7 +62,7 @@ export function ModelEvaluationReview(props: {
     setRunning(true);
     setError(null);
     try {
-      const response = await fetch("../api/evaluation/run", {
+      const response = await fetch(evaluationApiUrl("/run"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ date, stage, providers }),
@@ -71,6 +73,25 @@ export function ModelEvaluationReview(props: {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to run Model Evaluation.");
       setRunning(false);
+    }
+  };
+  const cancel = async (runId: string) => {
+    setCancellingRunId(runId);
+    setError(null);
+    try {
+      const response = await fetch(evaluationApiUrl("/cancel"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ run_id: runId }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok && response.status !== 409) throw new Error(payload.error ?? "Failed to cancel Model Evaluation.");
+      const refreshed = await fetch(evaluationApiUrl("", new URLSearchParams({ date: data.dailyDate, stage: data.stage })));
+      if (refreshed.ok) setData(await refreshed.json() as EvaluationReviewData);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to cancel Model Evaluation.");
+    } finally {
+      setCancellingRunId(null);
     }
   };
   const toggleProvider = (provider: EvaluationModel["provider"]) => {
@@ -101,7 +122,7 @@ export function ModelEvaluationReview(props: {
       </div>
       {error ? <p className={styles.error}>{error}</p> : null}
       {data.input ? <p className={styles.snapshot}>Frozen input · {data.input.id} · {data.input.inputHash.slice(0, 12)} · Last run {formatTime(data.input.createdAt)}</p> : null}
-      {data.runs.length > 0 ? <RunStatuses runs={data.runs} /> : null}
+      {data.runs.length > 0 ? <RunStatuses runs={data.runs} cancellingRunId={cancellingRunId} onCancel={cancel} /> : null}
       {!data.input ? <p className={styles.empty}>No comparable evaluation exists for this date and stage yet.</p> : null}
       {data.input && successfulRuns.length < 2 ? <p className={styles.empty}>This frozen input does not yet have two successful model outputs to compare.</p> : null}
       {data.stage1 ? <Stage1Results items={data.stage1} runs={successfulRuns} mode={stage1Mode} onModeChange={setStage1Mode} /> : null}
@@ -111,12 +132,23 @@ export function ModelEvaluationReview(props: {
   );
 }
 
-function RunStatuses(props: { runs: EvaluationRunView[] }) {
+function RunStatuses(props: {
+  runs: EvaluationRunView[];
+  cancellingRunId: string | null;
+  onCancel: (runId: string) => void;
+}) {
   return <div className={styles.runStatuses}>{props.runs.map((run) => <article key={run.id} className={styles.runStatus}>
-    <strong>{providerLabel(run.provider)}</strong><span>{run.status}</span>
+    <strong>{providerLabel(run.provider)}</strong><span>{displayRunStatus(run.status)}</span>
     <small>{run.model} · {run.completedAt ? formatTime(run.completedAt) : "Running"}</small>
+    {run.status === "running" ? <button type="button" onClick={() => props.onCancel(run.id)} disabled={props.cancellingRunId !== null}>
+      {props.cancellingRunId === run.id ? "Cancelling..." : "Cancel"}
+    </button> : null}
     {run.error ? <p className={styles.error}>{run.error}</p> : null}
   </article>)}</div>;
+}
+
+function displayRunStatus(status: EvaluationRunView["status"]): string {
+  return status === "cancelled" ? "Cancelled" : status;
 }
 
 function Stage1Results(props: {

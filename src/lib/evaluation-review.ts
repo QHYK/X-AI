@@ -24,7 +24,7 @@ type EvaluationRunRow = {
   id: string;
   provider: string;
   model: string;
-  status: "running" | "success" | "failed";
+  status: "running" | "success" | "failed" | "cancelled";
   error: string | null;
   startedAt: Date | string;
   completedAt: Date | string | null;
@@ -43,7 +43,7 @@ export type EvaluationRunView = {
   id: string;
   provider: string;
   model: string;
-  status: "running" | "success" | "failed";
+  status: "running" | "success" | "failed" | "cancelled";
   error: string | null;
   startedAt: string;
   completedAt: string | null;

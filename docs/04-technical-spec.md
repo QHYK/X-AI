@@ -368,7 +368,7 @@ evaluation_inputs
   ↓
 evaluation_runs
   id, evaluation_input_id, provider, model, prompt_version, status, error,
-  started_at, completed_at, duration_ms, input_tokens, output_tokens, created_at
+  started_at, completed_at, duration_ms, input_tokens, output_tokens, process_pid, created_at
   ↓
 evaluation_outputs
   id, evaluation_run_id, item_key, output_json, created_at
@@ -390,6 +390,11 @@ Orchestrator。它绝不写 `processed_contents`、`events`、`event_review_item
 Dashboard API 会先创建持久化的 `running` runs，再用固定 detached CLI 执行；读取页面 polling
 `evaluation_runs` 的状态。当前运行时是长期运行的 Node server，独立子进程不依赖原 HTTP 请求；
 同一 Daily + Stage 已有 running run 时拒绝重复触发。
+
+每个 Model Run 使用独立 detached process group，`process_pid` 只在服务端用于取消对应 Run 及其
+子进程；客户端只能提交 `evaluation_run.id`，不能传入系统 PID。取消会将仍为 `running` 的 Run
+原子更新为 `cancelled`，不影响同一 Frozen Input 的其他模型；已 `success`、`failed` 或
+`cancelled` 的 Run 不可再次取消。
 
 ### 3.8 Initial Indexes
 

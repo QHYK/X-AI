@@ -10,6 +10,7 @@ import { resolveEvaluationModels } from "../src/lib/evaluation-model-config.js";
 import {
   isEvaluationStage,
   resumeEvaluation,
+  resumeEvaluationRun,
   runEvaluation,
   type EvaluationStage,
 } from "../src/lib/model-evaluation.js";
@@ -29,8 +30,10 @@ async function main() {
     ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined,
   });
   try {
-    const result = options.inputId
-      ? await resumeEvaluation({ pool, evaluationInputId: options.inputId })
+    const result = options.runId
+      ? await resumeEvaluationRun({ pool, evaluationRunId: options.runId })
+      : options.inputId
+        ? await resumeEvaluation({ pool, evaluationInputId: options.inputId })
       : await runEvaluation({
         pool,
         date: options.date as string,
@@ -52,6 +55,7 @@ export function parseEvaluationCliArguments(args: string[]): {
   provider?: string;
   model?: string;
   inputId?: string;
+  runId?: string;
 } {
   const values = new Map<string, string>();
   for (const argument of args) {
@@ -60,7 +64,7 @@ export function parseEvaluationCliArguments(args: string[]): {
       throw new Error(`Unsupported argument "${argument}". Use --date=YYYY-MM-DD and optional --provider / --model.`);
     }
     const [, key, value] = match;
-    if (!key || !value || !["date", "stage", "provider", "model", "input-id"].includes(key)) {
+    if (!key || !value || !["date", "stage", "provider", "model", "input-id", "run-id"].includes(key)) {
       throw new Error(`Unsupported argument "${argument}".`);
     }
     if (values.has(key)) {
@@ -71,8 +75,9 @@ export function parseEvaluationCliArguments(args: string[]): {
   const date = values.get("date");
   const stage = values.get("stage");
   const inputId = values.get("input-id");
-  if (!stage || (!date && !inputId)) {
-    throw new Error("--stage=... and either --date=YYYY-MM-DD or --input-id=... are required.");
+  const runId = values.get("run-id");
+  if (!stage || (!date && !inputId && !runId)) {
+    throw new Error("--stage=... and either --date=YYYY-MM-DD, --input-id=... or --run-id=... are required.");
   }
   if (!isEvaluationStage(stage)) {
     throw new Error(`Unsupported Evaluation stage "${stage}".`);
@@ -83,6 +88,7 @@ export function parseEvaluationCliArguments(args: string[]): {
     provider: values.get("provider"),
     model: values.get("model"),
     inputId,
+    runId,
   };
 }
 

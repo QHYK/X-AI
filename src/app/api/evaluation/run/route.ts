@@ -25,7 +25,7 @@ export async function POST(request: Request): Promise<Response> {
       stage: parsed.request.stage,
       models: parsed.models,
     });
-    const result = startDetachedEvaluation(prepared);
+    const result = await startDetachedEvaluation(prepared);
     return Response.json(result, { status: result.status === "failed" ? 500 : 202 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to run Model Evaluation.";

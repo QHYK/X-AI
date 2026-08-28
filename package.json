@@ -37,6 +37,7 @@
     "test:model-evaluation": "tsx scripts/test-model-evaluation.ts",
     "test:model-evaluation-review": "tsx scripts/test-model-evaluation-review.ts",
     "test:model-evaluation-background": "tsx scripts/test-model-evaluation-background.ts",
+    "test:model-evaluation-cancel": "tsx scripts/test-model-evaluation-cancel.ts",
     "test:content-completion-runtime": "tsx scripts/test-content-completion-runtime.ts",
     "test:openai": "tsx scripts/test-openai-call.ts openai",
     "test:deepseek": "tsx scripts/test-openai-call.ts deepseek",
