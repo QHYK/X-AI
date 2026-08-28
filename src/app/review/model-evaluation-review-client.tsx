@@ -38,7 +38,7 @@ export function ModelEvaluationReview(props: {
     let cancelled = false;
     const poll = async () => {
       try {
-        const response = await fetch(`../../api/evaluation?date=${encodeURIComponent(data.dailyDate)}&stage=${encodeURIComponent(data.stage)}`);
+        const response = await fetch(`../api/evaluation?date=${encodeURIComponent(data.dailyDate)}&stage=${encodeURIComponent(data.stage)}`);
         if (!response.ok) return;
         const next = await response.json() as EvaluationReviewData;
         if (cancelled) return;
@@ -60,7 +60,7 @@ export function ModelEvaluationReview(props: {
     setRunning(true);
     setError(null);
     try {
-      const response = await fetch("../../api/evaluation/run", {
+      const response = await fetch("../api/evaluation/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ date, stage, providers }),

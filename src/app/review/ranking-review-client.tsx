@@ -37,7 +37,7 @@ export function EventRankingReview({ data }: { data: EventReviewData }) {
     <RankingEditor
       dailyDate={data.dailyDate}
       cutoff={data.cutoff}
-      endpoint="../../api/review/events/ranking"
+      endpoint="../api/review/events/ranking"
       reviewRunId={data.reviewRunId}
       initialItems={data.items}
       renderContent={(item, rank) => <EventContent item={item} rank={rank} cutoff={data.cutoff} />}
@@ -50,7 +50,7 @@ export function LongFormRankingReview({ data }: { data: LongFormReviewData }) {
     <RankingEditor
       dailyDate={data.dailyDate}
       cutoff={data.cutoff}
-      endpoint="../../api/review/long-form/ranking"
+      endpoint="../api/review/long-form/ranking"
       initialItems={data.items}
       renderContent={(item, rank) => <LongFormContent item={item} rank={rank} />}
     />
