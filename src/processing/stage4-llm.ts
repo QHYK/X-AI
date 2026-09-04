@@ -26,6 +26,8 @@ export type Stage4LlmOptions = {
 };
 
 export type Stage4WebSearchToolUsage = {
+  apiMode: "responses" | "chat_completions";
+  usage: { inputTokens: number; outputTokens: number; totalTokens: number } | null;
   webSearchPerformed: boolean;
   webSearchCallCount: number;
   sources: string[];
@@ -79,6 +81,7 @@ export async function runStage4EventEnrichmentLlm(
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
+  const useWebSearch = await determineWhetherExternalContextIsNeeded(client, model, input, timeoutMs);
 
   let rawOutputText: string | null = null;
   let lastError = "Unknown Stage 4 LLM failure.";
@@ -87,10 +90,10 @@ export async function runStage4EventEnrichmentLlm(
   for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
     attemptsUsed = attempt;
     try {
-      const response = await client.responses.create(
+      const response = await (useWebSearch ? client.responses : client.structured).create(
         {
           model,
-          instructions: buildStage4EventEnrichmentInstructions(),
+          instructions: buildStage4EventEnrichmentInstructions({ webSearchAvailable: useWebSearch }),
           input: [
             {
               role: "user",
@@ -103,8 +106,7 @@ export async function runStage4EventEnrichmentLlm(
             },
           ],
           max_output_tokens: 4_000,
-          tools: [{ type: "web_search" }],
-          tool_choice: "auto",
+          ...(useWebSearch ? { tools: [{ type: "web_search" }], tool_choice: "auto" as const } : {}),
           store: false,
           text: {
             format: {
@@ -133,7 +135,9 @@ export async function runStage4EventEnrichmentLlm(
         break;
       }
 
-      const toolUsage = extractWebSearchToolUsage(response);
+      const toolUsage = useWebSearch
+        ? extractWebSearchToolUsage(response)
+        : emptyChatToolUsage(response);
       const normalizedOutput = normalizeExternalContext(validation.output, toolUsage);
       return {
         success: true,
@@ -170,6 +174,75 @@ export async function runStage4EventEnrichmentLlm(
     elapsedMs: Date.now() - startedAt,
     error: lastError,
     rawOutputText,
+  };
+}
+
+/**
+ * Web Search 仅在缺失事实会实质影响事件理解时启用；判断本身不持久化，也不新增 Pipeline stage。
+ * 判断失败时保守地使用已有 source 内容，不把一次判定故障扩大为默认检索。
+ */
+async function determineWhetherExternalContextIsNeeded(
+  client: ReturnType<typeof createLlmClient>,
+  model: string,
+  input: Stage4EventEnrichmentInput,
+  timeoutMs: number,
+): Promise<boolean> {
+  try {
+    const response = await client.structured.create({
+      model,
+      instructions: [
+        "Decide whether external web context is necessary before enriching this event.",
+        "Return need_external_context=true only when a critical fact is missing from the provided reports and that gap would materially impair understanding: necessary background, a latest development that cannot be determined, important factual conflict, or needed authoritative confirmation.",
+        "Do not request search merely because more facts may exist. If the reports already explain what happened, needed background, why it matters, and material source differences, return false.",
+      ].join("\n"),
+      input: buildStage4EventEnrichmentUserPrompt(input),
+      max_output_tokens: 64,
+      store: false,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "stage4_external_context_decision",
+          description: "Whether Stage 4 requires external web context before enrichment.",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["need_external_context"],
+            properties: { need_external_context: { type: "boolean" } },
+          },
+        },
+      },
+    }, { timeout: timeoutMs });
+    return parseStage4ExternalContextDecision(response.output_text);
+  } catch (error) {
+    console.warn(
+      "Stage 4 external-context decision failed; continuing without Web Search.",
+      sanitizeLlmError(error instanceof Error ? error.message : String(error)),
+    );
+    return false;
+  }
+}
+
+function parseStage4ExternalContextDecision(rawText: string): boolean {
+  const parsed: unknown = JSON.parse(rawText);
+  if (
+    !isRecord(parsed) ||
+    Object.keys(parsed).length !== 1 ||
+    typeof parsed.need_external_context !== "boolean"
+  ) {
+    throw new Error("Invalid Stage 4 external-context decision structured output.");
+  }
+  return parsed.need_external_context;
+}
+
+function emptyChatToolUsage(response: { usage?: { input_tokens: number; output_tokens: number; total_tokens: number } }): Stage4WebSearchToolUsage {
+  return {
+    apiMode: "chat_completions",
+    usage: normalizeUsage(response.usage),
+    webSearchPerformed: false,
+    webSearchCallCount: 0,
+    sources: [],
+    calls: [],
   };
 }
 
@@ -217,11 +290,27 @@ function extractWebSearchToolUsage(response: unknown): Stage4WebSearchToolUsage 
   }
 
   return {
+    apiMode: "responses",
+    usage: isRecord(response) && isRecord(response.usage)
+      ? normalizeUsage(response.usage as { input_tokens: number; output_tokens: number; total_tokens: number })
+      : null,
     webSearchPerformed: calls.length > 0,
     webSearchCallCount: calls.length,
     sources: [...sources].sort(),
     calls,
   };
+}
+
+function normalizeUsage(
+  usage: { input_tokens: number; output_tokens: number; total_tokens: number } | undefined,
+) {
+  return usage
+    ? {
+        inputTokens: usage.input_tokens,
+        outputTokens: usage.output_tokens,
+        totalTokens: usage.total_tokens,
+      }
+    : null;
 }
 
 function collectWebSearchActionSources(value: unknown, sources: Set<string>) {

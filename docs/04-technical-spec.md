@@ -818,7 +818,9 @@ Stage 4 → OpenAI
 正式 Stage 1–4 commands 不依赖它们。
 Shared compatibility layer 支持 OpenAI / DeepSeek / Kimi；Kimi 当前不用于正式 Daily Workflow。
 
-OpenAI 继续使用 Responses API；DeepSeek / Kimi 使用各自的 OpenAI-compatible Chat Completions API。
+OpenAI、DeepSeek / Kimi 的普通 Structured Output 调用使用各自 OpenAI-compatible Chat Completions API。
+OpenAI Responses API 仅保留给 Stage 4 的实际 Web Search 路径；该路径由一次不持久化的
+Stage 4 上下文需求判断触发，默认不搜索。
 所有 provider 输出原则上都必须经过相同的 Application Schema Validation 后才能使用或持久化。
 Stage 2 当前处于临时 diagnostic 模式，严格 output / assignment 问题会被记录但不阻断 runtime output；
 该例外是已知限制，不改变 Prompt Spec 定义的长期 contract。
@@ -834,7 +836,8 @@ DeepSeek 当前使用官方 JSON Object mode 并在 instruction 中提供 schema
 模型调用应与业务逻辑解耦，未来可以替换模型而不修改 Workflow。
 
 ### External Context Retrieval
-Stage 4 uses the OpenAI Responses API `web_search` tool as an optional built-in tool.
+Stage 4 默认使用 Chat Completions 生成 Structured Output。仅当上下文需求判断确认现有 Source
+不足以理解事件时，才使用 OpenAI Responses API `web_search` tool。
 The request provides:
 ```json
 {

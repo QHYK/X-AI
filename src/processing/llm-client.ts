@@ -61,6 +61,7 @@ export type LlmResponse = {
   id: string;
   output_text: string;
   output: unknown[];
+  api_mode: "responses" | "chat_completions";
   usage?: ResponseUsage;
   finish_reason?: string | null;
 };
@@ -193,6 +194,14 @@ export function createLlmClient(options: LlmClientOptions = {}) {
           ? createOpenAiResponse(client, request, requestOptions)
           : createChatCompletionResponse(client, config.provider, request, requestOptions),
     },
+    /** 普通 Structured Output 默认走 Chat Completions；Web Search 保留使用 responses。 */
+    structured: {
+      create: (
+        request: ResponseRequest,
+        requestOptions: { timeout?: number } = {},
+      ): Promise<LlmResponse> =>
+        createChatCompletionResponse(client, config.provider, request, requestOptions),
+    },
   };
 }
 
@@ -220,6 +229,7 @@ async function createOpenAiResponse(
       id: raw.id,
       output_text: raw.output_text,
       output: raw.output,
+      api_mode: "responses",
       usage: raw.usage ?? undefined,
       finish_reason: resolveResponsesFinishReason(raw.status, raw.incomplete_details?.reason ?? null),
     };
@@ -243,14 +253,14 @@ function resolveResponsesFinishReason(
 
 async function createChatCompletionResponse(
   client: OpenAI,
-  provider: Exclude<LlmProvider, "openai">,
+  provider: LlmProvider,
   request: ResponseRequest,
   requestOptions: { timeout?: number },
 ): Promise<LlmResponse> {
   const format = request.text?.format;
   const instructions = buildChatInstructions(provider, request.instructions, format?.schema);
   const responseFormat = format
-    ? provider === "kimi"
+    ? provider === "openai" || provider === "kimi"
       ? {
           type: "json_schema" as const,
           json_schema: {
@@ -262,7 +272,13 @@ async function createChatCompletionResponse(
         }
       : { type: "json_object" as const }
     : undefined;
-  const diagnostic = buildRequestDiagnostic(provider, client.baseURL, request, responseFormat);
+  const diagnostic = buildRequestDiagnostic(
+    provider,
+    client.baseURL,
+    request,
+    responseFormat,
+    "chat_completions",
+  );
   logRequestDiagnostic(diagnostic);
   let response: OpenAI.Chat.Completions.ChatCompletion;
   try {
@@ -290,6 +306,7 @@ async function createChatCompletionResponse(
     id: response.id,
     output_text: typeof outputText === "string" ? outputText : "",
     output: [],
+    api_mode: "chat_completions",
     finish_reason: response.choices[0]?.finish_reason ?? null,
     usage: response.usage
       ? {
@@ -302,7 +319,7 @@ async function createChatCompletionResponse(
 }
 
 function buildChatInstructions(
-  provider: Exclude<LlmProvider, "openai">,
+  provider: LlmProvider,
   instructions: string | undefined,
   schema: unknown,
 ): string {
@@ -338,8 +355,11 @@ function buildRequestDiagnostic(
   baseUrl: string,
   request: ResponseRequest,
   chatResponseFormat?: unknown,
+  apiMode: "responses" | "chat_completions" = provider === "openai"
+    ? "responses"
+    : "chat_completions",
 ): LlmRequestDiagnostic {
-  const isResponsesApi = provider === "openai";
+  const isResponsesApi = apiMode === "responses";
   return {
     provider,
     method: "POST",

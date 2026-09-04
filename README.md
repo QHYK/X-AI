@@ -6,19 +6,14 @@ X-AI-field 是一个 AI 驱动的信息筛选系统：持续收集可信信息�
 
 已完成：
 - Product / AI Workflow / Prompt / Technical Spec
-- Source List
-- Project Bootstrap / PostgreSQL / Supabase / Drizzle persistence
-- RSS Collector / Content Completion
+- Project Bootstrap / Source List / RSS Collector / Content Completion
 - Stage 1 - Content Understanding & Selection
 - Stage 2 - Event Merge
 - Stage 3 - Channel Ranking + Exact Dedup
 - Stage 4 — Selected Event Enrichment + Optional Web Search
-- Daily Workflow Orchestrator
-- Daily Brief API `GET /api/brief?date=YYYY-MM-DD`
-- Internal Dashboard `/dashboard`
-- X-field Daily Brief 页面
-- 09:00 Asia/Shanghai Cron
-- Human Review：Event / Long-form Ranking Review + Feedback
+- Daily Workflow Orchestrator / 09:00 Asia/Shanghai Cron / Internal Dashboard
+- Daily Brief API & Page
+- Human Review + Feedback
 - Manual Model Evaluation MVP（Stage 1–3，冻结输入，多模型离线比较）
 
 ## Daily Brief
@@ -138,7 +133,7 @@ npm run eval:stage3:long-form -- --date=2026-08-28
 # npm run test:stage4-event-date           # Validate deterministic event_date 推导
 # npm run test:stage4-persistence          # 验证 Stage 4 跨日 append、同日 rebuild 和 rollback
 npm run test:content-completion-runtime  # 验证 Completion 统计与 Dashboard runtime 读取
-npm run test:model-evaluation             # 验证冻结输入、独立 model run 与 Production 隔离
+npm run test:model-evaluation            # 验证冻结输入、独立 model run 与 Production 隔离
 npm run test:openai                      # Structured-output provider smoke testsmoke test
 npm run test:deepseek
 npm run test:kimi
@@ -165,25 +160,17 @@ Stage 4 persistence 会使用最近一次成功 runtime artifacts 识别同一 `
 ### Model Evaluation
 
 Model Evaluation 是人工触发的离线实验工具，不属于 `npm run daily`、Cron 或 Production
-Workflow。它只评测 Stage 1、Stage 2、Stage 3 Event / Digest / Long-form：先把指定
-Stage 2/3 的实际 Stage 输入保存为 `evaluation_inputs` Frozen Input；Stage 1 只保存不可变
-Raw Article ID 与 batch 配置，并在执行/查看时用同一 Stage 1 builder 重建输入。每个模型的
-`evaluation_runs` 引用同一个比较 identity，并把已验证 Structured Output 写入 `evaluation_outputs`。
+Workflow。它只评测 Stage 1、Stage 2、Stage 3 Event / Digest / Long-form。
 
-默认运行当前 Evaluation 配置中的 DeepSeek 与 Kimi；可用
-`--provider=deepseek` 限定一个 Provider，`--model=...` 需要同时提供单一 `--provider`。
+默认运行当前 Evaluation 配置中的 DeepSeek 与 Kimi；
+可用 `--provider=deepseek` 限定一个 Provider，`--model=...` 需要同时提供单一 `--provider`。
 配置读取现有 `DEEPSEEK_*` / `KIMI_*` 环境变量；可选 `EVALUATION_PROVIDERS=deepseek,kimi`
 控制默认 Provider 列表。Evaluation 不写 `processed_contents`、`events`、Review 或 Feedback，
 也不修改任何正式 Rank。`sql/evaluation/` 提供 Routing、Merge、Event Top 15 / Rank
 Difference 与运行性能的人工比较 SQL。
 
-内部观察页面位于 `review/models`：人工选择 Daily、Stage 和当前启用的模型后，页面才会调用
-Evaluation Service。它只比较同一个 Frozen Input 下各模型的最新 Run，展示 Stage 1 routing/category
-分歧、Stage 2 Event Groups，以及 Stage 3 排名差异；不会自动运行、不会参与 Daily，也不会修改
-任何 Production 结果。读取接口为 `api/evaluation?date=...&stage=...`，手动触发接口为
-`api/evaluation/run`。
-Run API 会先持久化 `running` runs，再以 detached CLI 在当前长期运行的 Node server 上继续执行，
-因此浏览器刷新或关闭不会中断评测；页面会 polling 持久化状态直到各模型结束。
+内部观察页面位于 `review/models`：不会自动运行、不会参与 Daily，也不会修改任何 Production 结果。
+读取接口为 `api/evaluation?date=...&stage=...`，手动触发接口为 `api/evaluation/run`。
 
 ### Production
 

@@ -107,7 +107,7 @@ export async function runStage3EventRankingLlm(
     for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
       attemptsUsed = attempt;
       try {
-        const response = await client.responses.create(
+        const response = await client.structured.create(
           {
             model,
             instructions: buildStage3EventRankingInstructions(),

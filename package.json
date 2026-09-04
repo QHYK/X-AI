@@ -40,6 +40,10 @@
     "test:model-evaluation-cancel": "tsx scripts/test-model-evaluation-cancel.ts",
     "test:content-completion-runtime": "tsx scripts/test-content-completion-runtime.ts",
     "test:openai": "tsx scripts/test-openai-call.ts openai",
+    "test:openai:chat": "tsx scripts/test-openai-call.ts openai chat-completions",
+    "test:openai:chat:structured": "tsx scripts/test-openai-call.ts openai chat-completions-structured",
+    "test:stage1:chat": "tsx scripts/test-stage1-chat-structured.ts",
+    "test:stage4:chat": "tsx scripts/test-stage4-chat-no-search.ts",
     "test:deepseek": "tsx scripts/test-openai-call.ts deepseek",
     "test:kimi": "tsx scripts/test-openai-call.ts kimi",
     "recover:stage4-events:dry-run": "tsx scripts/dry-run-stage4-event-recovery.ts"

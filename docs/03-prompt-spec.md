@@ -177,7 +177,7 @@ Rank by:
 
 ## Stage 4 — Selected Event Enrichment
 
-**Prompt Version:** `v6`
+**Prompt Version:** `v7`
 
 **Goal:** Act as the final editorial synthesis layer for each selected Event. Make the Event independently understandable by explaining what happened and, when relevant, the minimum background / preceding development needed to understand it and why the development deserves attention now.
 
@@ -242,7 +242,9 @@ Do not manufacture significance. Straightforward Events whose significance is al
 - Summaries must remain faithful to the provided reports and any actual Web Search results used.
 
 ### Web Search
-- Web Search is available with `tool_choice=auto`; it remains optional and is not required for every Event.
+- Stage 4 first makes a non-persisted application-side context decision. If existing sources are sufficient,
+  enrichment uses Chat Completions without Web Search; otherwise it uses Responses API with `tool_choice=auto`.
+- Web Search remains optional and is not required for every Event.
 - First understand the provided reports, then actively judge whether important context is still missing.
 - Use Web Search when it can materially improve independent understanding through necessary background/context, important preceding developments, why the development matters now, important context for an ongoing story, first-party confirmation, or clarification of meaningful uncertainty/conflicting reports.
 - Web Search is especially useful when the provided candidates describe only the latest development in an important ongoing story without enough context to understand its significance.

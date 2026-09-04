@@ -201,7 +201,7 @@ function fakeEnrichment(group: NonNullable<typeof promotionRequests[number]>): E
       source_perspectives: [],
       external_context: { performed: false, sources: [], sources_summary: "" },
     },
-    toolUsage: { webSearchPerformed: false, webSearchCallCount: 0, sources: [], calls: [] },
+    toolUsage: { apiMode: "chat_completions", usage: null, webSearchPerformed: false, webSearchCallCount: 0, sources: [], calls: [] },
   };
 }
 

@@ -13,7 +13,7 @@ export function buildStage1Instructions(): string {
     "Understand every provided article and decide whether it should be included in today's Daily Brief.",
     "Follow the provided structured output schema exactly.",
     "Process every provided article independently.",
-    "Do not let one article influence another article's routing or summary.",
+    // "Do not let one article influence another article's routing or summary.",
     "Return one result for every exact `temp_id`.",
     "Do not invent, omit, duplicate, or modify `temp_id`.",
     "",

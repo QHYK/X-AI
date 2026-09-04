@@ -17,10 +17,11 @@ export type Stage4EventEnrichmentInput = {
   sources: Stage4EventSourceInput[];
 };
 
-export const STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION = "v6";
+export const STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION = "v7";
 
 /** 构造单个 Event 的最终编辑加工指令及按需 Web Search 约束。 */
-export function buildStage4EventEnrichmentInstructions(): string {
+export function buildStage4EventEnrichmentInstructions(options: { webSearchAvailable?: boolean } = {}): string {
+  const webSearchAvailable = options.webSearchAvailable === true;
   return [
     "You are Stage 4 of X-AI-field: Selected Event Enrichment.",
     "Act as the final editorial synthesis layer for one selected Event in the Daily Brief.",
@@ -61,18 +62,24 @@ export function buildStage4EventEnrichmentInstructions(): string {
     "- Each `source_perspectives[].summary`: no more than 80 Chinese characters.",
     "",
     "Web Search:",
-    "- Web Search is available with tool choice auto. Do not search every Event by default.",
-    "- First understand the provided reports, then actively judge whether important context is still missing.",
-    "- Use Web Search when it can materially improve the final Event by adding necessary background, important preceding developments, an explanation of why the development matters now, first-party confirmation, or clarification of meaningful uncertainty/conflicting reports.",
-    "- Web Search is especially valuable when the Event is part of an important ongoing story and the provided candidates only describe the latest development without enough context to understand its significance.",
-    "- Prefer first-party or authoritative sources for important policy decisions, official economic data, company announcements, court decisions, regulatory actions, and research findings when confirmation materially improves the Event.",
-    "- Search may also be useful when a small amount of reliable background can explain why an otherwise isolated fact deserves attention.",
-    "- Do not search merely to accumulate more facts, repeat information already supported by the provided reports, add trivia, or fill the summary with generic background.",
-    "- Do not search for speculative market impact, investment recommendations, or price predictions.",
-    "- If Web Search does not provide meaningful information gain, rely on the provided reports.",
+    webSearchAvailable
+      ? "- Web Search is available with tool choice auto. Do not search every Event by default."
+      : "- Web Search is not available for this request. Use only the provided reports and set external_context.performed to false with empty sources and sources_summary.",
+    ...(webSearchAvailable ? [
+      "- First understand the provided reports, then actively judge whether important context is still missing.",
+      "- Use Web Search when it can materially improve the final Event by adding necessary background, important preceding developments, an explanation of why the development matters now, first-party confirmation, or clarification of meaningful uncertainty/conflicting reports.",
+      "- Web Search is especially valuable when the Event is part of an important ongoing story and the provided candidates only describe the latest development without enough context to understand its significance.",
+      "- Prefer first-party or authoritative sources for important policy decisions, official economic data, company announcements, court decisions, regulatory actions, and research findings when confirmation materially improves the Event.",
+      "- Search may also be useful when a small amount of reliable background can explain why an otherwise isolated fact deserves attention.",
+      "- Do not search merely to accumulate more facts, repeat information already supported by the provided reports, add trivia, or fill the summary with generic background.",
+      "- Do not search for speculative market impact, investment recommendations, or price predictions.",
+      "- If Web Search does not provide meaningful information gain, rely on the provided reports.",
+    ] : []),
     "- If no Web Search is used, set `external_context.sources_summary` to an empty string.",
-    "- If Web Search is used, `event_summary` and `event_summary_zh` may naturally integrate the verified background, preceding developments, confirmation, or significance needed to make the Event independently understandable.",
-    "- If Web Search is used, use `external_context.sources_summary` to concisely state what useful context, confirmation, or explanation the search added.",
+    ...(webSearchAvailable ? [
+      "- If Web Search is used, `event_summary` and `event_summary_zh` may naturally integrate the verified background, preceding developments, confirmation, or significance needed to make the Event independently understandable.",
+      "- If Web Search is used, use `external_context.sources_summary` to concisely state what useful context, confirmation, or explanation the search added.",
+    ] : []),
     "- Web Search results must never be presented as an original source perspective; `source_perspectives` remains based only on the provided source candidates.",
     "",
     "Do not:",
