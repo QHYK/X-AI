@@ -7,7 +7,6 @@ type DuplicateRow = {
   url: string | null;
   contentText: string | null;
   sourceName: string;
-  createdAt: Date;
 };
 
 export type PreStage1DuplicateSummary = {
@@ -26,11 +25,11 @@ export async function ignorePreStage1ExactDuplicates(
   scope: PublishedAtScope,
 ): Promise<PreStage1DuplicateSummary> {
   const result = await pool.query<DuplicateRow>(
-    `select ra.id, ra.title, ra.url, ra.content_text as "contentText", s.name as "sourceName", ra.created_at as "createdAt"
+    `select ra.id, ra.title, ra.url, ra.content_text as "contentText", s.name as "sourceName"
        from raw_articles ra join sources s on s.id = ra.source_id
       where ra.stage1_status = 'pending'
         and ra.published_at >= $1::timestamptz and ra.published_at < $2::timestamptz
-      order by ra.created_at asc, ra.id asc`,
+      order by ra.id asc`,
     [scope.startAt, scope.endAt],
   );
   const rows = result.rows;
@@ -99,6 +98,5 @@ function compareDuplicateWinner(left: DuplicateRow, right: DuplicateRow): number
   const rightContent = right.contentText?.trim().length ?? 0;
   return rightContent - leftContent
     || right.sourceName.length - left.sourceName.length
-    || left.createdAt.getTime() - right.createdAt.getTime()
     || left.id.localeCompare(right.id);
 }
