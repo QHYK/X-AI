@@ -5,6 +5,7 @@ import type { Pool } from "pg";
 import {
   getDashboardData,
   loadContentCompletionRuntimeByDate,
+  loadDuplicateFilterRuntimeByDate,
   loadRuntimeMetricsByDate,
 } from "../src/lib/dashboard.js";
 import { getDailyBriefForDailyDate } from "../src/lib/daily-brief.js";
@@ -280,6 +281,7 @@ try {
     daily_date: "2026-08-20",
     started_at: "2026-08-24T16:29:00.000Z",
     status: "success",
+    duplicate_filter_run: join(runtimeRoot, "runtime/pre-stage1-duplicates/fixture"),
     steps: [
       {
         name: "process:stage1",
@@ -301,16 +303,47 @@ try {
     remaining_count: 7,
     status: "success",
   });
+  await writeRun(runtimeRoot, "runtime/pre-stage1-duplicates/fixture", {
+    status: "success",
+    inputCount: 10,
+    duplicateCount: 3,
+    outputCount: 7,
+    duplicateRate: 0.3,
+    sameUrlCount: 1,
+    sameTitleCount: 1,
+    sameUrlAndTitleCount: 1,
+  });
 
   const dates = new Set(["2026-08-20", "2026-08-19"]);
   const stageRuntime = await loadRuntimeMetricsByDate(runtimeRoot, dates);
   const completionRuntime = await loadContentCompletionRuntimeByDate(runtimeRoot, dates);
+  const duplicateFilterRuntime = await loadDuplicateFilterRuntimeByDate(runtimeRoot, dates);
   checks.push({
     name: "runtime artifacts use their recorded daily_date instead of their calendar start date",
     passed:
       stageRuntime.get("2026-08-20")?.get("stage2")?.candidateCount === 7 &&
       completionRuntime.get("2026-08-20")?.candidateCount === 11 &&
       completionRuntime.get("2026-08-20")?.remainingCount === 7,
+  });
+  checks.push({
+    name: "Dashboard runtime returns Exact Duplicate Filter statistics from the Daily run artifact",
+    passed:
+      duplicateFilterRuntime.get("2026-08-20")?.duplicateCount === 3 &&
+      duplicateFilterRuntime.get("2026-08-20")?.outputCount === 7 &&
+      duplicateFilterRuntime.get("2026-08-20")?.sameUrlCount === 1 &&
+      duplicateFilterRuntime.get("2026-08-20")?.sameTitleCount === 1 &&
+      duplicateFilterRuntime.get("2026-08-20")?.sameUrlAndTitleCount === 1,
+  });
+  const dashboardWithDuplicateFilter = await getDashboardData(createDashboardPool([]), {
+    now: new Date("2026-08-20T16:30:00.000Z"),
+    rootDir: runtimeRoot,
+  });
+  checks.push({
+    name: "Dashboard Date Details exposes Exact Duplicate Filter statistics",
+    passed:
+      dashboardWithDuplicateFilter.details.duplicateFilter?.duplicateCount === 3 &&
+      dashboardWithDuplicateFilter.details.duplicateFilter?.duplicateRate === 0.3 &&
+      dashboardWithDuplicateFilter.details.duplicateFilter?.outputCount === 7,
   });
   checks.push({
     name: "legacy runtime without a prompt version remains N/A",

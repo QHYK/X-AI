@@ -10,6 +10,7 @@ import {
 
 const STEPS = [
   "collect:rss",
+  "dedupe:stage1",
   "complete:content",
   "process:stage1",
   "process:stage2",
@@ -36,6 +37,7 @@ type DailyRun = {
   scope_start_at: string;
   scope_end_at: string;
   content_completion_run: string | null;
+  duplicate_filter_run: string | null;
   stage2_run: string | null;
   stage3_run: string | null;
   stage4_run: string | null;
@@ -58,6 +60,7 @@ async function main() {
     scope_start_at: scope.startAt,
     scope_end_at: scope.endAt,
     content_completion_run: null,
+    duplicate_filter_run: null,
     stage2_run: null,
     stage3_run: null,
     stage4_run: null,
@@ -166,6 +169,8 @@ function getRunPointerPath(runDir: string, name: StepName): string | null {
   switch (name) {
     case "complete:content":
       return join(runDir, "content-completion-run.txt");
+    case "dedupe:stage1":
+      return join(runDir, "duplicate-filter-run.txt");
     case "process:stage2":
       return join(runDir, "stage2-run.txt");
     case "process:stage3":
@@ -183,6 +188,9 @@ function setStageRun(run: DailyRun, name: StepName, runDir: string): void {
   }
 
   switch (name) {
+    case "dedupe:stage1":
+      run.duplicate_filter_run = runDir;
+      break;
     case "complete:content":
       run.content_completion_run = runDir;
       break;

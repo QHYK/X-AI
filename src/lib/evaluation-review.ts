@@ -124,6 +124,10 @@ export async function getEvaluationReviewData(
     return emptyReviewData(dailyDate, stage);
   }
 
+  if (stage === "stage1") {
+    return getStage1PairwiseReviewData(pool, dailyDate, input);
+  }
+
   const runResult = await pool.query<EvaluationRunRow>(
     `select distinct on (provider, model)
             id, provider, model, status, error, started_at as "startedAt",
@@ -156,17 +160,97 @@ export async function getEvaluationReviewData(
     stage2: null,
     rankings: null,
   };
-  if (stage === "stage1") {
-    const stage1Input = isStage1EvaluationInputReference(input.inputJson)
-      ? await reconstructStage1EvaluationInput(pool, input.inputJson)
-      : input.inputJson;
-    data.stage1 = normalizeStage1Evaluation(stage1Input, runs, outputsByRun);
-  } else if (stage === "stage2") {
+  if (stage === "stage2") {
     data.stage2 = normalizeStage2Evaluation(input.inputJson, runs, outputsByRun);
   } else {
     data.rankings = normalizeStage3Evaluation(stage, input.inputJson, runs, outputsByRun);
   }
   return data;
+}
+
+/** Stage 1 以 immutable raw_article_id 对齐；不同 Evaluation input 不阻断同日模型比较。 */
+async function getStage1PairwiseReviewData(
+  pool: Pick<Pool, "query">,
+  dailyDate: string,
+  latestInput: EvaluationInputRow,
+): Promise<EvaluationReviewData> {
+  const runResult = await pool.query<EvaluationRunRow & { evaluationInputId: string; inputJson: unknown }>(
+    `select distinct on (run.provider, run.model)
+            run.id, run.evaluation_input_id as "evaluationInputId", run.provider, run.model, run.status, run.error,
+            run.started_at as "startedAt", run.completed_at as "completedAt", run.duration_ms as "durationMs",
+            run.input_tokens as "inputTokens", run.output_tokens as "outputTokens", input.input_json as "inputJson"
+       from evaluation_runs run join evaluation_inputs input on input.id = run.evaluation_input_id
+      where input.daily_date = $1::date and input.stage = 'stage1' and run.status = 'success'
+      order by run.provider, run.model, run.started_at desc, run.id desc`,
+    [dailyDate],
+  );
+  const runs = runResult.rows.map(toRunView);
+  const runIds = runs.map((run) => run.id);
+  const outputRows = runIds.length === 0 ? [] : (await pool.query<EvaluationOutputRow>(
+    `select evaluation_run_id as "evaluationRunId", item_key as "itemKey", output_json as "outputJson"
+       from evaluation_outputs where evaluation_run_id = any($1::uuid[]) order by created_at asc, id asc`,
+    [runIds],
+  )).rows;
+  const outputsByRun = groupOutputsByRun(outputRows);
+  const inputs = new Map<string, unknown>();
+  for (const row of runResult.rows) {
+    if (!inputs.has(row.evaluationInputId)) {
+      inputs.set(row.evaluationInputId, isStage1EvaluationInputReference(row.inputJson)
+        ? await reconstructStage1EvaluationInput(pool, row.inputJson)
+        : row.inputJson);
+    }
+  }
+  return {
+    dailyDate,
+    stage: "stage1",
+    input: { id: latestInput.id, inputHash: latestInput.inputHash, createdAt: toIso(latestInput.createdAt) },
+    runs,
+    stage1: normalizeStage1EvaluationAcrossInputs(runs, runResult.rows, inputs, outputsByRun),
+    stage2: null,
+    rankings: null,
+  };
+}
+
+function normalizeStage1EvaluationAcrossInputs(
+  runs: EvaluationRunView[],
+  runRows: Array<EvaluationRunRow & { evaluationInputId: string }>,
+  inputs: Map<string, unknown>,
+  outputsByRun: Map<string, EvaluationOutputRow[]>,
+): Stage1EvaluationItem[] {
+  const items = new Map<string, Stage1EvaluationItem>();
+  for (const run of runs) {
+    const inputId = runRows.find((row) => row.id === run.id)?.evaluationInputId;
+    const batches = asArray(recordValue(inputs.get(inputId ?? ""), "batches"));
+    for (const batch of batches) {
+      const rawIds = asArray(recordValue(batch, "raw_article_ids")).map((value) => stringValue(value) ?? "");
+      const articles = asArray(recordValue(recordValue(batch, "input"), "articles"));
+      const output = outputsByRun.get(run.id)?.find((entry) => entry.itemKey === stringValue(recordValue(batch, "item_key")))?.outputJson;
+      articles.forEach((article, index) => {
+        const rawArticleId = rawIds[index];
+        if (!rawArticleId) return;
+        const current = items.get(rawArticleId) ?? {
+          id: rawArticleId,
+          title: stringValue(recordValue(article, "title")) ?? "Untitled article",
+          source: stringValue(recordValue(article, "source_name")) ?? "Unknown source",
+          results: {}, routingDisagreement: false, categoryDisagreement: false,
+        };
+        const tempId = stringValue(recordValue(article, "temp_id"));
+        const result = asArray(recordValue(output, "results")).find((entry) => stringValue(recordValue(entry, "temp_id")) === tempId);
+        current.results[run.id] = result ? {
+          routing: stringValue(recordValue(result, "routing")), category: stringValue(recordValue(result, "category")),
+          titleZh: stringValue(recordValue(recordValue(result, "generated_content"), "title_zh")),
+          summaryZh: stringValue(recordValue(recordValue(result, "generated_content"), "summary_zh")),
+        } : null;
+        items.set(rawArticleId, current);
+      });
+    }
+  }
+  return [...items.values()].map((item) => {
+    const present = Object.values(item.results).filter((value): value is NonNullable<typeof value> => value !== null);
+    return { ...item, routingDisagreement: new Set(present.map((value) => value.routing)).size > 1,
+      categoryDisagreement: new Set(present.map((value) => value.category)).size > 1 };
+  }).sort((a, b) => Number(b.routingDisagreement) - Number(a.routingDisagreement)
+    || Number(b.categoryDisagreement) - Number(a.categoryDisagreement) || a.title.localeCompare(b.title));
 }
 
 /** 将 Stage 1 batch outputs 按原始 temp_id 合并，且只将 routing/category 差异标为 disagreement。 */

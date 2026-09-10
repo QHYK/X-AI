@@ -7,6 +7,7 @@ import { toDailyScopeEnv, type DailyScope } from "./daily-scope.js";
 
 export type DailyStageName =
   | "collect:rss"
+  | "dedupe:stage1"
   | "complete:content"
   | "process:stage1"
   | "process:stage2"

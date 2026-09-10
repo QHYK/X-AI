@@ -30,7 +30,7 @@ Daily Brief 包含四个部分：
 ```text
 RSS Sources
     ↓
-Collection → Content Completion
+Collection → Exact Raw Duplicate Filter → Content Completion
     ↓
 Stage 1 - Understand / Select / Route
     ↓
@@ -117,6 +117,7 @@ npm run daily                            # Run the complete daily pipeline.
 npm run collect:rss                      # RSS sources → `raw_articles`
 npm run complete:content                 # rss.content_text 内容不足的补充正文
 npm run process:stage1                   # Stage 1: Process the last 24 hours Raw Articles
+npm run dedupe:stage1                    # Exact duplicate filter (Daily supplies its published_at scope)
 npm run process:stage2                   # Stage 2: Merge Event and write runtime intermediate data
 npm run process:stage3                   # Stage 3: Channel rank, exact dedup and persist
 npm run process:stage4                   # Stage 4: enrich Events and persist events

@@ -27,6 +27,19 @@ export type Stage1JobOptions = Stage1LlmOptions & {
   batchSize?: number;
   batchMaxContentChars?: number;
   batchMaxTotalChars?: number;
+  onAttemptRecord?: (record: Stage1AttemptRecord) => void | Promise<void>;
+  onInitialBatches?: (batches: Stage1ArticleRow[][]) => void | Promise<void>;
+};
+
+export type Stage1AttemptRecord = {
+  batchId: string;
+  parentBatchId: string | null;
+  articleCount: number;
+  attempt: number;
+  type: "initial" | "retry" | "split";
+  status: "success" | "failed";
+  errorType: string | null;
+  durationMs: number;
 };
 
 export type Stage1JobArticleResult = {
@@ -55,6 +68,8 @@ export type Stage1JobSummary = {
   processedContentInsertedCount: number;
   batchCount: number;
   fallbackBatchCount: number;
+  splitCount: number;
+  singletonBatchCount: number;
   llmCallCount: number;
   retryCount: number;
   llmDurationMs: number;
@@ -71,6 +86,8 @@ export type Stage1BatchConfig = {
 type Stage1MicroBatchResult = {
   results: Stage1JobArticleResult[];
   fallbackUsed: boolean;
+  splitCount: number;
+  singletonBatchCount: number;
   llmCallCount: number;
   retryCount: number;
   llmDurationMs: number;
@@ -79,9 +96,9 @@ type Stage1MicroBatchResult = {
 
 const DEFAULT_STAGE1_CONCURRENCY = 3;
 const DEFAULT_STAGE1_LOOKBACK_HOURS = 24;
-export const DEFAULT_STAGE1_BATCH_SIZE = 8;
-export const DEFAULT_STAGE1_BATCH_MAX_CONTENT_CHARS = 12_000;
-export const DEFAULT_STAGE1_BATCH_MAX_TOTAL_CHARS = 40_000;
+export const DEFAULT_STAGE1_BATCH_SIZE = 15;
+export const DEFAULT_STAGE1_BATCH_MAX_CONTENT_CHARS = 20_000;
+export const DEFAULT_STAGE1_BATCH_MAX_TOTAL_CHARS = 60_000;
 
 /** 执行一次 Stage 1，支持默认滑动窗口或 Daily 传入的固定 published_at scope。 */
 export async function processStage1Batch(
@@ -98,9 +115,10 @@ export async function processStage1Batch(
     publishedAtScope: options.publishedAtScope,
   });
   const batches = createStage1MicroBatches(articles, batchConfig);
+  await options.onInitialBatches?.(batches);
 
-  const batchResults = await runWithConcurrency(batches, concurrency, async (batch) =>
-    processStage1MicroBatch(pool, batch, options),
+  const batchResults = await runWithConcurrency(batches, concurrency, async (batch, index) =>
+    processStage1MicroBatch(pool, batch, options, 0, `batch-${String(index + 1).padStart(3, "0")}`, null),
   );
   const results = batchResults.flatMap((result) => result.results);
   const tokenUsage = sumTokenUsage(batchResults.map((result) => result.tokenUsage));
@@ -121,6 +139,8 @@ export async function processStage1Batch(
       .length,
     batchCount: batches.length,
     fallbackBatchCount: batchResults.filter((result) => result.fallbackUsed).length,
+    splitCount: batchResults.reduce((sum, result) => sum + result.splitCount, 0),
+    singletonBatchCount: batchResults.reduce((sum, result) => sum + result.singletonBatchCount, 0),
     llmCallCount: batchResults.reduce((sum, result) => sum + result.llmCallCount, 0),
     retryCount: batchResults.reduce((sum, result) => sum + result.retryCount, 0),
     llmDurationMs: batchResults.reduce((sum, result) => sum + result.llmDurationMs, 0),
@@ -354,16 +374,36 @@ async function processStage1MicroBatch(
   pool: Pool,
   articles: Stage1ArticleRow[],
   options: Stage1LlmOptions = {},
+  inheritedAttempts = 0,
+  batchId = "batch",
+  parentBatchId: string | null = null,
 ): Promise<Stage1MicroBatchResult> {
-  const llmResult = await runStage1BatchLlm(articles, options);
+  const llmResult = await runStage1BatchLlm(articles, {
+    ...options,
+    onAttempt: async (event) => {
+      await options.onAttempt?.(event);
+      await (options as Stage1JobOptions).onAttemptRecord?.({
+        batchId,
+        parentBatchId,
+        articleCount: articles.length,
+        attempt: event.attempt,
+        type: event.attempt > 1 ? "retry" : parentBatchId ? "split" : "initial",
+        status: event.status,
+        errorType: event.errorType,
+        durationMs: event.durationMs,
+      });
+    },
+  });
   const metrics = createBatchMetrics(llmResult);
 
   if (llmResult.success) {
     return {
       ...metrics,
       fallbackUsed: false,
+      splitCount: 0,
+      singletonBatchCount: articles.length === 1 ? 1 : 0,
       results: await persistSuccessfulBatch(pool, articles, llmResult.output.results, {
-        attempts: llmResult.attempts,
+        attempts: inheritedAttempts + llmResult.attempts,
       }),
     };
   }
@@ -372,41 +412,38 @@ async function processStage1MicroBatch(
     return {
       ...metrics,
       fallbackUsed: false,
+      splitCount: 0,
+      singletonBatchCount: 1,
       results: [
-        await persistFailedArticle(pool, articles[0], llmResult.error, llmResult.attempts),
+        await persistFailedArticle(pool, articles[0], llmResult.error, inheritedAttempts + llmResult.attempts),
       ],
     };
   }
 
-  const results: Stage1JobArticleResult[] = [];
-  let fallbackMetrics = metrics;
-  for (const article of articles) {
-    const singleResult = await runStage1BatchLlm([article], options);
-    fallbackMetrics = mergeBatchMetrics(fallbackMetrics, createBatchMetrics(singleResult));
-
-    if (!singleResult.success) {
-      results.push(
-        await persistFailedArticle(
-          pool,
-          article,
-          singleResult.error,
-          llmResult.attempts + singleResult.attempts,
-        ),
-      );
-      continue;
-    }
-
-    results.push(
-      ...(await persistSuccessfulBatch(pool, [article], singleResult.output.results, {
-        attempts: llmResult.attempts + singleResult.attempts,
-      })),
-    );
-  }
+  const midpoint = Math.floor(articles.length / 2);
+  const left = await processStage1MicroBatch(
+    pool,
+    articles.slice(0, midpoint),
+    options,
+    inheritedAttempts + llmResult.attempts,
+    `${batchId}.left`,
+    batchId,
+  );
+  const right = await processStage1MicroBatch(
+    pool,
+    articles.slice(midpoint),
+    options,
+    inheritedAttempts + llmResult.attempts,
+    `${batchId}.right`,
+    batchId,
+  );
 
   return {
-    ...fallbackMetrics,
+    ...mergeBatchMetrics(mergeBatchMetrics(metrics, left), right),
     fallbackUsed: true,
-    results,
+    splitCount: 1 + left.splitCount + right.splitCount,
+    singletonBatchCount: left.singletonBatchCount + right.singletonBatchCount,
+    results: [...left.results, ...right.results],
   };
 }
 
@@ -522,11 +559,13 @@ function toStage1Output(result: Stage1BatchOutputResult): Stage1Output {
   };
 }
 
+type Stage1LlmMetrics = Pick<Stage1MicroBatchResult, "llmCallCount" | "retryCount" | "llmDurationMs" | "tokenUsage">;
+
 function createBatchMetrics(result: {
   attempts: number;
   elapsedMs: number;
   tokenUsage: Stage1TokenUsage | null;
-}): Omit<Stage1MicroBatchResult, "results" | "fallbackUsed"> {
+}): Stage1LlmMetrics {
   return {
     llmCallCount: result.attempts,
     retryCount: Math.max(0, result.attempts - 1),
@@ -536,9 +575,9 @@ function createBatchMetrics(result: {
 }
 
 function mergeBatchMetrics(
-  left: Omit<Stage1MicroBatchResult, "results" | "fallbackUsed">,
-  right: Omit<Stage1MicroBatchResult, "results" | "fallbackUsed">,
-): Omit<Stage1MicroBatchResult, "results" | "fallbackUsed"> {
+  left: Stage1LlmMetrics,
+  right: Stage1LlmMetrics,
+): Stage1LlmMetrics {
   return {
     llmCallCount: left.llmCallCount + right.llmCallCount,
     retryCount: left.retryCount + right.retryCount,
@@ -685,7 +724,7 @@ function truncateError(error: string): string {
 async function runWithConcurrency<T, R>(
   items: T[],
   concurrency: number,
-  task: (item: T) => Promise<R>,
+  task: (item: T, index: number) => Promise<R>,
 ): Promise<R[]> {
   const results: R[] = [];
   let nextIndex = 0;
@@ -694,7 +733,7 @@ async function runWithConcurrency<T, R>(
     while (nextIndex < items.length) {
       const currentIndex = nextIndex;
       nextIndex += 1;
-      results[currentIndex] = await task(items[currentIndex]);
+      results[currentIndex] = await task(items[currentIndex], currentIndex);
     }
   }
 

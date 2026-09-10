@@ -8,6 +8,7 @@ import {
   formatContentCompletionRatio,
   getDashboardData,
   type DashboardContentCompletionMetrics,
+  type DashboardDuplicateFilterMetrics,
   type DashboardContentFunnel,
   type DashboardStageMetrics,
 } from "@/lib/dashboard.js";
@@ -174,6 +175,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
             <div className={styles.stageGrid}>
               <ContentCompletionCard metrics={data.details.contentCompletion} />
+              <DuplicateFilterCard metrics={data.details.duplicateFilter} />
               {Object.entries(data.details.stages).map(([stage, metrics]) => (
                 <StageCard
                   key={stage}
@@ -286,6 +288,23 @@ function ContentCompletionCard({
       </dl>
     </article>
   );
+}
+
+function DuplicateFilterCard({ metrics }: { metrics: DashboardDuplicateFilterMetrics | null }) {
+  if (!metrics) return <article className={styles.stageCard}><div className={styles.stageHeader}><h3>Exact Duplicate Filter</h3><span className={styles.naBadge}>N/A</span></div><p className={styles.empty}>No runtime artifact for this date.</p></article>;
+  return <article className={styles.stageCard}>
+    <div className={styles.stageHeader}><h3>Exact Duplicate Filter</h3></div>
+    <dl className={styles.metricList}>
+      <Metric label="Duplicates ignored" value={formatMetric(metrics.duplicateCount)} />
+      <Metric label="Dedup rate" value={`${(metrics.duplicateRate * 100).toFixed(1)}%`} />
+      <Metric label="Remaining unique articles" value={formatMetric(metrics.outputCount)} />
+    </dl>
+    <details><summary>Duplicate categories</summary><dl className={styles.metricList}>
+      <Metric label="URL only" value={formatMetric(metrics.sameUrlCount)} />
+      <Metric label="Title only" value={formatMetric(metrics.sameTitleCount)} />
+      <Metric label="URL + Title" value={formatMetric(metrics.sameUrlAndTitleCount)} />
+    </dl></details>
+  </article>;
 }
 
 function SummaryCard({ label, value }: { label: string; value: number }) {

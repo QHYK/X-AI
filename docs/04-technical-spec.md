@@ -564,6 +564,11 @@ source_id + source_item_origin_id
 如来源没有 item id，则使用 URL 等稳定字段辅助判断。
 Exact Duplicate 不再次插入 `raw_articles`。
 
+在 Collection 后、Content Completion 前，系统还会在当前 Daily scope 的 pending Raw Articles
+中标记跨 RSS Channel 的 exact duplicate：trim 后 URL 相同或 title 相同即视为重复。
+winner 依次取现有 `content_text` 较长、`source.name` 较长、较早 `created_at`、较小 id；loser 保留
+Raw Article，但写为 `stage1_status = ignored` 且 `processing_error = 'duplicate'`。
+
 #### Same Event Across Different Sources
 例如：
 ```text
@@ -581,6 +586,9 @@ Daily Workflow 使用本次 Daily 固定的 `raw_articles.published_at` scope；
 单独运行 Stage 1 时使用基于 `published_at` 的最近 24 小时默认窗口。
 
 Stage 1 对普通文章使用小型 micro-batch，但每篇 Raw Article 仍独立判断；较大的 input 可以单独处理。
+默认 batch 为 15 篇、单篇 20,000 characters、总计 60,000 characters；超限和 Long-form 仍单篇处理。
+多篇 batch 在既有 LLM retry 耗尽后按原顺序递归二分，只有失败子集继续拆分至 singleton。
+每次运行保存 `runtime/stage1/<run-id>/batches/*.input.json`、`attempts.jsonl` 与 `summary.json`。
 ```text
 Raw Article → LLM → Ignore / Event / Digest / Long-form / Inspiration
 ```
@@ -734,7 +742,8 @@ PATCH /api/review/long-form/ranking
 
 人工执行 `npm run eval:stage1`、`eval:stage2`、`eval:stage3:event`、`eval:stage3:digest` 或 `eval:stage3:long-form` 时，
 Evaluation Service 先从 Production DB 或对应成功 Stage 3 runtime 构造一次 Frozen Input，随后才创建多个 Model Run。
-Stage 1 保留当前 micro-batch 输入边界；
+Stage 1 保留当前 micro-batch 输入边界；同一 Daily 的成功 Stage 1 model runs 可跨不同
+`evaluation_input_id` 以 `raw_article_id` 交集两两比较。Stage 2/3 仍要求相同 Frozen Input。
 Stage 2 使用该 Daily 的已选 Event Candidates；
 Stage 3 使用指定日期最近一次成功正式 Stage 3 runtime 中已经去重后的 Event、Digest 分类和 Long-form 输入。
 所有模型读取同一 `evaluation_input_id`，但每个 Run 独立保存 success / failed、耗时、可用 token 和输出。

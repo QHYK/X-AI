@@ -100,6 +100,16 @@ export type DashboardContentCompletionMetrics = {
   perSourceLimit: number | null;
 };
 
+export type DashboardDuplicateFilterMetrics = {
+  inputCount: number;
+  duplicateCount: number;
+  outputCount: number;
+  duplicateRate: number;
+  sameUrlCount: number;
+  sameTitleCount: number;
+  sameUrlAndTitleCount: number;
+};
+
 export type DashboardContentFunnel = {
   rawChars: number;
   selectedChars: number;
@@ -132,6 +142,7 @@ export type DashboardDay = {
   events: number;
   runtime: {
     contentCompletion: DashboardContentCompletionMetrics | null;
+    duplicateFilter: DashboardDuplicateFilterMetrics | null;
     stages: Record<DashboardStage, DashboardStageMetrics | null>;
     llmCalls: number | null;
     inputTokens: number | null;
@@ -157,6 +168,7 @@ export type DashboardData = {
     processedByCategory: Record<string, number>;
     digestByCategory: Record<string, number>;
     contentCompletion: DashboardContentCompletionMetrics | null;
+    duplicateFilter: DashboardDuplicateFilterMetrics | null;
     stages: Record<DashboardStage, DashboardStageMetrics | null>;
   };
 };
@@ -232,6 +244,7 @@ export async function getDashboardData(
     digestCategoriesResult,
     runtimeByDate,
     completionByDate,
+    duplicateFilterByDate,
     contentFunnel,
   ] = await Promise.all([
     pool.query<TotalRow>(`
@@ -324,6 +337,7 @@ export async function getDashboardData(
       options.rootDir ?? process.cwd(),
       requestedRuntimeDates,
     ),
+    loadDuplicateFilterRuntimeByDate(options.rootDir ?? process.cwd(), requestedRuntimeDates),
     contentFunnelPromise,
   ]);
 
@@ -370,6 +384,7 @@ export async function getDashboardData(
       events: count(event?.total),
       runtime: {
         contentCompletion: completionByDate.get(scope.dailyDate) ?? null,
+        duplicateFilter: duplicateFilterByDate.get(scope.dailyDate) ?? null,
         stages,
         llmCalls: sumKnown(availableStages.map((stage) => stage.llmCalls)),
         inputTokens: sumKnown(availableStages.map((stage) => stage.inputTokens)),
@@ -405,6 +420,9 @@ export async function getDashboardData(
       digestByCategory: categoryCounts(digestCategoriesResult.rows),
       contentCompletion: detailScopeCompleted
         ? completionByDate.get(detailScope.dailyDate) ?? null
+        : null,
+      duplicateFilter: detailScopeCompleted
+        ? duplicateFilterByDate.get(detailScope.dailyDate) ?? null
         : null,
       stages: detailStages,
     },
@@ -572,6 +590,42 @@ function contentCompletionMetricsFromArtifact(
     limit: numberFrom(artifact, "limit"),
     perSourceLimit: numberFrom(artifact, "per_source_limit"),
   };
+}
+
+/** Daily run 记录 duplicate-filter runtime path；Dashboard 直接读取该 artifact，不查询业务表估算。 */
+export async function loadDuplicateFilterRuntimeByDate(
+  rootDir: string,
+  requestedDates: Set<string>,
+): Promise<Map<string, DashboardDuplicateFilterMetrics>> {
+  const dailyDir = join(rootDir, "runtime", "daily");
+  let names: string[];
+  try { names = await readdir(dailyDir); } catch (error) {
+    if (isMissingFile(error)) return new Map();
+    throw error;
+  }
+  const metrics = new Map<string, DashboardDuplicateFilterMetrics>();
+  for (const name of names) {
+    try {
+      const daily = asObject(JSON.parse(await readFile(join(dailyDir, name, "run.json"), "utf8")));
+      const date = daily && stringValue(daily.daily_date);
+      const artifactPath = daily && stringValue(daily.duplicate_filter_run);
+      if (!date || !artifactPath || !requestedDates.has(date)) continue;
+      const artifact = asObject(JSON.parse(await readFile(join(artifactPath, "run.json"), "utf8")));
+      if (!artifact) continue;
+      metrics.set(date, {
+        inputCount: numberFrom(artifact, "inputCount") ?? 0,
+        duplicateCount: numberFrom(artifact, "duplicateCount") ?? 0,
+        outputCount: numberFrom(artifact, "outputCount") ?? 0,
+        duplicateRate: numberFrom(artifact, "duplicateRate") ?? 0,
+        sameUrlCount: numberFrom(artifact, "sameUrlCount") ?? 0,
+        sameTitleCount: numberFrom(artifact, "sameTitleCount") ?? 0,
+        sameUrlAndTitleCount: numberFrom(artifact, "sameUrlAndTitleCount") ?? 0,
+      });
+    } catch (error) {
+      if (!isMissingFile(error)) console.error("Failed to read dashboard duplicate filter runtime artifact.", error);
+    }
+  }
+  return metrics;
 }
 
 /**

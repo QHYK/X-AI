@@ -157,14 +157,24 @@ function Stage1Results(props: {
   mode: "disagreements" | "all";
   onModeChange: (mode: "disagreements" | "all") => void;
 }) {
+  const [modelA, setModelA] = useState(props.runs[0]?.id ?? "");
+  const [modelB, setModelB] = useState(props.runs[1]?.id ?? props.runs[0]?.id ?? "");
+  const pairRuns = props.runs.filter((run) => run.id === modelA || run.id === modelB);
+  const comparable = props.items.filter((item) => item.results[modelA] && item.results[modelB]);
+  const modelAOnly = props.items.filter((item) => item.results[modelA] && !item.results[modelB]).length;
+  const modelBOnly = props.items.filter((item) => !item.results[modelA] && item.results[modelB]).length;
+  const disagrees = (item: Stage1EvaluationItem) => {
+    const a = item.results[modelA]; const b = item.results[modelB];
+    return Boolean(a && b && (a.routing !== b.routing || a.category !== b.category));
+  };
   const visible = props.mode === "disagreements"
-    ? props.items.filter((item) => item.routingDisagreement || item.categoryDisagreement)
+    ? comparable.filter(disagrees)
     : props.items;
   return <div className={styles.evaluationResults}>
-    <div className={styles.resultToolbar}><strong>Understanding</strong><button type="button" onClick={() => props.onModeChange("disagreements")} disabled={props.mode === "disagreements"}>Disagreements</button><button type="button" onClick={() => props.onModeChange("all")} disabled={props.mode === "all"}>All</button></div>
+    <div className={styles.resultToolbar}><strong>Understanding</strong><label>Model A <select value={modelA} onChange={(event) => setModelA(event.target.value)}>{props.runs.map((run) => <option key={run.id} value={run.id}>{providerLabel(run.provider)} · {run.model}</option>)}</select></label><label>Model B <select value={modelB} onChange={(event) => setModelB(event.target.value)}>{props.runs.map((run) => <option key={run.id} value={run.id}>{providerLabel(run.provider)} · {run.model}</option>)}</select></label><small>Comparable: {comparable.length} · A only: {modelAOnly} · B only: {modelBOnly}</small><button type="button" onClick={() => props.onModeChange("disagreements")} disabled={props.mode === "disagreements"}>Disagreements</button><button type="button" onClick={() => props.onModeChange("all")} disabled={props.mode === "all"}>All</button></div>
     {visible.length === 0 ? <p className={styles.empty}>No routing or category disagreements in this frozen input.</p> : visible.map((item) => <article className={styles.stage1Item} key={item.id}>
       <header><strong>{item.title}</strong><small>{item.source}</small></header>
-      <div className={styles.modelColumns}>{props.runs.map((run) => {
+      <div className={styles.modelColumns}>{pairRuns.map((run) => {
         const result = item.results[run.id];
         return <section key={run.id}><h3>{providerLabel(run.provider)}</h3><p>Routing: {result?.routing ?? "—"}</p><p>Category: {result?.category ?? "—"}</p><p>Title ZH: {result?.titleZh ?? "—"}</p><p>Summary ZH: {result?.summaryZh ?? "—"}</p></section>;
       })}</div>

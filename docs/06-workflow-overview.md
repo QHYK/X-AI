@@ -11,6 +11,8 @@
                                    ↓
                          [Data] Raw Articles
                                    ↓
+                  [Code] Exact Raw Duplicate Filter
+                                   ↓
                      [Code] Content Completion
                                    ↓
                [AI] Stage 1 Understanding & Selection
@@ -61,7 +63,8 @@
 flowchart LR
     S["[配置] Source List"] --> C["[代码] RSS Collection"]
     C --> R["[数据] raw_articles"]
-    R --> CC["[代码] Content Completion"]
+    R --> RD["[代码] Exact Raw Duplicate Filter"]
+    RD --> CC["[代码] Content Completion"]
     CC --> S1["[AI] Stage 1<br/>理解 · 筛选 · Routing"]
 
     S1 -->|Event| EC["[数据] Event Candidates"]
