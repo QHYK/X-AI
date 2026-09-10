@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import {
+  resolveCatchupPublishedAtScope,
   readPublishedAtScopeFromEnv,
   resolveDailyScope,
 } from "../src/lib/daily-scope.js";
@@ -31,24 +32,35 @@ const scopes = executionTimes.map((time) =>
 const expectedScope = {
   dailyDate: "2026-08-25",
   timezone: "Asia/Shanghai",
-  startAt: "2026-08-24T01:00:00.000Z",
-  endAt: "2026-08-25T01:00:00.000Z",
+  startAt: "2026-08-24T00:30:00.000Z",
+  endAt: "2026-08-25T00:30:00.000Z",
 };
 
 checks.push({
-  name: "same DAILY_DATE is deterministic at 09:00, 14:00, and 22:00 Shanghai",
+  name: "same DAILY_DATE is deterministic at 08:30, 14:00, and 22:00 Shanghai",
   passed: scopes.every((scope) => JSON.stringify(scope) === JSON.stringify(expectedScope)),
   detail: scopes,
 });
 checks.push({
-  name: "default scope uses the latest ended Shanghai 09:00 boundary",
+  name: "default scope uses the latest ended Shanghai 08:30 boundary",
   passed:
-    resolveDailyScope(undefined, new Date("2026-08-25T00:59:59.999Z")).dailyDate ===
+    resolveDailyScope(undefined, new Date("2026-08-25T00:29:59.999Z")).dailyDate ===
       "2026-08-24" &&
-    resolveDailyScope(undefined, new Date("2026-08-25T01:00:00.000Z")).dailyDate ===
+    resolveDailyScope(undefined, new Date("2026-08-25T00:30:00.000Z")).dailyDate ===
       "2026-08-25" &&
     resolveDailyScope(undefined, new Date("2026-08-25T22:00:00.000Z")).dailyDate ===
       "2026-08-25",
+});
+checks.push({
+  name: "DAILY_DATE=2026-09-10 uses the required 08:30 Shanghai boundaries",
+  passed:
+    JSON.stringify(resolveDailyScope("2026-09-10")) ===
+    JSON.stringify({
+      dailyDate: "2026-09-10",
+      timezone: "Asia/Shanghai",
+      startAt: "2026-09-09T00:30:00.000Z",
+      endAt: "2026-09-10T00:30:00.000Z",
+    }),
 });
 
 const scope = scopes[0];
@@ -72,44 +84,51 @@ checks.push({
 const scopedQueries: CapturedQuery[] = [];
 const scopedQueryable = createCapturingQueryable(scopedQueries);
 await loadPendingStage1Articles(scopedQueryable, { publishedAtScope: scope });
-await loadStage2EventCandidates(scopedQueryable, { publishedAtScope: scope });
-await loadStage3RankingRows(scopedQueryable, "digest", 24, scope);
+const stage1Lineage = {
+  startedAt: "2026-08-25T02:00:00.000Z",
+  finishedAt: "2026-08-25T02:10:00.000Z",
+};
+await loadStage2EventCandidates(scopedQueryable, {
+  stage1StartedAt: stage1Lineage.startedAt,
+  stage1FinishedAt: stage1Lineage.finishedAt,
+});
+await loadStage3RankingRows(
+  scopedQueryable,
+  "digest",
+  stage1Lineage.startedAt,
+  stage1Lineage.finishedAt,
+);
 
 checks.push({
-  name: "Stage 1, 2, and 3 use the same [scope_start, scope_end) values",
+  name: "Stage 1 uses published_at scope while Stage 2/3 use the current Stage 1 lineage",
   passed:
     scopedQueries.length === 3 &&
-    scopedQueries.every((query) =>
-      query.text.includes("ra.published_at >=") &&
-      query.text.includes("ra.published_at <") &&
-      !query.text.includes("ra.collected_at >="),
+    scopedQueries[0]?.text.includes("ra.published_at >=") &&
+    scopedQueries[0]?.text.includes("ra.published_at <") &&
+    scopedQueries.slice(1).every((query) =>
+      query.text.includes("pc.created_at >=") &&
+      query.text.includes("pc.created_at <=") &&
+      query.text.includes("ra.stage1_status = 'selected'"),
     ) &&
     JSON.stringify(scopedQueries[0]?.values) ===
       JSON.stringify([expectedScope.startAt, expectedScope.endAt]) &&
     JSON.stringify(scopedQueries[1]?.values) ===
-      JSON.stringify([expectedScope.startAt, expectedScope.endAt]) &&
-    JSON.stringify(scopedQueries[2]?.values?.slice(1)) ===
-      JSON.stringify([expectedScope.startAt, expectedScope.endAt]),
+      JSON.stringify([stage1Lineage.startedAt, stage1Lineage.finishedAt]) &&
+    JSON.stringify(scopedQueries[2]?.values) ===
+      JSON.stringify(["digest", stage1Lineage.startedAt, stage1Lineage.finishedAt]),
   detail: scopedQueries,
 });
 
 const defaultQueries: CapturedQuery[] = [];
 const defaultQueryable = createCapturingQueryable(defaultQueries);
 await loadPendingStage1Articles(defaultQueryable);
-await loadStage2EventCandidates(defaultQueryable);
-await loadStage3RankingRows(defaultQueryable, "long_form", 24);
 checks.push({
-  name: "standalone Stage 1, 2, and 3 use published_at rolling 24-hour defaults",
+  name: "standalone Stage 1 uses a published_at rolling 24-hour default",
   passed:
-    defaultQueries.length === 3 &&
-    defaultQueries.every(
-      (query) =>
-        query.text.includes("ra.published_at >= now() -") &&
-        !query.text.includes("ra.collected_at >= now() -"),
-    ) &&
-    JSON.stringify(defaultQueries[0]?.values) === JSON.stringify([24]) &&
-    JSON.stringify(defaultQueries[1]?.values) === JSON.stringify([24]) &&
-    JSON.stringify(defaultQueries[2]?.values) === JSON.stringify(["long_form", 24]),
+    defaultQueries.length === 1 &&
+    defaultQueries[0]?.text.includes("ra.published_at >= now() -") &&
+    !defaultQueries[0]?.text.includes("ra.collected_at >= now() -") &&
+    JSON.stringify(defaultQueries[0]?.values) === JSON.stringify([24]),
   detail: defaultQueries,
 });
 
@@ -167,19 +186,32 @@ checks.push({
 const stage3Env = buildDailyStepEnv({
   scope,
   step: "process:stage3",
-  lineage: { stage2Run: "runtime/stage2/current", stage3Run: null },
+  lineage: {
+    stage1Run: "runtime/stage1/current",
+    stage2Run: "runtime/stage2/current",
+    stage3Run: null,
+  },
 });
 const stage4Env = buildDailyStepEnv({
   scope,
   step: "process:stage4",
   lineage: {
+    stage1Run: "runtime/stage1/current",
     stage2Run: "runtime/stage2/current",
     stage3Run: "runtime/stage3/current",
   },
 });
+const stage1Env = buildDailyStepEnv({
+  scope,
+  step: "process:stage1",
+  lineage: { stage1Run: null, stage2Run: null, stage3Run: null },
+});
+const catchupScope = resolveCatchupPublishedAtScope(scope);
 checks.push({
-  name: "Stage 3 and Stage 4 receive the current Daily runtime lineage",
+  name: "Daily Stage 1 receives the 72-hour catch-up window and later stages receive runtime lineage",
   passed:
+    stage1Env.DAILY_CATCHUP_SCOPE_START_AT === catchupScope.startAt &&
+    stage1Env.DAILY_CATCHUP_SCOPE_END_AT === catchupScope.endAt &&
     stage3Env.STAGE3_STAGE2_RUN_DIR === "runtime/stage2/current" &&
     stage4Env.STAGE4_STAGE3_RUN_DIR === "runtime/stage3/current" &&
     stage3Env.DAILY_PUBLISHED_SCOPE_START_AT === expectedScope.startAt &&

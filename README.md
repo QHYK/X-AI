@@ -11,7 +11,7 @@ X-AI-field 是一个 AI 驱动的信息筛选系统：持续收集可信信息�
 - Stage 2 - Event Merge
 - Stage 3 - Channel Ranking + Exact Dedup
 - Stage 4 — Selected Event Enrichment + Optional Web Search
-- Daily Workflow Orchestrator / 09:00 Asia/Shanghai Cron / Internal Dashboard
+- Daily Workflow Orchestrator / 08:30 Asia/Shanghai Cron / Internal Dashboard
 - Daily Brief API & Page
 - Human Review + Feedback
 - Manual Model Evaluation MVP（Stage 1–3，冻结输入，多模型离线比较）
@@ -180,7 +180,7 @@ npm run build
 npm run start
 ```
 
-当前不内置 Cron。部署环境可由外部 scheduler 在 `09:00 Asia/Shanghai` 触发 `npm run daily`。
+当前不内置 Cron。部署环境可由外部 scheduler 在 `08:30 Asia/Shanghai` 触发 `npm run daily`。
 
 ### Updating Sources
 
@@ -205,7 +205,7 @@ GET /api/brief?date=YYYY-MM-DD
 - `meta`
 
 所有可阅读内容都返回原文链接。Brief 的 Daily Date 由新闻发布时间 scope 决定：
-`Daily YYYY-MM-DD = 前一天 09:00 <= raw_articles.published_at < 当天 09:00`
+`Daily YYYY-MM-DD = 前一天 08:30 <= raw_articles.published_at < 当天 08:30`
 （Asia/Shanghai）。`collected_at` 只表示系统采集时间，不决定 Daily 归属。Digest / Long-form /
 Inspiration 通过关联 Raw Article 归属；Event 只要有一条 scope 内的 Event Candidate 即归入该
 Daily，且只返回一次。retry / backfill 不改变 Daily membership，`published_at IS NULL` 的文章
@@ -222,11 +222,11 @@ http://localhost:3000/review/long-form
 ```
 
 - 页面需要可用的 `DATABASE_URL`，默认展示最近 7 天的数据量与 Daily Workflow 运行情况。
-- 数据库是业务数据 Source of Truth；所有每日统计按 `raw_articles.published_at` 的 `Asia/Shanghai` 09:00 Daily boundary 计算。
+- 数据库是业务数据 Source of Truth；所有每日统计按 `raw_articles.published_at` 的 `Asia/Shanghai` 08:30 Daily boundary 计算。
 - `runtime/content-completion/` 补充每天最新一次 Completion success/selected、remaining backlog、duration 和 Date Details 计数。
 - `runtime/stage1~4/` 只补充运行指标，例如 LLM calls、retry、实际记录的 token、duration、Stage 2/3/4 的中间与结果数量。
 - 某个字段没有时显示 `N/A`，不会估算或写入新的 metrics 数据。
-- Dashboard 顶部提供 Event / Long-form Review 入口。Review 页面默认使用最近已结束的 09:00 Daily date，也可通过日期控件查看其他日期。
+- Dashboard 顶部提供 Event / Long-form Review 入口。Review 页面默认使用最近已结束的 08:30 Daily date，也可通过日期控件查看其他日期。
 
 ## Documentation
 

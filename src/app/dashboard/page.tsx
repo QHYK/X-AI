@@ -48,7 +48,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           <p className={styles.eyebrow}>X-AI-field · Internal</p>
           <h1 className={styles.title}>Daily Workflow Dashboard</h1>
           <p className={styles.subtitle}>
-            最近 7 个已完成 Daily scope · 09:00 boundary（{data.timezone}）
+            最近 7 个已完成 Daily scope · 08:30 boundary（{data.timezone}）
           </p>
         </div>
         <div className={styles.headerActions}>
@@ -188,7 +188,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         ) : (
           <article className={styles.scopeNotice} role="status">
             <strong>Daily scope has not completed yet</strong>
-            <p>Details and Content Funnel are unavailable until the 09:00 boundary.</p>
+          <p>Details and Content Funnel are unavailable until the 08:30 boundary.</p>
           </article>
         )}
       </section>
@@ -225,7 +225,7 @@ function ContentFunnel({ funnel }: { funnel: DashboardContentFunnel }) {
       <div className={styles.funnelHeading}>
         <div>
           <h3>Content Funnel</h3>
-          <p>Character volume · Daily 09:00 boundary</p>
+          <p>Character volume · Daily 08:30 boundary</p>
         </div>
         <span>Null values count as 0</span>
       </div>

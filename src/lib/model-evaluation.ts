@@ -23,6 +23,7 @@ import {
 } from "../processing/stage1-job.js";
 import { runStage1BatchLlmForInput } from "../processing/stage1-llm.js";
 import { prepareStage2Input, loadStage2EventCandidates, type Stage2IdMap, type Stage2Input } from "../processing/stage2-candidates.js";
+import { loadStage1Runtime } from "../processing/stage1-runtime.js";
 import {
   validateStage2Assignments,
   validateStage2Output,
@@ -386,7 +387,11 @@ export async function buildFrozenEvaluationInput(input: {
       } satisfies Stage1EvaluationInputReference;
     }
     case "stage2": {
-      const candidates = await loadStage2EventCandidates(input.pool, { publishedAtScope: scope });
+      const stage1 = await loadStage1Runtime(input.rootDir, undefined, input.date);
+      const candidates = await loadStage2EventCandidates(input.pool, {
+        stage1StartedAt: stage1.run.started_at,
+        stage1FinishedAt: stage1.run.finished_at,
+      });
       const prepared = prepareStage2Input(candidates);
       return { input: prepared.input, id_map: prepared.idMap } satisfies Stage2FrozenInput;
     }

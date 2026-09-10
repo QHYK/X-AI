@@ -2,7 +2,10 @@ import { config } from "dotenv";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Pool } from "pg";
-import { resolveDailyScope } from "../src/lib/daily-scope.js";
+import {
+  resolveCatchupPublishedAtScope,
+  resolveDailyScope,
+} from "../src/lib/daily-scope.js";
 import {
   completeRawArticleContent,
   resolveContentCompletionLimits,
@@ -22,7 +25,8 @@ config({ path: ".env.local", override: true });
 
 async function main() {
   const startedAt = new Date();
-  const scope = resolveDailyScope(process.env.DAILY_DATE, startedAt);
+  const dailyScope = resolveDailyScope(process.env.DAILY_DATE, startedAt);
+  const scope = resolveCatchupPublishedAtScope(dailyScope);
 
   const options = {
     sourceNames: parseSourceNames(process.env.CONTENT_COMPLETION_SOURCE_NAMES),
@@ -36,7 +40,7 @@ async function main() {
   const runDir = contentCompletionRunDir(startedAt);
   const artifact: ContentCompletionRuntimeArtifact = {
     status: "running",
-    daily_date: scope.dailyDate,
+    daily_date: dailyScope.dailyDate,
     scope_start_at: scope.startAt,
     scope_end_at: scope.endAt,
     started_at: startedAt.toISOString(),

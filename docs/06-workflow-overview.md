@@ -102,7 +102,7 @@ flowchart LR
     PDB --> API
     API --> UI["[计划] X-field Daily Brief UI"]
 
-    CRON["[计划] 09:00 Cron"] --> ORCH["[代码] Daily Workflow Orchestrator"]
+    CRON["[计划] 08:30 Cron"] --> ORCH["[代码] Daily Workflow Orchestrator"]
     ORCH -. "触发" .-> C
 
     ERDB --> FB["[后台] Event Ranking Review"]
@@ -111,13 +111,16 @@ flowchart LR
     LFR --> FDB
 ```
 
-Daily Orchestrator 在启动时按 Asia/Shanghai 09:00 boundary 固定一次
-`raw_articles.published_at` scope，并传给 Stage 1、Stage 2、Stage 3 Digest / Long-form。
-它也将本次 Stage 2 runtime 明确传给 Stage 3，再将本次 Stage 3 runtime 明确传给 Stage 4。
-单独运行 Stage 1–3 时使用基于 `published_at` 的最近 24 小时窗口。
+Daily Orchestrator 在启动时按 Asia/Shanghai 08:30 boundary 固定一次 24 小时 Daily scope。
+Content Completion 与 Stage 1 以该 `daily_end` 倒推 72 小时的 `published_at` catch-up window
+处理延迟进入 RSS 的文章。Stage 2 Event 与 Stage 3 Digest / Long-form 只消费本次 Stage 1
+`started_at` 至 `finished_at` 之间新创建、且仍为 `selected` 的 `processed_contents`；Stage 3 Event
+继续读取本次 Stage 2 runtime。编排器将本次 Stage 1 runtime 传给 Stage 2、本次 Stage 2 runtime
+传给 Stage 3，再将本次 Stage 3 runtime 传给 Stage 4。手动 Stage 2 / Stage 3 可回退到最近一次
+successful Stage 1 runtime。
 
 `GET /api/brief?date=YYYY-MM-DD` 使用同一新闻发布时间 scope 归属 Daily：
-`Daily YYYY-MM-DD = 前一天 09:00 <= raw_articles.published_at < 当天 09:00`
+`Daily YYYY-MM-DD = 前一天 08:30 <= raw_articles.published_at < 当天 08:30`
 （Asia/Shanghai）。`collected_at` 只表示系统采集时间；Processed 内容通过关联 Raw Article
 归属，Event 通过其 Event Candidates 关联的 Raw Article 归属，而非按结果 `created_at`。
 retry / backfill 不改变 Daily membership；`published_at IS NULL` 的文章不进入任何 Daily。

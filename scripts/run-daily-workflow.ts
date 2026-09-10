@@ -38,6 +38,7 @@ type DailyRun = {
   scope_end_at: string;
   content_completion_run: string | null;
   duplicate_filter_run: string | null;
+  stage1_run: string | null;
   stage2_run: string | null;
   stage3_run: string | null;
   stage4_run: string | null;
@@ -61,6 +62,7 @@ async function main() {
     scope_end_at: scope.endAt,
     content_completion_run: null,
     duplicate_filter_run: null,
+    stage1_run: null,
     stage2_run: null,
     stage3_run: null,
     stage4_run: null,
@@ -99,6 +101,7 @@ async function main() {
       scope,
       step: name,
       lineage: {
+        stage1Run: run.stage1_run,
         stage2Run: run.stage2_run,
         stage3Run: run.stage3_run,
       },
@@ -171,6 +174,8 @@ function getRunPointerPath(runDir: string, name: StepName): string | null {
       return join(runDir, "content-completion-run.txt");
     case "dedupe:stage1":
       return join(runDir, "duplicate-filter-run.txt");
+    case "process:stage1":
+      return join(runDir, "stage1-run.txt");
     case "process:stage2":
       return join(runDir, "stage2-run.txt");
     case "process:stage3":
@@ -193,6 +198,9 @@ function setStageRun(run: DailyRun, name: StepName, runDir: string): void {
       break;
     case "complete:content":
       run.content_completion_run = runDir;
+      break;
+    case "process:stage1":
+      run.stage1_run = runDir;
       break;
     case "process:stage2":
       run.stage2_run = runDir;

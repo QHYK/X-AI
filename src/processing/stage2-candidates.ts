@@ -1,9 +1,8 @@
 /**
  * 为 Stage 2 准备 Event 候选与临时 ID 映射。
- * 候选通过 raw_articles.published_at 归属，因此 Daily scope 能与 Stage 1/3 保持一致。
+ * 候选通过本次 Stage 1 的执行时间关联，避免补偿窗口内的历史结果混入后续运行。
  */
 import type { Pool, PoolClient } from "pg";
-import type { PublishedAtScope } from "../lib/daily-scope.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
 
@@ -38,23 +37,14 @@ export type PreparedStage2Input = {
   idMap: Stage2IdMap;
 };
 
-const DEFAULT_STAGE2_LOOKBACK_HOURS = 24;
-
-/** 加载已被 Stage 1 选中且 routing 为 event 的候选，支持固定 Daily scope。 */
+/** 加载本次 Stage 1 新选中的 Event 候选。 */
 export async function loadStage2EventCandidates(
   queryable: Queryable,
   options: {
-    publishedWithinHours?: number;
-    publishedAtScope?: PublishedAtScope;
-  } = {},
+    stage1StartedAt: string;
+    stage1FinishedAt: string;
+  },
 ): Promise<Stage2CandidateRow[]> {
-  const publishedWithinHours = options.publishedWithinHours ?? DEFAULT_STAGE2_LOOKBACK_HOURS;
-  const publishedAtPredicate = options.publishedAtScope
-    ? "ra.published_at >= $1::timestamptz and ra.published_at < $2::timestamptz"
-    : "ra.published_at >= now() - ($1::int * interval '1 hour')";
-  const values: Array<number | string> = options.publishedAtScope
-    ? [options.publishedAtScope.startAt, options.publishedAtScope.endAt]
-    : [publishedWithinHours];
   const result = await queryable.query<Stage2CandidateRow>(
     `
       select
@@ -71,13 +61,14 @@ export async function loadStage2EventCandidates(
       join sources s on s.id = ra.source_id
       where pc.routing = 'event'
         and ra.stage1_status = 'selected'
-        and ${publishedAtPredicate}
+        and pc.created_at >= $1::timestamptz
+        and pc.created_at <= $2::timestamptz
       order by
-        ra.published_at desc,
+        pc.created_at asc,
         s.name,
         pc.id
     `,
-    values,
+    [options.stage1StartedAt, options.stage1FinishedAt],
   );
 
   return result.rows;

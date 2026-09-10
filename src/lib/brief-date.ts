@@ -1,7 +1,7 @@
 /**
  * Brief API 的自然日日期解析工具。
  *
- * 该范围仅服务于兼容的日期输入；Daily Workflow 的 09:00 scope 由 daily-scope 模块定义。
+ * 该范围仅服务于兼容的日期输入；Daily Workflow 的 08:30 scope 由 daily-scope 模块定义。
  */
 const SHANGHAI_UTC_OFFSET_HOURS = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;

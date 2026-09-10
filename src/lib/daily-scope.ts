@@ -1,16 +1,18 @@
 /**
  * Daily Workflow 的统一时间范围定义。
  *
- * 所有 Daily Date 都以 Asia/Shanghai 09:00 为右边界
+ * 所有 Daily Date 都以 Asia/Shanghai 08:30 为右边界
  * 并以 raw_articles.published_at 归属输入数据
  */
 import { parseBriefDate } from "./brief-date.js";
 
 export const DAILY_TIMEZONE = "Asia/Shanghai";
-export const DAILY_BOUNDARY_HOUR = 9;
+export const DAILY_BOUNDARY_HOUR = 8;
+export const DAILY_BOUNDARY_MINUTE = 30;
 
 const SHANGHAI_UTC_OFFSET_HOURS = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const CATCHUP_WINDOW_HOURS = 72;
 
 export type PublishedAtScope = {
   startAt: string;
@@ -22,8 +24,52 @@ export type DailyScope = PublishedAtScope & {
   timezone: typeof DAILY_TIMEZONE;
 };
 
+/** Content Completion 与 Stage 1 的补偿窗口，覆盖延迟进入 RSS 的历史发布时间。 */
+export function resolveCatchupPublishedAtScope(
+  scope: Pick<DailyScope, "endAt">,
+): PublishedAtScope {
+  const endAt = new Date(scope.endAt);
+  if (Number.isNaN(endAt.getTime())) {
+    throw new Error(`Daily scope endAt must be a valid timestamp, got "${scope.endAt}".`);
+  }
+
+  return {
+    startAt: new Date(
+      endAt.getTime() - CATCHUP_WINDOW_HOURS * 60 * 60 * 1000,
+    ).toISOString(),
+    endAt: endAt.toISOString(),
+  };
+}
+
+/** 读取 Daily 编排专门传给 Content Completion / Stage 1 的 72 小时窗口。 */
+export function readCatchupPublishedAtScopeFromEnv(
+  env: Readonly<Record<string, string | undefined>>,
+): PublishedAtScope | undefined {
+  const startAt = env.DAILY_CATCHUP_SCOPE_START_AT;
+  const endAt = env.DAILY_CATCHUP_SCOPE_END_AT;
+  if (!startAt && !endAt) {
+    return undefined;
+  }
+  if (!startAt || !endAt) {
+    throw new Error(
+      "DAILY_CATCHUP_SCOPE_START_AT and DAILY_CATCHUP_SCOPE_END_AT must be provided together.",
+    );
+  }
+
+  const start = parseTimestamp(startAt, "DAILY_CATCHUP_SCOPE_START_AT");
+  const end = parseTimestamp(endAt, "DAILY_CATCHUP_SCOPE_END_AT");
+  if (end.getTime() - start.getTime() !== CATCHUP_WINDOW_HOURS * 60 * 60 * 1000) {
+    throw new Error("Daily catch-up published_at scope must be exactly 72 hours.");
+  }
+
+  return {
+    startAt: start.toISOString(),
+    endAt: end.toISOString(),
+  };
+}
+
 /**
- * 解析指定 Daily Date，或在未指定时选择最近已结束的 09:00 boundary。
+ * 解析指定 Daily Date，或在未指定时选择最近已结束的 08:30 boundary。
  * 固定结果使同一 Daily 的重跑不会因执行时刻变化而改变输入集合。
  */
 export function resolveDailyScope(
@@ -117,7 +163,7 @@ export function toDailyScopeEnv(scope: DailyScope): Record<string, string> {
   };
 }
 
-// 9:00 之后返回今天，否则返回前一天
+// 08:30 之后返回今天，否则返回前一天
 function resolveLatestEndedDailyDate(now: Date): string {
   if (Number.isNaN(now.getTime())) {
     throw new Error("Current time must be a valid date.");
@@ -127,7 +173,9 @@ function resolveLatestEndedDailyDate(now: Date): string {
     now.getTime() + SHANGHAI_UTC_OFFSET_HOURS * 60 * 60 * 1000,
   );
   const currentDate = formatUtcDate(shanghai);
-  if (shanghai.getUTCHours() >= DAILY_BOUNDARY_HOUR) {
+  const shanghaiMinutes = shanghai.getUTCHours() * 60 + shanghai.getUTCMinutes();
+  const boundaryMinutes = DAILY_BOUNDARY_HOUR * 60 + DAILY_BOUNDARY_MINUTE;
+  if (shanghaiMinutes >= boundaryMinutes) {
     return currentDate;
   }
 
@@ -151,7 +199,10 @@ function shanghaiBoundaryForDate(dailyDate: string): Date {
     throw new Error(`DAILY_DATE must be a valid YYYY-MM-DD date, got "${dailyDate}".`);
   }
 
-  return new Date(day.startUtc.getTime() + DAILY_BOUNDARY_HOUR * 60 * 60 * 1000);
+  return new Date(
+    day.startUtc.getTime() +
+      (DAILY_BOUNDARY_HOUR * 60 + DAILY_BOUNDARY_MINUTE) * 60 * 1000,
+  );
 }
 
 function shiftDailyDate(dailyDate: string, days: number): string {

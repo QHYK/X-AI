@@ -22,11 +22,9 @@ import {
   type Stage2TokenUsage,
 } from "./stage2-llm.js";
 import { resolveStageLlmModel } from "./llm-client.js";
-import type { PublishedAtScope } from "../lib/daily-scope.js";
-
 export type Stage2JobOptions = Stage2LlmOptions & {
-  publishedWithinHours?: number;
-  publishedAtScope?: PublishedAtScope;
+  stage1StartedAt?: string;
+  stage1FinishedAt?: string;
 };
 
 export type Stage2EventGroup = {
@@ -73,11 +71,14 @@ export async function processStage2Merge(
   pool: Pool,
   options: Stage2JobOptions = {},
 ): Promise<Stage2JobResult> {
+  if (!options.stage1StartedAt || !options.stage1FinishedAt) {
+    throw new Error("Stage 2 requires the source Stage 1 started_at and finished_at lineage.");
+  }
   const startedAt = Date.now();
   const model = resolveStageLlmModel("stage2", options.model);
   const candidateRows = await loadStage2EventCandidates(pool, {
-    publishedWithinHours: options.publishedWithinHours,
-    publishedAtScope: options.publishedAtScope,
+    stage1StartedAt: options.stage1StartedAt,
+    stage1FinishedAt: options.stage1FinishedAt,
   });
   const { input, idMap } = prepareStage2Input(candidateRows);
 

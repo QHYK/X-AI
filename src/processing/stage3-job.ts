@@ -42,6 +42,7 @@ import type {
 import { inferSciencePublication } from "./science-publication.js";
 import { resolveStageLlmModel } from "./llm-client.js";
 import { normalizeArticleUrl } from "./url-normalization.js";
+import { loadStage1Runtime } from "./stage1-runtime.js";
 import type { PublishedAtScope } from "../lib/daily-scope.js";
 import { resolveDailyScope } from "../lib/daily-scope.js";
 import { EVENT_DISPLAY_CUTOFF } from "../lib/ranking-config.js";
@@ -57,6 +58,9 @@ type Stage2RunArtifact = {
   model?: string;
   candidate_count?: number;
   event_group_count?: number;
+  stage1_run_dir?: string;
+  stage1_started_at?: string;
+  stage1_finished_at?: string;
 };
 
 type Stage2IdMap = Record<string, string>;
@@ -124,6 +128,7 @@ type Stage3IdMap = {
 
 export type Stage3JobOptions = {
   stage2RunDir?: string;
+  stage1RunDir?: string;
   publishedWithinHours?: number;
   publishedAtScope?: PublishedAtScope;
   eventTopN?: number;
@@ -163,7 +168,7 @@ const CROSS_CHANNEL_DUPLICATE_REASON =
   "normalized_url matches a selected Top N Event article URL";
 
 /**
- * 执行 Stage 3，并优先使用 Daily 传入的 Stage 2 run 与 published_at scope。
+ * 执行 Stage 3，并优先使用 Daily 传入的 Stage 2 run 与其关联的 Stage 1 lineage。
  * 单独运行时仍允许回退到最近成功的 Stage 2 artifact。
  */
 export async function processStage3(
@@ -189,6 +194,9 @@ export async function processStage3(
   await mkdir(longFormDir, { recursive: true });
 
   let sourceStage2RunDir = "";
+  let sourceStage1RunDir = "";
+  let stage1StartedAt = "";
+  let stage1FinishedAt = "";
   let eventGroupCount = 0;
   let eventSelectedCount = 0;
   let crossChannelRemovedCount = 0;
@@ -207,6 +215,13 @@ export async function processStage3(
   try {
     const stage2 = await loadStage2RunForStage3(rootDir, options.stage2RunDir);
     sourceStage2RunDir = stage2.runDir;
+    const stage1 = await loadStage1Runtime(
+      rootDir,
+      stage2.run.stage1_run_dir ?? options.stage1RunDir,
+    );
+    sourceStage1RunDir = stage1.runDir;
+    stage1StartedAt = stage2.run.stage1_started_at ?? stage1.run.started_at;
+    stage1FinishedAt = stage2.run.stage1_finished_at ?? stage1.run.finished_at;
     const eventBundle = buildStage3EventRankingInput(
       stage2.input,
       stage2.output,
@@ -218,14 +233,14 @@ export async function processStage3(
     const digestRows = await loadStage3RankingRows(
       pool,
       "digest",
-      publishedWithinHours,
-      options.publishedAtScope,
+      stage1StartedAt,
+      stage1FinishedAt,
     );
     const longFormRows = await loadStage3RankingRows(
       pool,
       "long_form",
-      publishedWithinHours,
-      options.publishedAtScope,
+      stage1StartedAt,
+      stage1FinishedAt,
     );
     const digestRecords = buildDigestRecords(digestRows);
     const longFormRecords = buildLongFormRecords(longFormRows);
@@ -361,6 +376,9 @@ export async function processStage3(
     await writeRunJson(join(runDir, "run.json"), {
       runId,
       sourceStage2RunDir,
+      sourceStage1RunDir,
+      stage1StartedAt,
+      stage1FinishedAt,
       startedAt,
       finishedAt: new Date(),
       model,
@@ -405,6 +423,9 @@ export async function processStage3(
     await writeRunJson(join(runDir, "run.json"), {
       runId,
       sourceStage2RunDir,
+      sourceStage1RunDir,
+      stage1StartedAt,
+      stage1FinishedAt,
       startedAt,
       finishedAt: new Date(),
       model,
@@ -580,19 +601,13 @@ function validateStage2IdMap(input: Stage2Input, idMap: Stage2IdMap) {
   }
 }
 
-/** 读取某一频道的 Stage 3 排名候选，并按原始文章采集时间限定 Daily 输入范围。 */
+/** 读取本次 Stage 1 新产生的 Digest / Long-form 候选。 */
 export async function loadStage3RankingRows(
   queryable: Queryable,
   routing: "digest" | "long_form",
-  publishedWithinHours: number,
-  publishedAtScope?: PublishedAtScope,
+  stage1StartedAt: string,
+  stage1FinishedAt: string,
 ): Promise<RankingCandidateRow[]> {
-  const publishedAtPredicate = publishedAtScope
-    ? "ra.published_at >= $2::timestamptz and ra.published_at < $3::timestamptz"
-    : "ra.published_at >= now() - ($2::int * interval '1 hour')";
-  const values: Array<number | string> = publishedAtScope
-    ? [routing, publishedAtScope.startAt, publishedAtScope.endAt]
-    : [routing, publishedWithinHours];
   const result = await queryable.query<RankingCandidateRow>(
     `
       select
@@ -608,14 +623,15 @@ export async function loadStage3RankingRows(
       join sources s on s.id = ra.source_id
       where pc.routing = $1
         and ra.stage1_status = 'selected'
-        and ${publishedAtPredicate}
+        and pc.created_at >= $2::timestamptz
+        and pc.created_at <= $3::timestamptz
       order by
         pc.category,
-        ra.published_at desc,
+        pc.created_at asc,
         s.name,
         pc.id
     `,
-    values,
+    [routing, stage1StartedAt, stage1FinishedAt],
   );
 
   return result.rows;
@@ -1255,6 +1271,9 @@ async function writeRunJson(
   value: {
     runId: string;
     sourceStage2RunDir: string;
+    sourceStage1RunDir: string;
+    stage1StartedAt: string;
+    stage1FinishedAt: string;
     startedAt: Date;
     finishedAt: Date;
     model: string;
@@ -1281,6 +1300,9 @@ async function writeRunJson(
     run_id: value.runId,
     timestamp: value.runId,
     source_stage2_run: value.sourceStage2RunDir,
+    source_stage1_run: value.sourceStage1RunDir,
+    stage1_started_at: value.stage1StartedAt,
+    stage1_finished_at: value.stage1FinishedAt,
     status: value.status,
     started_at: value.startedAt.toISOString(),
     finished_at: value.finishedAt.toISOString(),

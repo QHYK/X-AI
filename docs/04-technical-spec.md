@@ -440,18 +440,18 @@ source_id + date
 每天执行一次完整 Daily Workflow。
 触发时间：
 ```text
-09:00 Asia/Shanghai
+08:30 Asia/Shanghai
 ```
 
 每个 Daily 使用固定的 `raw_articles.published_at` 半开区间，Daily 日期对应区间结束的
-09:00 boundary。例如：
+08:30 boundary。例如：
 
 ```text
 Daily 2026-08-25
-= 2026-08-24 09:00 <= published_at < 2026-08-25 09:00 (Asia/Shanghai)
+= 2026-08-24 08:30 <= published_at < 2026-08-25 08:30 (Asia/Shanghai)
 ```
 
-Orchestrator 启动时只计算一次 scope；默认选择最近一个已经结束的 09:00 boundary。
+Orchestrator 启动时只计算一次 scope；默认选择最近一个已经结束的 08:30 boundary。
 `DAILY_DATE=YYYY-MM-DD npm run daily` 可显式选择相同 scope 进行 retry / backfill。
 `published_at` 决定新闻属于哪一期 Daily；`collected_at` 只记录系统何时采集。
 因此 late retry / backfill 不改变 Daily membership，`published_at IS NULL` 的文章不进入任何 Daily scope。
@@ -460,7 +460,7 @@ Orchestrator 通过 `DAILY_PUBLISHED_SCOPE_START_AT` / `DAILY_PUBLISHED_SCOPE_EN
 
 只设置一个 Cron Trigger。
 ```text
-Cron 09:00
+Cron 08:30
     ↓
 Collection
     ↓
@@ -548,6 +548,10 @@ update raw_articles.content_text and content_completion metadata
 
 运行失败时 artifact 保留已经获得的真实 metrics；未知字段为 `null`，不估算。
 
+Daily Workflow 的 Content Completion 使用 `daily_end - 72 hours <= published_at < daily_end`
+的 catch-up window，以涵盖延迟进入 RSS 的文章；runtime 的 `scope_start_at` /
+`scope_end_at` 记录这一实际窗口。Daily Scope 本身仍保持 24 小时。
+
 ### 4.4 Deduplication
 区分两类重复。
 
@@ -584,7 +588,7 @@ FT: Fed ...
 
 只处理最近 workflow window 内 `stage1_status IN ('pending', 'failed')` 的 Raw Articles。
 
-Daily Workflow 使用本次 Daily 固定的 `raw_articles.published_at` scope；
+Daily Workflow 使用以本次 `daily_end` 倒推 72 小时的 `raw_articles.published_at` catch-up window；
 单独运行 Stage 1 时使用基于 `published_at` 的最近 24 小时默认窗口。
 
 Stage 1 对普通文章使用小型 micro-batch，但每篇 Raw Article 仍独立判断；较大的 input 可以单独处理。
@@ -606,10 +610,11 @@ processing_error = ...
 ### 4.6 Stage 2
 
 Stage 1 全部可处理内容完成后触发 Stage 2。
-读取当前 workflow 的 Event Candidates；生成轻量 Event Groups。
-默认时间窗口与 Stage 1 一致，为最近 24 小时 published 内容。
-在 Daily Workflow 中改用本次 Daily 固定的 `raw_articles.published_at` scope；单独运行
-Stage 2 时继续使用基于 `published_at` 的最近 24 小时默认窗口。
+读取本次 Stage 1 新创建的 Event Candidates；生成轻量 Event Groups。候选必须同时满足
+`routing = event`、`raw_articles.stage1_status = selected` 与
+`stage1.started_at <= processed_contents.created_at <= stage1.finished_at`。Stage 2 不再以
+`published_at` 重新决定候选集合；Daily 明确传入本次 Stage 1 runtime，手动运行则回退到最近一次
+successful Stage 1 runtime。
 
 ```text
 Event Candidates
@@ -630,9 +635,12 @@ invented IDs，但暂时不阻断 runtime output。这是已知限制，后续�
 Stage 2 完成后主动触发 Stage 3。
 Stage 3 分阶段执行。
 
-Daily Workflow 中 Digest / Long-form 候选使用与 Stage 1/2 相同的固定 `raw_articles.published_at` scope；
-单独运行 Stage 3 时继续使用基于 `published_at` 的最近 24 小时默认窗口。
-Event Groups 读取 Orchestrator 明确传入的本次 Stage 2 runtime run。
+Digest / Long-form 候选只消费本次 Stage 1 新创建的内容：保留
+`raw_articles.stage1_status = selected`，并以 Stage 1 runtime 的
+`started_at <= processed_contents.created_at <= finished_at` 限定。Event Groups 继续读取
+Orchestrator 明确传入的本次 Stage 2 runtime run；Stage 3 Event 不修改其 Stage 2 runtime lineage。
+手动 Stage 3 优先读取所选 Stage 2 artifact 中记录的 Stage 1 runtime，缺失时回退到最近一次
+successful Stage 1 runtime。
 
 ```text
 Event Groups
@@ -777,7 +785,7 @@ Daily Date 由 Raw Article 的新闻发布时间 scope 决定，而不是采集�
 
 ```text
 Daily YYYY-MM-DD
-= 前一天 09:00 <= raw_articles.published_at < 当天 09:00 (Asia/Shanghai)
+= 前一天 08:30 <= raw_articles.published_at < 当天 08:30 (Asia/Shanghai)
 ```
 
 - Digest / Long-form / Inspiration 通过 `processed_contents.raw_article_id → raw_articles`
@@ -1009,8 +1017,9 @@ runtime     → Debug / operational artifacts，不是数据库
 npm run daily
 ```
 
-Orchestrator 固定本次 Daily scope，并将本次 Stage 2 run 明确传给 Stage 3、本次 Stage 3
-run 明确传给 Stage 4，避免 Daily 依赖全局 latest runtime。显式 retry / backfill：
+Orchestrator 固定本次 24 小时 Daily scope；Content Completion 与 Stage 1 另以 Daily end 为右边界
+使用 72 小时 catch-up window。它将本次 Stage 1 run 明确传给 Stage 2、本次 Stage 2 run 明确传给
+Stage 3、本次 Stage 3 run 明确传给 Stage 4，避免 Daily 依赖全局 latest runtime。显式 retry / backfill：
 
 ```bash
 DAILY_DATE=2026-08-25 npm run daily
@@ -1020,17 +1029,17 @@ DAILY_DATE=2026-08-25 npm run daily
 
 未来：
 ```text
-09:00 Asia/Shanghai Cron → Daily Workflow Orchestrator
+08:30 Asia/Shanghai Cron → Daily Workflow Orchestrator
 ```
 
 ---
 
 ## 9. Runtime Artifacts
 
-`runtime/` 保存 Stage 2–4 的真实 input / output / mapping / run metadata，用于 Debug、Review、重跑边界。
+`runtime/` 保存 Stage 1–4 的真实 input / output / mapping / run metadata，用于 Debug、Review、重跑边界。
 
 `runtime/daily/.../run.json` 额外记录 `daily_date`、`timezone`、
-`scope_start_at`、`scope_end_at`，以及本次 `content_completion_run`、`stage2_run`、
+`scope_start_at`、`scope_end_at`，以及本次 `content_completion_run`、`stage1_run`、`stage2_run`、
 `stage3_run`、`stage4_run`，
 同时保留各 step status / duration / failed_step。
 

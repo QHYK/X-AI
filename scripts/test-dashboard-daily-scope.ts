@@ -39,7 +39,7 @@ const expectedRecentDates = [
 ];
 
 checks.push({
-  name: "Dashboard defaults to the last completed Daily scope on either side of 09:00 Shanghai",
+  name: "Dashboard defaults to the last completed Daily scope on either side of 08:30 Shanghai",
   passed:
     resolveDailyScope(undefined, beforeBoundary).dailyDate === "2026-08-24" &&
     resolveDailyScope(undefined, afterBoundary).dailyDate === "2026-08-25",
@@ -81,7 +81,7 @@ checks.push({
         query.text.includes("ra.published_at >= scope.start_at") &&
         query.text.includes("ra.published_at < scope.end_at") &&
         !query.text.includes("ra.collected_at >= scope.start_at") &&
-        JSON.stringify(query.values) ===
+        JSON.stringify(query.values?.slice(0, 3)) ===
         JSON.stringify([
           recentScopes.map((scope) => scope.dailyDate),
           recentScopes.map((scope) => scope.startAt),

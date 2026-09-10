@@ -443,51 +443,47 @@ function extractCategories(item: Record<string, unknown>): string[] | null {
   return categories.length > 0 ? [...new Set(categories)] : null;
 }
 
-type DedupeKey =
-  | { kind: "origin_id"; value: string }
-  | { kind: "url"; value: string };
+type DedupeKey = {
+  sourceItemOriginId: string | null;
+  url: string | null;
+};
 
 function getDedupeKey(article: NormalizedRawArticle): DedupeKey | null {
   if (article.sourceItemOriginId) {
     return {
-      kind: "origin_id",
-      value: article.sourceItemOriginId,
+      sourceItemOriginId: article.sourceItemOriginId,
+      url: article.url,
     };
   }
 
   if (article.url) {
     return {
-      kind: "url",
-      value: article.url,
+      sourceItemOriginId: null,
+      url: article.url,
     };
   }
 
   return null;
 }
 
-/** 根据 source 内稳定 origin ID 优先、URL 回退的规则检查重复，保障 RSS 重跑幂等。 */
+/** 同时检查 source 内 origin ID 与 URL，避免同一 URL 因 feed item ID 后缀变化重复插入。 */
 async function rawArticleExists(
   client: PoolClient,
   sourceId: string,
   dedupeKey: DedupeKey,
 ): Promise<boolean> {
   const result = await client.query<{ id: string }>(
-    dedupeKey.kind === "origin_id"
-      ? `
-          select id
-          from raw_articles
-          where source_id = $1
-            and source_item_origin_id = $2
-          limit 1
-        `
-      : `
-          select id
-          from raw_articles
-          where source_id = $1
-            and url = $2
-          limit 1
-        `,
-    [sourceId, dedupeKey.value],
+    `
+      select id
+      from raw_articles
+      where source_id = $1
+        and (
+          source_item_origin_id = $2
+          or ($3::text is not null and url = $3)
+        )
+      limit 1
+    `,
+    [sourceId, dedupeKey.sourceItemOriginId, dedupeKey.url],
   );
 
   return result.rowCount !== null && result.rowCount > 0;

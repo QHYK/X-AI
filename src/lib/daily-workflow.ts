@@ -3,7 +3,11 @@
  *
  * 除传递固定 scope 外，也把本次 Stage 2/3 runtime 路径固定为下游 lineage。
  */
-import { toDailyScopeEnv, type DailyScope } from "./daily-scope.js";
+import {
+  resolveCatchupPublishedAtScope,
+  toDailyScopeEnv,
+  type DailyScope,
+} from "./daily-scope.js";
 
 export type DailyStageName =
   | "collect:rss"
@@ -15,6 +19,7 @@ export type DailyStageName =
   | "process:stage4";
 
 export type DailyLineage = {
+  stage1Run: string | null;
   stage2Run: string | null;
   stage3Run: string | null;
 };
@@ -30,6 +35,17 @@ export function buildDailyStepEnv(options: {
 
   if (options.runPointerPath) {
     env.DAILY_STAGE_RUN_POINTER = options.runPointerPath;
+  }
+  if (options.step === "complete:content" || options.step === "process:stage1") {
+    const catchupScope = resolveCatchupPublishedAtScope(options.scope);
+    env.DAILY_CATCHUP_SCOPE_START_AT = catchupScope.startAt;
+    env.DAILY_CATCHUP_SCOPE_END_AT = catchupScope.endAt;
+  }
+  if (options.step === "process:stage2") {
+    if (!options.lineage.stage1Run) {
+      throw new Error("Stage 2 requires the current Daily Stage 1 run path.");
+    }
+    env.STAGE2_STAGE1_RUN_DIR = options.lineage.stage1Run;
   }
   if (options.step === "process:stage3") {
     if (!options.lineage.stage2Run) {
