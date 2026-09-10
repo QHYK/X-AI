@@ -77,9 +77,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Raw Published</th>
-                <th>Stage1 Pending</th>
-                <th>Stage1 Selected</th>
+                <th>Raw</th>
+                <th>Pending</th>
+                <th>Selected</th>
                 <th>Ignored</th>
                 <th>Failed</th>
                 <th>Completion</th>
@@ -92,7 +92,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 <th>Long-form</th>
                 <th>Inspiration</th>
                 <th>Stage2 Groups</th>
-                <th>Stage3 Selected Events</th>
+                <th>Stage3 Events</th>
                 <th>Stage4 Events</th>
                 <th>LLM Calls</th>
                 <th>Input Tokens</th>
@@ -299,11 +299,12 @@ function DuplicateFilterCard({ metrics }: { metrics: DashboardDuplicateFilterMet
       <Metric label="Dedup rate" value={`${(metrics.duplicateRate * 100).toFixed(1)}%`} />
       <Metric label="Remaining unique articles" value={formatMetric(metrics.outputCount)} />
     </dl>
-    <details><summary>Duplicate categories</summary><dl className={styles.metricList}>
+    <summary>Duplicate categories</summary>
+    <dl className={styles.metricList}>
       <Metric label="URL only" value={formatMetric(metrics.sameUrlCount)} />
       <Metric label="Title only" value={formatMetric(metrics.sameTitleCount)} />
       <Metric label="URL + Title" value={formatMetric(metrics.sameUrlAndTitleCount)} />
-    </dl></details>
+    </dl>
   </article>;
 }
 

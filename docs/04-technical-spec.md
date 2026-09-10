@@ -795,6 +795,11 @@ Daily YYYY-MM-DD
 - `inspiration`
 - `meta`
 
+Event items retain their existing `tags`, `tags_zh`, `entities`, and `entities_zh` fields.
+Digest and Long-form items additionally expose `has_full_content`, derived from whether the
+associated `raw_articles.full_content_text` is non-null and non-blank. The field never exposes
+the full text itself; Inspiration and Event items do not expose it.
+
 Original links：
 - Event → API 通过 `processed_contents → raw_articles` 组装 `sources[]`
 - Digest / Long-form / Inspiration → `url`
@@ -802,6 +807,22 @@ Original links：
 API 不创建 `daily_briefs` / `brief_items` snapshot；当前是实时 composition。
 
 CORS 使用环境变量配置允许的 X-field origin。
+
+### Read More API
+
+```text
+POST /api/content/read-more
+{ "contentId": "processed_contents.id" }
+```
+
+The API only accepts Digest and Long-form content IDs. It joins to the associated Raw Article and
+reads `full_content_text` server-side. If no non-blank full text exists, it returns
+`{ "status": "not_available" }`; otherwise it uses the shared LLM client to return an on-demand
+structured Chinese detailed summary. The original full text is never returned to the client.
+
+The route is independent of `GET /api/brief`, has no cache or persistence, and makes no automatic
+LLM retries. Provider or structured-output failures are logged server-side and return
+`{ "status": "temporarily_unavailable" }` without affecting the Brief API.
 
 ---
 

@@ -63,9 +63,13 @@ export type BriefContentItem = {
   url: string | null;
   published_at: string | null;
   created_at: string;
+  has_full_content: boolean;
 };
 
-export type BriefInspirationItem = Omit<BriefContentItem, "rank"> & {
+export type BriefInspirationItem = Omit<
+  BriefContentItem,
+  "rank" | "has_full_content"
+> & {
   image_url: string | null;
 };
 
@@ -123,9 +127,10 @@ type ContentRow = {
   url: string | null;
   published_at: Date | string | null;
   created_at: Date | string;
+  hasFullContent: boolean;
 };
 
-type InspirationRow = Omit<ContentRow, "rank" | "category"> & {
+type InspirationRow = Omit<ContentRow, "rank" | "category" | "hasFullContent"> & {
   image_url: string | null;
 };
 
@@ -311,7 +316,8 @@ async function loadDigestItems(
         s.name as source,
         ra.url,
         ra.published_at,
-        pc.created_at
+        pc.created_at,
+        coalesce(nullif(btrim(ra.full_content_text), ''), '') <> '' as "hasFullContent"
       from processed_contents pc
       join raw_articles ra on ra.id = pc.raw_article_id
       join sources s on s.id = ra.source_id
@@ -350,7 +356,8 @@ async function loadLongFormItems(
         s.name as source,
         ra.url,
         ra.published_at,
-        pc.created_at
+        pc.created_at,
+        coalesce(nullif(btrim(ra.full_content_text), ''), '') <> '' as "hasFullContent"
       from processed_contents pc
       join raw_articles ra on ra.id = pc.raw_article_id
       join sources s on s.id = ra.source_id
@@ -443,6 +450,7 @@ function toBriefContentItem(row: ContentRow): BriefContentItem {
     url: row.url,
     published_at: toIsoString(row.published_at),
     created_at: toIsoString(row.created_at) ?? "",
+    has_full_content: row.hasFullContent,
   };
 }
 
