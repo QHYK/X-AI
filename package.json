@@ -17,6 +17,8 @@
     "collect:rss": "tsx scripts/collect-rss.ts",
     "dedupe:stage1": "tsx scripts/dedupe-stage1.ts",
     "test:pre-stage1-duplicates": "tsx scripts/test-pre-stage1-duplicates.ts",
+    "test:firecrawl-content": "tsx scripts/test-firecrawl-content.ts",
+    "test:firecrawl-content-extraction": "tsx scripts/test-firecrawl-content-extraction.ts",
     "complete:content": "tsx scripts/complete-content.ts",
     "process:stage1": "tsx scripts/process-stage1.ts",
     "process:stage2": "tsx scripts/process-stage2.ts",

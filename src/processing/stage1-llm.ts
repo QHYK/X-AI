@@ -68,7 +68,7 @@ export type Stage1TokenUsage = {
 const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE1_LLM_TIMEOUT_MS ?? 45_000);
 const DEFAULT_MAX_RETRIES = Number(process.env.STAGE1_LLM_MAX_RETRIES ?? 2);
 const RETRY_DELAY_MS = Number(process.env.STAGE1_LLM_RETRY_DELAY_MS ?? 1_000);
-const HTTP_503_RETRY_DELAY_MS = 600_000;
+const HTTP_503_RETRY_DELAY_MS = 10_000;
 const MAX_OUTPUT_TOKENS_PER_ARTICLE = 1_200;
 
 /**

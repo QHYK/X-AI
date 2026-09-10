@@ -20,6 +20,9 @@ import {
 
 const DASHBOARD_DAYS = 7;
 const STAGES = ["stage1", "stage2", "stage3", "stage4"] as const;
+const CONTENT_COMPLETION_SHORT_CHARS = Number(
+  process.env.CONTENT_COMPLETION_SHORT_CHARS ?? 80,
+);
 
 type Routing = "event" | "digest" | "long_form" | "inspiration";
 export type DashboardStage = (typeof STAGES)[number];
@@ -31,6 +34,7 @@ type CountRow = {
   selected?: number | string;
   ignored?: number | string;
   failed?: number | string;
+  completion_backlog?: number | string;
   event?: number | string;
   digest?: number | string;
   long_form?: number | string;
@@ -140,6 +144,7 @@ export type DashboardDay = {
   };
   processed: Record<Routing, number> & { total: number };
   events: number;
+  completionBacklog: number;
   runtime: {
     contentCompletion: DashboardContentCompletionMetrics | null;
     duplicateFilter: DashboardDuplicateFilterMetrics | null;
@@ -266,17 +271,35 @@ export async function getDashboardData(
         select
           scope.date,
           count(ra.id)::int as total,
-          count(ra.id) filter (where ra.stage1_status = 'pending')::int as pending,
-          count(ra.id) filter (where ra.stage1_status = 'selected')::int as selected,
-          count(ra.id) filter (where ra.stage1_status = 'ignored')::int as ignored,
-          count(ra.id) filter (where ra.stage1_status = 'failed')::int as failed
+          count(ra.id) filter (
+            where ra.stage1_status = 'pending'
+          )::int as pending,
+          count(ra.id) filter (
+            where ra.stage1_status = 'selected'
+          )::int as selected,
+          count(ra.id) filter (
+            where ra.stage1_status = 'ignored'
+          )::int as ignored,
+          count(ra.id) filter (
+            where ra.stage1_status = 'failed'
+          )::int as failed,
+          count(ra.id) filter (
+            where ra.stage1_status = 'pending'
+              and ra.url is not null
+              and length(btrim(coalesce(ra.content_text, ''))) < $4
+          )::int as completion_backlog
         from scopes scope
         left join raw_articles ra
           on ra.published_at >= scope.start_at
           and ra.published_at < scope.end_at
         group by scope.date
       `,
-      [scopeDates, scopeStarts, scopeEnds],
+      [
+        scopeDates,
+        scopeStarts,
+        scopeEnds,
+        CONTENT_COMPLETION_SHORT_CHARS,
+      ],
     ),
     pool.query<CountRow>(
       `
@@ -382,6 +405,7 @@ export async function getDashboardData(
         inspiration: count(processed?.inspiration),
       },
       events: count(event?.total),
+      completionBacklog: count(raw?.completion_backlog),
       runtime: {
         contentCompletion: completionByDate.get(scope.dailyDate) ?? null,
         duplicateFilter: duplicateFilterByDate.get(scope.dailyDate) ?? null,

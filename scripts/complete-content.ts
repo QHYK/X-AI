@@ -1,6 +1,8 @@
 import { config } from "dotenv";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { Pool } from "pg";
+import { resolveDailyScope } from "../src/lib/daily-scope.js";
 import {
   completeRawArticleContent,
   resolveContentCompletionLimits,
@@ -9,6 +11,7 @@ import {
 import {
   contentCompletionRunDir,
   writeContentCompletionRuntime,
+  writeContentCompletionResults,
   type ContentCompletionRuntimeArtifact,
 } from "../src/processing/content-completion-runtime.js";
 
@@ -19,16 +22,23 @@ config({ path: ".env.local", override: true });
 
 async function main() {
   const startedAt = new Date();
+  const scope = resolveDailyScope(process.env.DAILY_DATE, startedAt);
+
   const options = {
     sourceNames: parseSourceNames(process.env.CONTENT_COMPLETION_SOURCE_NAMES),
     limit: optionalNumber(process.env.CONTENT_COMPLETION_LIMIT),
     perSourceLimit: optionalNumber(process.env.CONTENT_COMPLETION_PER_SOURCE_LIMIT),
     concurrency: optionalNumber(process.env.CONTENT_COMPLETION_CONCURRENCY),
+    scopeStartAt: scope.startAt,
+    scopeEndAt: scope.endAt,
   };
   const limits = resolveContentCompletionLimits(options);
   const runDir = contentCompletionRunDir(startedAt);
   const artifact: ContentCompletionRuntimeArtifact = {
     status: "running",
+    daily_date: scope.dailyDate,
+    scope_start_at: scope.startAt,
+    scope_end_at: scope.endAt,
     started_at: startedAt.toISOString(),
     finished_at: null,
     duration_ms: null,
@@ -37,7 +47,16 @@ async function main() {
     success_count: null,
     failed_count: null,
     skipped_count: null,
+    unusable_count: null,
     remaining_count: null,
+    input_count: null,
+    attempted_count: null,
+    firecrawl_request_count: null,
+    retry_count: null,
+    content_type_distribution: null,
+    raw_length: null,
+    content_text_length: null,
+    full_content_text_length: null,
     limit: limits.limit,
     per_source_limit: limits.perSourceLimit,
     error: null,
@@ -66,9 +85,27 @@ async function main() {
     const summary = await completeRawArticleContent(pool, options, (metrics) => {
       applyMetrics(artifact, metrics);
     });
+    applySummaryMetrics(artifact, summary);
+    await writeRawMarkdown(runDir, summary.results);
+    const runtimeResults = summary.results.map((result) => {
+      return Object.fromEntries(Object.entries(result).filter(([key]) => key !== "rawMarkdown"));
+    });
+    await writeContentCompletionResults(runDir, runtimeResults);
     finishArtifact(artifact, startedAt, "success", null);
     await writeContentCompletionRuntime(runDir, artifact);
-    console.log(JSON.stringify(summary, null, 2));
+
+    // Log the summary, but exclude the rawMarkdown content
+    const { results: _results, ...summaryForLog } = summary;
+    console.log(
+      JSON.stringify(
+        {
+          ...summaryForLog,
+          runtimeDir: runDir,
+        },
+        null,
+        2,
+      ),
+    );
   } catch (error) {
     finishArtifact(
       artifact,
@@ -81,6 +118,29 @@ async function main() {
   } finally {
     await pool?.end();
   }
+}
+
+async function writeRawMarkdown(
+  runDir: string,
+  results: Array<{ rawArticleId: string; rawMarkdown: string | null }>,
+): Promise<void> {
+  const rawDir = join(runDir, "firecrawl-raw-markdown");
+  await mkdir(rawDir, { recursive: true });
+  await Promise.all(results.filter((result) => result.rawMarkdown).map((result) =>
+    writeFile(join(rawDir, `${result.rawArticleId}.md`), result.rawMarkdown as string),
+  ));
+}
+
+function applySummaryMetrics(artifact: ContentCompletionRuntimeArtifact, summary: Awaited<ReturnType<typeof completeRawArticleContent>>): void {
+  artifact.unusable_count = summary.unusableCount;
+  artifact.input_count = summary.inputCount;
+  artifact.attempted_count = summary.attemptedCount;
+  artifact.firecrawl_request_count = summary.firecrawlRequestCount;
+  artifact.retry_count = summary.retryCount;
+  artifact.content_type_distribution = summary.contentTypeDistribution;
+  artifact.raw_length = summary.rawLength;
+  artifact.content_text_length = summary.contentTextLength;
+  artifact.full_content_text_length = summary.fullContentTextLength;
 }
 
 function applyMetrics(

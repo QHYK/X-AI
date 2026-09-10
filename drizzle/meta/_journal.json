@@ -57,6 +57,13 @@
       "when": 1787934309664,
       "tag": "0007_amusing_moondragon",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789036766853,
+      "tag": "0008_fresh_franklin_storm",
+      "breakpoints": true
     }
   ]
 }

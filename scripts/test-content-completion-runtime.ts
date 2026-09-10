@@ -61,6 +61,7 @@ checks.push({
   passed:
     selected.length === 2 &&
     selectionQueries[0]?.text.includes("source_rank <= $5") === true &&
+    !selectionQueries[0]?.text.includes("full_content_text") &&
     selectionQueries[0]?.text.includes("limit $6") === true &&
     selectionQueries[0]?.values?.[4] === 1 &&
     selectionQueries[0]?.values?.[5] === 2,
@@ -68,8 +69,8 @@ checks.push({
 });
 
 const resultCounts = summarizeCompletionResults([
-  completionResult("updated"),
-  completionResult("updated"),
+  completionResult("success"),
+  completionResult("success"),
   completionResult("failed"),
   completionResult("skipped"),
 ]);
@@ -152,12 +153,15 @@ function completionResult(
     title: status,
     url: "https://example.com/article",
     status,
-    trigger: "empty_content",
-    skipReason: status === "skipped" ? "known_blocked_source" : null,
+    contentType: status === "success" ? "article_body" : null,
     originalLength: 0,
-    extractedLength: status === "updated" ? 1000 : null,
-    httpStatus: status === "skipped" ? null : 200,
+    rawLength: status === "skipped" ? null : 1200,
+    contentLength: status === "success" ? 1000 : null,
+    fullContentLength: null,
+    requestCount: status === "skipped" ? 0 : 1,
+    retryCount: 0,
     error: status === "failed" ? "fetch failed" : null,
+    rawMarkdown: null,
   };
 }
 
@@ -181,7 +185,16 @@ async function writeFixture(
     success_count: metrics.success_count,
     failed_count: 1,
     skipped_count: 0,
+    unusable_count: 0,
     remaining_count: metrics.remaining_count,
+    input_count: metrics.selected_count,
+    attempted_count: metrics.selected_count,
+    firecrawl_request_count: metrics.selected_count,
+    retry_count: 0,
+    content_type_distribution: { article_body: metrics.success_count ?? 0 },
+    raw_length: 1000,
+    content_text_length: 800,
+    full_content_text_length: 0,
     limit: 50,
     per_source_limit: 10,
     error: null,

@@ -168,7 +168,7 @@ Source List 导入时将旧的 Economics / Business / Financial / Market 归一�
 ```text
 id, source_id, source_item_origin_id,
 title, url, author, published_at, collected_at,
-content_text, image_url, source_tags, metadata,
+content_text, full_content_text, image_url, source_tags, metadata,
 stage1_status, stage1_processed_at, processing_error
 ```
 
@@ -183,6 +183,7 @@ stage1_status, stage1_processed_at, processing_error
 | `published_at`          | timestamptz | nullable                    |
 | `collected_at`          | timestamptz | NOT NULL                    |
 | `content_text`          | text        | nullable                    |
+| `full_content_text`     | text        | nullable；仅供后续详情复用，不进入 Stage 1 |
 | `image_url`             | text        | nullable                    |
 | `source_tags`           | text[]      | nullable                    |
 | `metadata`              | jsonb       | nullable                    |
@@ -513,7 +514,7 @@ Web Collector 应尽量输出与 RSS Collector 相同的标准 Raw Article 结�
 ### 4.3 Content Completion
 正文不足时执行
 ```text
-raw_articles → need completion? → article extraction → update content_text
+raw_articles → need completion? → Firecrawl scrape → extract Stage 1 input → update content_text
 ```
 
 如果：
@@ -522,13 +523,14 @@ content_text is null / empty
 ```
 且存在有效 `url`：
 ```text
-try fetch article page
+use Firecrawl `/v2/scrape` to request Markdown
     ↓
-extract readable text
+extract article-relevant Markdown (Abstract / Takeaways / Key Points / Summary / body)
     ↓
-update raw_articles.content_text
+update raw_articles.content_text and content_completion metadata
 ```
-该步骤主要用于 Nature 等只提供标题和链接的 Feed。
+该步骤只补足 Stage 1 理解所需内容，不调用 LLM。原始 Firecrawl Markdown 只保存在 runtime；
+只有清洗后的长且完整正文具备后续详情复用价值时，才写入 `full_content_text`，且 Stage 1 不读取它。
 
 如果补抓仍失败：
 * Raw Article 保留；

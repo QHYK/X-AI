@@ -54,6 +54,7 @@ export const rawArticles = pgTable(
     publishedAt: timestamp("published_at", { withTimezone: true }),
     collectedAt: timestamp("collected_at", { withTimezone: true }).notNull().defaultNow(),
     contentText: text("content_text"),
+    fullContentText: text("full_content_text"),
     imageUrl: text("image_url"),
     sourceTags: text("source_tags").array(),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),

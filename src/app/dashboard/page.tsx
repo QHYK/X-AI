@@ -110,7 +110,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   <td>{formatNumber(day.raw.ignored)}</td>
                   <td>{formatNumber(day.raw.failed)}</td>
                   <td>{formatContentCompletionRatio(day.runtime.contentCompletion)}</td>
-                  <td>{formatMetric(day.runtime.contentCompletion?.remainingCount)}</td>
+                  <td>{formatNumber(day.completionBacklog)}</td>
                   <td>{formatDuration(day.runtime.contentCompletion?.durationMs)}</td>
                   <td>{formatDuration(day.runtime.stages.stage1?.durationMs)}</td>
                   <td>{formatNumber(day.processed.total)}</td>

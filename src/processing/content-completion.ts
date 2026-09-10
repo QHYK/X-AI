@@ -1,10 +1,19 @@
-/**
- * Content Completion：在 Stage 1 前补全正文不足的原始文章。
- *
- * 复用同一 eligibility 条件统计候选和剩余 backlog，且仅更新 content_text，不改变后续 Stage 的选择逻辑。
- */
-import { Readability } from "@mozilla/readability";
-import { JSDOM } from "jsdom";
+/** Firecrawl-based Stage 1 input completion. No LLM is used here. 
+    CPI / PPI / 非农 / BEA
+    content_text       = 约 1k–2.5k 的 release opening
+    full_content_text  = NULL
+    content_type       = release_summary
+
+    Nature paper
+    content_text       = Abstract
+    full_content_text  = NULL
+    content_type       = abstract
+
+    普通长文
+    content_text       = <=4k Stage1 内容
+    full_content_text  = cleaned 完整正文
+    content_type       = article_body
+*/
 import type { Pool, PoolClient } from "pg";
 
 export type ContentCompletionOptions = {
@@ -12,34 +21,56 @@ export type ContentCompletionOptions = {
   perSourceLimit?: number;
   sourceNames?: string[];
   concurrency?: number;
+  scopeStartAt?: string;
+  scopeEndAt?: string;
 };
+
+export type CompletionStatus = "success" | "unusable" | "failed" | "skipped";
+export type CompletionContentType =
+  | "article_body"
+  | "takeaways"
+  | "key_points"
+  | "abstract"
+  | "description"
+  | "summary"
+  | "executive_summary"
+  | "release_summary";
 
 export type ContentCompletionResult = {
   rawArticleId: string;
   sourceName: string;
   title: string;
   url: string;
-  status: "updated" | "failed" | "skipped";
-  trigger: CompletionTrigger | null;
-  skipReason: string | null;
+  status: CompletionStatus;
+  contentType: CompletionContentType | null;
   originalLength: number;
-  extractedLength: number | null;
-  httpStatus: number | null;
+  rawLength: number | null;
+  contentLength: number | null;
+  fullContentLength: number | null;
+  requestCount: number;
+  retryCount: number;
   error: string | null;
+  rawMarkdown: string | null;
 };
 
 export type ContentCompletionSummary = {
   candidateCount: number;
   selectedCount: number;
   successCount: number;
+  unusableCount: number;
+  failedCount: number;
+  skippedCount: number;
   remainingCount: number;
   limit: number;
   perSourceLimit: number;
-  checkedCount: number;
+  inputCount: number;
   attemptedCount: number;
-  updatedCount: number;
-  failedCount: number;
-  skippedCount: number;
+  firecrawlRequestCount: number;
+  retryCount: number;
+  contentTypeDistribution: Partial<Record<CompletionContentType, number>>;
+  rawLength: number;
+  contentTextLength: number;
+  fullContentTextLength: number;
   results: ContentCompletionResult[];
 };
 
@@ -48,9 +79,13 @@ export type ContentCompletionMetrics = Pick<
   | "candidateCount"
   | "selectedCount"
   | "successCount"
+  | "unusableCount"
   | "failedCount"
   | "skippedCount"
   | "remainingCount"
+  | "attemptedCount"
+  | "firecrawlRequestCount"
+  | "retryCount"
 >;
 
 export type ContentCompletionLimits = {
@@ -58,88 +93,79 @@ export type ContentCompletionLimits = {
   perSourceLimit: number;
 };
 
-type CompletionTrigger = "empty_content" | "invalid_placeholder" | "short_long_form";
-
-type RawArticleCompletionCandidate = {
+type Candidate = {
   id: string;
   sourceName: string;
-  sourceCategory: string;
-  sourceType: string | null;
   title: string;
   url: string;
   contentText: string | null;
 };
 
-type ExtractionResult = {
-  httpStatus: number | null;
-  finalUrl: string;
-  htmlFetched: boolean;
-  text: string;
+type FirecrawlBody = {
+  success?: boolean;
+  markdown?: unknown;
+  data?: { markdown?: unknown };
+  error?: unknown;
+};
+
+type FetchResult = {
+  markdown: string | null;
+  rawLength: number | null;
+  requestCount: number;
+  retryCount: number;
   error: string | null;
+  requestSucceeded: boolean;
+};
+
+export type FirecrawlExtraction = {
+  contentText: string | null;
+  fullContentText: string | null;
+  contentType: CompletionContentType | null;
 };
 
 const DEFAULT_LIMIT = Number(process.env.CONTENT_COMPLETION_LIMIT ?? 50);
-const DEFAULT_PER_SOURCE_LIMIT = Number(process.env.CONTENT_COMPLETION_PER_SOURCE_LIMIT ?? 10);
-const DEFAULT_CONCURRENCY = Number(process.env.CONTENT_COMPLETION_CONCURRENCY ?? 4);
-const FETCH_TIMEOUT_MS = Number(process.env.CONTENT_COMPLETION_FETCH_TIMEOUT_MS ?? 20_000);
-const DOMAIN_DELAY_MS = Number(process.env.CONTENT_COMPLETION_DOMAIN_DELAY_MS ?? 3_000);
-const LONG_FORM_SHORT_CONTENT_CHARS = Number(
-  process.env.CONTENT_COMPLETION_LONG_FORM_SHORT_CHARS ?? 500,
+const DEFAULT_PER_SOURCE_LIMIT = Number(
+  process.env.CONTENT_COMPLETION_PER_SOURCE_LIMIT ?? 10,
 );
-const MIN_EXTRACTED_TEXT_CHARS = Number(process.env.CONTENT_COMPLETION_MIN_TEXT_CHARS ?? 700);
-const MIN_IMPROVEMENT_CHARS = Number(process.env.CONTENT_COMPLETION_MIN_IMPROVEMENT_CHARS ?? 500);
-
-const PLACEHOLDER_CONTENT = new Set(["comments", "comment", "read more"]);
-
+const DEFAULT_CONCURRENCY = Number(
+  process.env.CONTENT_COMPLETION_CONCURRENCY ?? 2,
+);
+// 是否值得触发 Content Completion 的正文长度阈值；不同于 Firecrawl 结果的最低可用阈值。
+const SHORT_CONTENT_CHARS = Number(
+  process.env.CONTENT_COMPLETION_SHORT_CHARS ?? 80,
+);
+const TIMEOUT_MS = Number(
+  process.env.CONTENT_COMPLETION_FIRECRAWL_TIMEOUT_MS ?? 30_000,
+);
+const MAX_RETRIES = Number(
+  process.env.CONTENT_COMPLETION_FIRECRAWL_MAX_RETRIES ?? 2,
+);
 const SPECIAL_SKIP_SOURCE_NAMES = new Set(["xkcd", "NASA Image of the Day"]);
-
-const KNOWN_BLOCKED_SOURCE_NAMES = new Set([
-  "Nature: Chemistry",
-  "Nature:  Biotechnology",
-  "Bloomberg Opinion",
-  "FT Lex Best",
-  "The Economist: Business",
-  "The Economist: China",
-  "The Economist: Finance and economics",
-  "The Economist: Financial Indicators",
-  "The Economist: International",
-  "The Economist: Science and technology",
+const INSTITUTIONAL_RELEASE_SOURCE_NAMES = new Set([
+  "CPI",
+  "PPI",
+  "非农报告 Employment Situation",
+  "BEA - 商务部数据",
 ]);
+const INSTITUTIONAL_SUMMARY_MAX_CHARS = 2_500;
+// const PLACEHOLDERS = new Set(["comments", "comment", "read more", "continue reading...", "full text ]]>"]);
 
-const CHALLENGE_MARKERS = [
-  "are you a robot",
-  "client challenge",
-  "security verification",
-  "access denied",
-  "captcha",
-  "unusual activity",
-  "enable javascript and cookies",
-  "cloudflare",
-];
+// Firecrawl 提取结果达到这一长度才有最低使用价值；并非决定是否进入补全的阈值。
+const MIN_USEFUL_CHARS = 80;
+// 供 Stage1 使用的 content_text 上限，避免单篇正文无限放大模型输入。达到此长度额外保留完整正文，供需要更长上下文的后续用途使用。
+const STAGE1_MAX_CHARS = 4_000;
 
-const COMPLETION_ELIGIBILITY_SQL = `
+const ELIGIBILITY = `
   ra.stage1_status = 'pending'
   and ra.url is not null
-  and (
-    cardinality($1::text[]) = 0
-    or s.name = any($1::text[])
-  )
-  and (
-    $4::boolean = true
-    or ra.content_text is null
-    or btrim(ra.content_text) = ''
-    or lower(btrim(ra.content_text)) = any($2::text[])
-    or (
-      s.category = 'long-form'
-      and length(ra.content_text) < $3
-    )
-  )
+  and (cardinality($1::text[]) = 0 or s.name = any($1::text[]))
+  and length(btrim(coalesce(ra.content_text, ''))) < $2
+  and ($3::timestamptz is null or ra.published_at >= $3::timestamptz)
+  and ($4::timestamptz is null or ra.published_at < $4::timestamptz)
+  and s.name not in ('xkcd', 'NASA Image of the Day')
 `;
 
-/**
- * 执行一次正文补全，并在关键阶段回传真实 metrics 给 runtime 写入方。
- * candidateCount 不受 limit 影响，selectedCount 则遵守全局与单来源限制。
- */
+/** Content Completion 总入口：选取候选、受限并发补全，并汇总本次运行统计。 */
 export async function completeRawArticleContent(
   pool: Pool,
   options: ContentCompletionOptions = {},
@@ -148,35 +174,39 @@ export async function completeRawArticleContent(
   const limits = resolveContentCompletionLimits(options);
   const candidateCount = await countCompletionCandidates(pool, options);
   onMetrics?.({ candidateCount });
+
   const candidates = await loadCompletionCandidates(pool, options);
   onMetrics?.({ selectedCount: candidates.length });
-  const completedResults: ContentCompletionResult[] = [];
-  const results = await runWithConcurrency(
+
+  const limiter = new FirecrawlRateLimiter();
+  const results = await concurrent(
     candidates,
     Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY),
-    async (candidate) => {
-      const result = await completeRawArticle(pool, candidate);
-      completedResults.push(result);
-      onMetrics?.(summarizeCompletionResults(completedResults));
-      return result;
-    },
+    (candidate) => complete(pool, candidate, limiter),
   );
-  const resultCounts = summarizeCompletionResults(results);
-  onMetrics?.(resultCounts);
+  const counts = summarizeCompletionResults(results);
+  onMetrics?.(counts);
+
   const remainingCount = await countCompletionCandidates(pool, options);
   onMetrics?.({ remainingCount });
 
   return {
     candidateCount,
     selectedCount: candidates.length,
-    successCount: resultCounts.successCount,
     remainingCount,
     ...limits,
-    checkedCount: results.length,
+    inputCount: candidates.length,
     attemptedCount: results.filter((result) => result.status !== "skipped").length,
-    updatedCount: resultCounts.successCount,
-    failedCount: resultCounts.failedCount,
-    skippedCount: resultCounts.skippedCount,
+    firecrawlRequestCount: sum(results, (result) => result.requestCount),
+    retryCount: sum(results, (result) => result.retryCount),
+    contentTypeDistribution: distribution(results),
+    rawLength: sum(results, (result) => result.rawLength ?? 0),
+    contentTextLength: sum(results, (result) => result.contentLength ?? 0),
+    fullContentTextLength: sum(
+      results,
+      (result) => result.fullContentLength ?? 0,
+    ),
+    ...counts,
     results,
   };
 }
@@ -190,6 +220,7 @@ export function resolveContentCompletionLimits(
   };
 }
 
+/** 单独统计完整候选池，用于区分实际处理量与受限后的待处理余量。 */
 export async function countCompletionCandidates(
   queryable: Pick<Pool | PoolClient, "query">,
   options: ContentCompletionOptions = {},
@@ -199,393 +230,659 @@ export async function countCompletionCandidates(
       select count(*)::int as count
       from raw_articles ra
       join sources s on s.id = ra.source_id
-      where ${COMPLETION_ELIGIBILITY_SQL}
+      where ${ELIGIBILITY}
     `,
-    completionEligibilityValues(options),
+    values(options),
   );
 
   return Number(result.rows[0]?.count ?? 0);
 }
 
 /**
- * 按既定缺失程度和来源配额挑选本次候选。
- * 窗口函数先执行每来源限额，再应用全局 limit，以避免单一来源占满批次。
+ * 按 source 排名再应用全局 limit，避免单一来源占满本次补全配额。
  */
 export async function loadCompletionCandidates(
   queryable: Pick<Pool | PoolClient, "query">,
   options: ContentCompletionOptions,
-): Promise<RawArticleCompletionCandidate[]> {
+): Promise<Candidate[]> {
   const limits = resolveContentCompletionLimits(options);
-  const result = await queryable.query<RawArticleCompletionCandidate>(
+  const result = await queryable.query<Candidate>(
     `
       with ranked as (
         select
           ra.id,
           s.name as "sourceName",
-          s.category as "sourceCategory",
-          s.source_type as "sourceType",
           ra.title,
           ra.url,
           ra.content_text as "contentText",
           row_number() over (
             partition by s.id
             order by
-              case
-                when ra.content_text is null or btrim(ra.content_text) = '' then 0
-                when lower(btrim(ra.content_text)) = any($2::text[]) then 1
-                when s.category = 'long-form'
-                  and length(ra.content_text) < $3 then 2
-                else 3
-              end,
               length(coalesce(ra.content_text, '')) asc,
               coalesce(ra.published_at, ra.collected_at) desc
           ) as source_rank
         from raw_articles ra
         join sources s on s.id = ra.source_id
-        where ${COMPLETION_ELIGIBILITY_SQL}
+        where ${ELIGIBILITY}
       )
-      select
-        id,
-        "sourceName",
-        "sourceCategory",
-        "sourceType",
-        title,
-        url,
-        "contentText"
+      select id, "sourceName", title, url, "contentText"
       from ranked
       where source_rank <= $5
-      order by "sourceName", source_rank
+      order by source_rank asc, "sourceName" asc
       limit $6
     `,
-    [
-      ...completionEligibilityValues(options),
-      limits.perSourceLimit,
-      limits.limit,
-    ],
+    [...values(options), limits.perSourceLimit, limits.limit],
   );
 
   return result.rows;
 }
 
+// 解析选项并返回查询参数
+function values(
+  options: ContentCompletionOptions,
+): [string[], number, string | null, string | null] {
+  const sources = options.sourceNames?.filter(Boolean) ?? [];
+
+  return [
+    sources,
+    SHORT_CONTENT_CHARS,
+    options.scopeStartAt ?? null,
+    options.scopeEndAt ?? null,
+  ];
+}
+
 export function summarizeCompletionResults(
   results: ContentCompletionResult[],
-): Pick<ContentCompletionMetrics, "successCount" | "failedCount" | "skippedCount"> {
+): Pick<
+  ContentCompletionSummary,
+  "successCount" | "unusableCount" | "failedCount" | "skippedCount"
+> {
   return {
-    successCount: results.filter((result) => result.status === "updated").length,
+    successCount: results.filter((result) => result.status === "success").length,
+    unusableCount: results.filter((result) => result.status === "unusable")
+      .length,
     failedCount: results.filter((result) => result.status === "failed").length,
     skippedCount: results.filter((result) => result.status === "skipped").length,
   };
 }
 
-function completionEligibilityValues(
-  options: ContentCompletionOptions,
-): [string[], string[], number, boolean] {
-  const sourceNames = options.sourceNames?.filter(Boolean) ?? [];
-  return [
-    sourceNames,
-    [...PLACEHOLDER_CONTENT],
-    LONG_FORM_SHORT_CONTENT_CHARS,
-    sourceNames.length > 0,
-  ];
-}
-
-async function completeRawArticle(
+/** 单篇处理链：Firecrawl 抓取、内容提取，并将结果及本次状态写回文章。 */
+async function complete(
   pool: Pool,
-  candidate: RawArticleCompletionCandidate,
+  candidate: Candidate,
+  limiter: FirecrawlRateLimiter,
 ): Promise<ContentCompletionResult> {
-  const originalLength = normalizedLength(candidate.contentText);
-  const trigger = getCompletionTrigger(candidate);
+  const originalLength = candidate.contentText?.trim().length ?? 0;
 
   if (SPECIAL_SKIP_SOURCE_NAMES.has(candidate.sourceName)) {
-    return skippedResult(candidate, trigger, originalLength, "special_source_skip");
-  }
-
-  if (KNOWN_BLOCKED_SOURCE_NAMES.has(candidate.sourceName)) {
-    return skippedResult(candidate, trigger, originalLength, "known_blocked_source");
-  }
-
-  if (!trigger) {
-    return skippedResult(candidate, null, originalLength, "trigger_not_met");
-  }
-
-  const extraction = await extractReadableText(candidate.url);
-  if (extraction.error) {
-    return failedResult(candidate, trigger, originalLength, extraction, extraction.error);
-  }
-
-  if (!extraction.htmlFetched || !isSuccessfulStatus(extraction.httpStatus)) {
-    return failedResult(
+    return makeResult(
       candidate,
-      trigger,
+      "skipped",
+      null,
       originalLength,
-      extraction,
-      extraction.httpStatus ? `HTTP ${extraction.httpStatus}` : "HTML fetch failed",
+      emptyFetch("special_source_skip"),
+      null,
     );
   }
 
-  if (isBlockedOrChallengeText(extraction.text)) {
-    return failedResult(candidate, trigger, originalLength, extraction, "blocked_or_challenge_page");
-  }
+  const fetched = await scrape(candidate.url, limiter);
 
-  if (!isMeaningfulImprovement(candidate.contentText, extraction.text)) {
-    return failedResult(
-      candidate,
-      trigger,
-      originalLength,
-      extraction,
-      "extracted_text_not_better_than_existing_content",
+  if (!fetched.markdown) {
+    const status = fetched.requestSucceeded ? "unusable" : "failed";
+    await persist(
+      pool,
+      candidate.id,
+      null,
+      null,
+      metadata(status, null, fetched, originalLength),
     );
+
+    return makeResult(candidate, status, null, originalLength, fetched, null);
   }
 
-  const client = await pool.connect();
-  try {
-    await updateRawArticleContent(client, candidate.id, extraction.text);
-  } finally {
-    client.release();
+  const extracted = extractFirecrawlContent(
+    fetched.markdown,
+    candidate.sourceName,
+  );
+
+  if (!extracted.contentText) {
+    await persist(
+      pool,
+      candidate.id,
+      null,
+      null,
+      metadata("unusable", null, fetched, originalLength),
+    );
+
+    return makeResult(candidate, "unusable", null, originalLength, fetched, null);
   }
 
-  return {
-    rawArticleId: candidate.id,
-    sourceName: candidate.sourceName,
-    title: candidate.title,
-    url: candidate.url,
-    status: "updated",
-    trigger,
-    skipReason: null,
+  await persist(
+    pool,
+    candidate.id,
+    extracted.contentText,
+    extracted.fullContentText,
+    metadata("success", extracted.contentType, fetched, originalLength, extracted),
+  );
+
+  return makeResult(
+    candidate,
+    "success",
+    extracted.contentType,
     originalLength,
-    extractedLength: extraction.text.length,
-    httpStatus: extraction.httpStatus,
-    error: null,
-  };
-}
-
-function getCompletionTrigger(candidate: RawArticleCompletionCandidate): CompletionTrigger | null {
-  const content = candidate.contentText?.trim() ?? "";
-  if (!content) {
-    return "empty_content";
-  }
-
-  if (PLACEHOLDER_CONTENT.has(content.toLowerCase())) {
-    return "invalid_placeholder";
-  }
-
-  if (candidate.sourceCategory === "long-form" && content.length < LONG_FORM_SHORT_CONTENT_CHARS) {
-    return "short_long_form";
-  }
-
-  return null;
-}
-
-async function extractReadableText(url: string): Promise<ExtractionResult> {
-  const fetched = await fetchHtml(url);
-  if (!fetched.html) {
-    return {
-      httpStatus: fetched.httpStatus,
-      finalUrl: fetched.finalUrl,
-      htmlFetched: false,
-      text: "",
-      error: fetched.error,
-    };
-  }
-
-  const dom = new JSDOM(fetched.html, { url: fetched.finalUrl });
-  const article = new Readability(dom.window.document).parse();
-  const text = cleanText(article?.textContent ?? "");
-
-  return {
-    httpStatus: fetched.httpStatus,
-    finalUrl: fetched.finalUrl,
-    htmlFetched: true,
-    text,
-    error: null,
-  };
-}
-
-async function fetchHtml(url: string): Promise<{
-  httpStatus: number | null;
-  finalUrl: string;
-  html: string;
-  error: string | null;
-}> {
-  return domainLimiter.run(url, async () => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(url, {
-        signal: controller.signal,
-        redirect: "follow",
-        headers: {
-          accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "user-agent":
-            "Mozilla/5.0 (compatible; X-AI-field content completion; +https://example.local/content-completion)",
-        },
-      });
-      const contentType = response.headers.get("content-type") ?? "";
-      const html =
-        contentType.includes("text/html") || contentType.includes("application/xhtml")
-          ? await response.text()
-          : "";
-
-      return {
-        httpStatus: response.status,
-        finalUrl: response.url,
-        html,
-        error: null,
-      };
-    } catch (error) {
-      return {
-        httpStatus: null,
-        finalUrl: url,
-        html: "",
-        error: error instanceof Error ? error.message : String(error),
-      };
-    } finally {
-      clearTimeout(timeout);
-    }
-  });
-}
-
-async function updateRawArticleContent(client: PoolClient, id: string, contentText: string) {
-  await client.query(
-    `
-      update raw_articles
-      set content_text = $1
-      where id = $2
-    `,
-    [contentText, id],
+    fetched,
+    extracted,
   );
 }
 
-function isMeaningfulImprovement(current: string | null, extracted: string): boolean {
-  const currentLength = normalizedLength(current);
-  if (extracted.length < MIN_EXTRACTED_TEXT_CHARS) {
-    return false;
-  }
+/**
+ * 只对可恢复的网络、5xx 与 429 重试；Firecrawl 已成功但内容无法提取时不再重复请求。
+ */
+async function scrape(
+  url: string,
+  limiter: FirecrawlRateLimiter,
+): Promise<FetchResult> {
+  let requests = 0;
 
-  return extracted.length >= currentLength + MIN_IMPROVEMENT_CHARS;
-}
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    await limiter.beforeRequest();
+    requests += 1;
 
-function isSuccessfulStatus(status: number | null): boolean {
-  return status !== null && status >= 200 && status < 300;
-}
+    try {
+      const response = await fetch("https://api.firecrawl.dev/v2/scrape", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url,
+          formats: ["markdown"],
+          onlyMainContent: true,
+        }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      const body = (await response.json().catch(() => null)) as FirecrawlBody | null;
+      const markdown = markdownFrom(body);
 
-function isBlockedOrChallengeText(text: string): boolean {
-  const normalized = text.toLowerCase();
-  return CHALLENGE_MARKERS.some((marker) => normalized.includes(marker));
-}
-
-function cleanText(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function normalizedLength(value: string | null): number {
-  return value?.trim().length ?? 0;
-}
-
-function skippedResult(
-  candidate: RawArticleCompletionCandidate,
-  trigger: CompletionTrigger | null,
-  originalLength: number,
-  skipReason: string,
-): ContentCompletionResult {
-  return {
-    rawArticleId: candidate.id,
-    sourceName: candidate.sourceName,
-    title: candidate.title,
-    url: candidate.url,
-    status: "skipped",
-    trigger,
-    skipReason,
-    originalLength,
-    extractedLength: null,
-    httpStatus: null,
-    error: null,
-  };
-}
-
-function failedResult(
-  candidate: RawArticleCompletionCandidate,
-  trigger: CompletionTrigger,
-  originalLength: number,
-  extraction: ExtractionResult,
-  error: string,
-): ContentCompletionResult {
-  return {
-    rawArticleId: candidate.id,
-    sourceName: candidate.sourceName,
-    title: candidate.title,
-    url: candidate.url,
-    status: "failed",
-    trigger,
-    skipReason: null,
-    originalLength,
-    extractedLength: extraction.text.length,
-    httpStatus: extraction.httpStatus,
-    error,
-  };
-}
-
-/** 按域名串行并保留间隔，避免并发抓取对同一站点造成不必要压力。 */
-class DomainRateLimiter {
-  private readonly lastRequestByDomain = new Map<string, number>();
-  private readonly queueByDomain = new Map<string, Promise<unknown>>();
-
-  constructor(private readonly delayMs: number) {}
-
-  async run<T>(url: string, task: () => Promise<T>): Promise<T> {
-    const domain = getDomain(url);
-    const previous = this.queueByDomain.get(domain) ?? Promise.resolve();
-    const current = previous.then(async () => {
-      const lastRequestAt = this.lastRequestByDomain.get(domain) ?? 0;
-      const waitMs = Math.max(0, this.delayMs - (Date.now() - lastRequestAt));
-      if (waitMs > 0) {
-        await sleep(waitMs);
+      if (response.ok && body?.success !== false && markdown) {
+        return {
+          markdown,
+          rawLength: markdown.length,
+          requestCount: requests,
+          retryCount: attempt,
+          error: null,
+          requestSucceeded: true,
+        };
       }
 
-      this.lastRequestByDomain.set(domain, Date.now());
-      return task();
-    });
+      const error =
+        typeof body?.error === "string"
+          ? body.error
+          : `Firecrawl HTTP ${response.status}`;
 
-    this.queueByDomain.set(
-      domain,
-      current.catch(() => {
-        // Keep the per-domain queue moving even when one request fails.
-      }),
-    );
+      if (response.ok && body?.success !== false) {
+        return {
+          markdown: null,
+          rawLength: null,
+          requestCount: requests,
+          retryCount: attempt,
+          error,
+          requestSucceeded: true,
+        };
+      }
 
-    return current;
+      if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+        return {
+          markdown: null,
+          rawLength: null,
+          requestCount: requests,
+          retryCount: attempt,
+          error,
+          requestSucceeded: false,
+        };
+      }
+
+      if (response.status === 429) {
+        limiter.defer(retryMs(response, body));
+      } else {
+        await sleep(1_000 * (attempt + 1));
+      }
+
+      if (attempt === MAX_RETRIES) {
+        return {
+          markdown: null,
+          rawLength: null,
+          requestCount: requests,
+          retryCount: attempt,
+          error,
+          requestSucceeded: false,
+        };
+      }
+    } catch (error) {
+      if (attempt === MAX_RETRIES) {
+        return {
+          markdown: null,
+          rawLength: null,
+          requestCount: requests,
+          retryCount: attempt,
+          error: error instanceof Error ? error.message : String(error),
+          requestSucceeded: false,
+        };
+      }
+
+      await sleep(1_000 * (attempt + 1));
+    }
   }
+
+  return emptyFetch("Firecrawl retry exhausted.");
 }
 
-const domainLimiter = new DomainRateLimiter(DOMAIN_DELAY_MS);
+/**
+ * 优先使用 Abstract、Takeaways、Key Points 等结构化片段，通常比通用正文更适合 Stage1 判断。
+ */
+export function extractFirecrawlContent(
+  markdown: string,
+  sourceName: string | null
+): FirecrawlExtraction {
+  // 1. 科研论文：只要 Abstract
+  const abstract = section(markdown, ["abstract"]);
+  if (useful(abstract)) {
+    return extracted(clean(abstract), null, "abstract");
+  }
 
-function getDomain(url: string): string {
-  return new URL(url).hostname.replace(/^www\./, "");
+  // 2. 页面原生的高信息密度结构
+  const candidates: Array<[readonly string[], CompletionContentType]> = [
+    [["ai takeaways", "takeaways"], "takeaways"],
+    [["key points"], "key_points"],
+    [["executive summary"], "executive_summary"],
+    [["summary", "overview"], "summary"],
+    [["description", "programme description"], "description"],
+  ];
+
+  for (const [headings, type] of candidates) {
+    const value = section(markdown, headings);
+
+    if (useful(value)) {
+      return extracted(clean(value), null, type);
+    }
+  }
+
+  // 3. 官方超长报告 release：只保留开头摘要，不保留完整正文
+  if (
+    sourceName &&
+    INSTITUTIONAL_RELEASE_SOURCE_NAMES.has(sourceName)
+  ) {
+    const releaseSummary = extractInstitutionalReleaseSummary(markdown);
+
+    if (useful(releaseSummary)) {
+      return extracted(
+        releaseSummary,
+        null,
+        "release_summary",
+      );
+    }
+  }
+
+  // 4. 普通文章
+  const body = clean(markdown);
+
+  if (!useful(body)) {
+    return extracted(null, null, null);
+  }
+
+  return extracted(
+    shorten(body),
+    body.length > STAGE1_MAX_CHARS ? body : null,
+    "article_body",
+  );
+}
+
+/**
+ * 提取 CPI、PPI、非农、BEA 等官方数据 release 的开头说明。
+ *
+ * 这类页面后半部分通常包含大量统计表、技术说明和附件，
+ * 对 Stage1 判断事件没有必要，因此只保留正式 release 的开头正文。
+ */
+function extractInstitutionalReleaseSummary(markdown: string): string | null {
+  const cleaned = clean(markdown);
+
+  if (!cleaned) {
+    return null;
+  }
+
+  const lines = cleaned.replace(/\r\n/g, "\n").split("\n");
+  const kept: string[] = [];
+  let meaningfulChars = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // 已经进入 Markdown 统计表，后续内容不再作为 Stage1 输入。
+    if (
+      meaningfulChars >= MIN_USEFUL_CHARS &&
+      trimmed.startsWith("|")
+    ) {
+      break;
+    }
+
+    // 官方 release 常在正文后进入附件、完整表格或技术材料。
+    if (
+      meaningfulChars >= MIN_USEFUL_CHARS &&
+      /^(#{1,6}\s*)?(full release|full release & tables|tables only|technical note|additional information|related materials)\b/i.test(
+        trimmed,
+      )
+    ) {
+      break;
+    }
+
+    kept.push(line);
+
+    if (trimmed) {
+      meaningfulChars += trimmed.length;
+    }
+  }
+
+  const value = kept
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (!useful(value)) {
+    return null;
+  }
+
+  return shortenInstitutionalSummary(value);
+}
+
+/**
+ * 官方数据 release 只需要开头最重要的几段；
+ * 优先在段落边界结束，而不是把整个 release 塞给 Stage1。
+ */
+function shortenInstitutionalSummary(value: string): string {
+  if (value.length <= INSTITUTIONAL_SUMMARY_MAX_CHARS) {
+    return value;
+  }
+
+  const boundary = value.lastIndexOf(
+    "\n\n",
+    INSTITUTIONAL_SUMMARY_MAX_CHARS,
+  );
+
+  return value
+    .slice(
+      0,
+      boundary > MIN_USEFUL_CHARS
+        ? boundary
+        : INSTITUTIONAL_SUMMARY_MAX_CHARS,
+    )
+    .trim();
+}
+
+function section(markdown: string, headings: readonly string[]): string | null {
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const index = lines.findIndex((line) => {
+    const match = /^#{1,6}\s+(.+?)\s*$/.exec(line);
+
+    return Boolean(
+      match && headings.includes(match[1]?.trim().toLowerCase() ?? ""),
+    );
+  });
+
+  if (index < 0) {
+    return null;
+  }
+
+  const value: string[] = [];
+
+  for (const line of lines.slice(index + 1)) {
+    if (/^#{1,6}\s+/.test(line)) {
+      break;
+    }
+
+    value.push(line);
+  }
+
+  return value.join("\n");
+}
+
+/** 这里只进行轻量 Markdown 清洗，去掉明显噪音，不承担完整正文 parser 的职责。 */
+function clean(markdown: string): string {
+  const kept: string[] = [];
+
+  for (const line of markdown.replace(/\r\n/g, "\n").split("\n")) {
+    if (
+      /^(#{1,6}\s*)?(subscribe|sign in|access options|more from bloomberg|recommended|for you|top reads|related articles|newsletter|footer|copyright|privacy policy|terms of use|bloomberg terminal)\b/i.test(
+        line.trim(),
+      ) || /this is a preview of subscription content/i.test(line)
+    ) {
+      break;
+    }
+
+    if (!/^\s*(skip to main content|home|menu|search)\s*$/i.test(line)) {
+      kept.push(line);
+    }
+  }
+
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function useful(value: string | null): value is string {
+  return Boolean(value && clean(value).length >= MIN_USEFUL_CHARS);
+}
+
+/** 将通用正文限制为 Stage1 所需长度，并尽量在段落边界截断。 */
+function shorten(value: string): string {
+  if (value.length <= STAGE1_MAX_CHARS) {
+    return value;
+  }
+
+  const boundary = value.lastIndexOf("\n\n", STAGE1_MAX_CHARS);
+
+  return value
+    .slice(0, boundary > MIN_USEFUL_CHARS ? boundary : STAGE1_MAX_CHARS)
+    .trim();
+}
+
+function extracted(
+  contentText: string | null,
+  fullContentText: string | null,
+  contentType: CompletionContentType | null,
+): FirecrawlExtraction {
+  return {
+    contentText,
+    fullContentText,
+    contentType,
+  };
+}
+
+/** 将 Stage1 输入、可复用全文与本次补全元数据分别写入各自字段。 */
+async function persist(
+  pool: Pool,
+  id: string,
+  content: string | null,
+  full: string | null,
+  completion: Record<string, unknown>,
+): Promise<void> {
+  await pool.query(
+    `
+      update raw_articles
+      set
+        content_text = coalesce($1::text, content_text),
+        full_content_text = $2::text,
+        metadata = coalesce(metadata, '{}'::jsonb)
+          || jsonb_build_object('content_completion', $3::jsonb)
+      where id = $4
+    `,
+    [content, full, JSON.stringify(completion), id],
+  );
+}
+
+function metadata(
+  status: "success" | "unusable" | "failed",
+  type: CompletionContentType | null,
+  fetched: FetchResult,
+  original: number,
+  extraction?: FirecrawlExtraction,
+): Record<string, unknown> {
+  return {
+    provider: "firecrawl",
+    status,
+    content_type: type,
+    attempted_at: new Date().toISOString(),
+    rss_original_length: original,
+    raw_length: fetched.rawLength ?? 0,
+    content_length: extraction?.contentText?.length ?? 0,
+    full_content_length: extraction?.fullContentText?.length ?? 0,
+    request_count: fetched.requestCount,
+    retry_count: fetched.retryCount,
+    error: fetched.error,
+  };
+}
+
+function makeResult(
+  candidate: Candidate,
+  status: CompletionStatus,
+  type: CompletionContentType | null,
+  original: number,
+  fetched: FetchResult,
+  extraction: FirecrawlExtraction | null,
+): ContentCompletionResult {
+  return {
+    rawArticleId: candidate.id,
+    sourceName: candidate.sourceName,
+    title: candidate.title,
+    url: candidate.url,
+    status,
+    contentType: type,
+    originalLength: original,
+    rawLength: fetched.rawLength,
+    contentLength: extraction?.contentText?.length ?? null,
+    fullContentLength: extraction?.fullContentText?.length ?? null,
+    requestCount: fetched.requestCount,
+    retryCount: fetched.retryCount,
+    error: status === "unusable" ? null : fetched.error,
+    rawMarkdown: fetched.markdown,
+  };
+}
+
+function emptyFetch(error: string): FetchResult {
+  return {
+    markdown: null,
+    rawLength: null,
+    requestCount: 0,
+    retryCount: 0,
+    error,
+    requestSucceeded: false,
+  };
+}
+
+function markdownFrom(body: FirecrawlBody | null): string | null {
+  const value = body?.markdown ?? body?.data?.markdown;
+
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function apiKey(): string {
+  if (!process.env.FIRECRAWL_API_KEY) {
+    throw new Error("FIRECRAWL_API_KEY is required for Content Completion.");
+  }
+
+  return process.env.FIRECRAWL_API_KEY;
+}
+
+function sum<T>(values: T[], mapper: (value: T) => number): number {
+  return values.reduce((total, value) => total + mapper(value), 0);
+}
+
+function distribution(
+  results: ContentCompletionResult[],
+): Partial<Record<CompletionContentType, number>> {
+  const result: Partial<Record<CompletionContentType, number>> = {};
+
+  for (const item of results) {
+    if (item.contentType) {
+      result[item.contentType] = (result[item.contentType] ?? 0) + 1;
+    }
+  }
+
+  return result;
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function runWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  task: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = [];
-  let nextIndex = 0;
+/** 将并发 worker 的请求节奏串行化，避免超过 Free Plan 每分钟 10 次请求的限制。 */
+class FirecrawlRateLimiter {
+  private count = 0;
+  private nextAllowedAt = 0;
+  private queue = Promise.resolve();
 
-  async function worker() {
-    while (nextIndex < items.length) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-      results[currentIndex] = await task(items[currentIndex]);
+  async beforeRequest(): Promise<void> {
+    const previous = this.queue;
+    let release = () => {};
+    this.queue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+
+    try {
+      if (this.count >= 10) {
+        await sleep(60_000);
+        this.count = 0;
+      }
+
+      const delay = this.nextAllowedAt - Date.now();
+
+      if (delay > 0) {
+        await sleep(delay);
+      }
+
+      this.count += 1;
+    } finally {
+      release();
     }
   }
 
+  defer(ms: number): void {
+    this.nextAllowedAt = Math.max(this.nextAllowedAt, Date.now() + ms);
+  }
+}
+
+function retryMs(response: Response, body: FirecrawlBody | null): number {
+  const header = response.headers.get("retry-after");
+
+  if (header && Number.isFinite(Number(header))) {
+    return Number(header) * 1_000;
+  }
+
+  const error = typeof body?.error === "string" ? body.error : "";
+  const match = /retry after\s+(\d+)\s*s/i.exec(error);
+
+  return match?.[1] ? Number(match[1]) * 1_000 : 60_000;
+}
+
+/** 以固定数量 worker 拉取队列，保留输入顺序并让每个 worker 处理下一项。 */
+async function concurrent<T, R>(
+  items: T[],
+  count: number,
+  task: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let index = 0;
+
   await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
+    Array.from({ length: Math.min(count, items.length) }, async () => {
+      while (index < items.length) {
+        const current = index++;
+        const item = items[current];
+
+        if (item !== undefined) {
+          results[current] = await task(item);
+        }
+      }
+    }),
   );
 
   return results;

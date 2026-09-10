@@ -1,0 +1,1 @@
+ALTER TABLE "raw_articles" ADD COLUMN "full_content_text" text;
