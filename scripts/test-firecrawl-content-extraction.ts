@@ -12,7 +12,7 @@ const checks = [
 
 let failed = false;
 for (const [name, markdown, type, hasFull] of checks) {
-  const result = extractFirecrawlContent(markdown);
+  const result = extractFirecrawlContent(markdown, null);
   const passed = result.contentType === type && Boolean(result.fullContentText) === hasFull && (type === null ? result.contentText === null : Boolean(result.contentText));
   console.log(`${passed ? "PASS" : "FAIL"} ${name}`);
   if (!passed) failed = true;
