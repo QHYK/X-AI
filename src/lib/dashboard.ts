@@ -653,7 +653,9 @@ export async function loadRuntimeMetricsByDate(
 
       const runs = await Promise.all(
         runNames.map(async (runName) => {
-          const runDir = join(stageDir, runName);
+          // Artifact names come from the runtime directory at request time. Avoid passing this
+          // dynamic segment to path.join so Turbopack does not trace runtime/** during build.
+          const runDir = `${stageDir}/${runName}`;
           try {
             const artifact = asObject(
               JSON.parse(await readFile(join(runDir, "run.json"), "utf8")),
