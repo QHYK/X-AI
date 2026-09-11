@@ -33,6 +33,7 @@
     "test:stage3-persistence": "tsx scripts/test-stage3-persistence-rules.ts",
     "test:stage4-event-date": "tsx scripts/test-stage4-event-date.ts",
     "test:stage4-persistence": "tsx scripts/test-stage4-persistence.ts",
+    "test:stage4-fail-fast": "tsx scripts/test-stage4-fail-fast.ts",
     "test:daily-scope": "tsx scripts/test-daily-scope.ts",
     "test:daily-date-backfill": "tsx scripts/test-daily-date-backfill.ts",
     "test:dashboard-daily-scope": "tsx scripts/test-dashboard-daily-scope.ts",

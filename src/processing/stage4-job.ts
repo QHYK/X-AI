@@ -25,6 +25,7 @@ import {
   type Stage4PersistenceResult,
 } from "./stage4-persistence.js";
 import { DEFAULT_STAGE4_EVENT_LIMIT } from "./stage4-config.js";
+import { classifyStage4LlmError } from "./stage4-llm.js";
 import { resolveDailyScope } from "../lib/daily-scope.js";
 
 type Stage3RunArtifact = {
@@ -402,6 +403,7 @@ async function processStage4FromDb(pool: Pool, options: Stage4JobOptions): Promi
         const message = caught instanceof Error ? caught.message : String(caught);
         failures.push(message);
         await writeJson(join(eventDir, "failure.json"), { error: message });
+        if (classifyStage4LlmError(message) === "quota_or_auth_unavailable") break;
       }
     }
     if (failures.length) {

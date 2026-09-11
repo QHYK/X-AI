@@ -65,6 +65,14 @@ export type Stage4LlmFailure = {
 };
 
 export type Stage4LlmResult = Stage4LlmSuccess | Stage4LlmFailure;
+export type Stage4LlmErrorKind = "quota_or_auth_unavailable" | "transient" | "ordinary";
+
+export function classifyStage4LlmError(message: string): Stage4LlmErrorKind {
+  const value = message.toLowerCase();
+  if (value.includes("insufficient_quota") || value.includes("auth_unavailable")) return "quota_or_auth_unavailable";
+  if (value.includes("timeout") || /\b5\d\d\b/.test(value)) return "transient";
+  return "ordinary";
+}
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE4_LLM_TIMEOUT_MS ?? 240_000);
 const DEFAULT_MAX_RETRIES = Number(process.env.STAGE4_LLM_MAX_RETRIES ?? 2);
@@ -154,7 +162,7 @@ export async function runStage4EventEnrichmentLlm(
       };
     } catch (error) {
       lastError = sanitizeLlmError(error instanceof Error ? error.message : String(error));
-      if (isNonRetryableLlmError(lastError)) {
+      if (classifyStage4LlmError(lastError) === "quota_or_auth_unavailable" || isNonRetryableLlmError(lastError)) {
         break;
       }
 
