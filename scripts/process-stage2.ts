@@ -4,7 +4,10 @@ import { Pool } from "pg";
 import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
 import { processStage2Merge, summarizeStage2Result } from "../src/processing/stage2-job.js";
 import { writeStage2RuntimeArtifacts } from "../src/processing/stage2-runtime-artifacts.js";
-import { loadStage1Runtime } from "../src/processing/stage1-runtime.js";
+import { loadOptionalStage1Runtime } from "../src/processing/stage1-runtime.js";
+import { backfillDailyAttribution } from "../src/processing/daily-attribution.js";
+import { resolveDailyScope } from "../src/lib/daily-scope.js";
+import { replaceEventGroups } from "../src/processing/event-group-persistence.js";
 
 const inheritedStage1RunDir = process.env.STAGE2_STAGE1_RUN_DIR;
 const inheritedRunPointer = process.env.DAILY_STAGE_RUN_POINTER;
@@ -32,24 +35,31 @@ async function main() {
 
   try {
     const startedAt = new Date();
-    const stage1 = await loadStage1Runtime(
+    const scope = resolveDailyScope(process.env.DAILY_DATE);
+    const stage1 = await loadOptionalStage1Runtime(
       process.cwd(),
       inheritedStage1RunDir ?? process.env.STAGE2_STAGE1_RUN_DIR,
+      scope.dailyDate,
     );
+    await backfillDailyAttribution(pool, scope);
     const result = await processStage2Merge(pool, {
-      stage1StartedAt: stage1.run.started_at,
-      stage1FinishedAt: stage1.run.finished_at,
+      dailyDate: scope.dailyDate,
+      stage1StartedAt: stage1?.run.started_at,
+      stage1FinishedAt: stage1?.run.finished_at,
     });
     const summary = summarizeStage2Result(result);
+    const eventGroupIds = result.success
+      ? await replaceEventGroups(pool, scope.dailyDate, result.eventGroups)
+      : [];
     const artifacts = await writeStage2RuntimeArtifacts(result, {
       startedAt,
-      stage1RunDir: stage1.runDir,
-      stage1StartedAt: stage1.run.started_at,
-      stage1FinishedAt: stage1.run.finished_at,
+      stage1RunDir: stage1?.runDir ?? null,
+      stage1StartedAt: stage1?.run.started_at ?? null,
+      stage1FinishedAt: stage1?.run.finished_at ?? null,
     });
     await writeRunPointer(artifacts.runDir);
 
-    console.log(JSON.stringify({ ...summary, runtimePath: artifacts.runDir }, null, 2));
+    console.log(JSON.stringify({ ...summary, eventGroupIds, runtimePath: artifacts.runDir }, null, 2));
     if (!result.success) {
       process.exitCode = 1;
     }

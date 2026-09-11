@@ -14,6 +14,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx scripts/import-sources.ts",
     "daily": "tsx scripts/run-daily-workflow.ts",
+    "backfill:daily-date": "tsx scripts/backfill-daily-date.ts",
     "collect:rss": "tsx scripts/collect-rss.ts",
     "dedupe:stage1": "tsx scripts/dedupe-stage1.ts",
     "test:pre-stage1-duplicates": "tsx scripts/test-pre-stage1-duplicates.ts",
@@ -33,9 +34,11 @@
     "test:stage4-event-date": "tsx scripts/test-stage4-event-date.ts",
     "test:stage4-persistence": "tsx scripts/test-stage4-persistence.ts",
     "test:daily-scope": "tsx scripts/test-daily-scope.ts",
+    "test:daily-date-backfill": "tsx scripts/test-daily-date-backfill.ts",
     "test:dashboard-daily-scope": "tsx scripts/test-dashboard-daily-scope.ts",
     "test:daily-workflow-retry": "tsx scripts/test-daily-workflow-retry.ts",
     "test:stage1-persistence": "tsx scripts/test-stage1-persistence.ts",
+    "test:stage2-standalone": "tsx scripts/test-stage2-standalone.ts",
     "test:ranking-review": "tsx scripts/test-ranking-review.ts",
     "test:event-review-finalization": "tsx scripts/test-event-review-finalization.ts",
     "test:model-evaluation": "tsx scripts/test-model-evaluation.ts",
@@ -49,8 +52,7 @@
     "test:stage1:chat": "tsx scripts/test-stage1-chat-structured.ts",
     "test:stage4:chat": "tsx scripts/test-stage4-chat-no-search.ts",
     "test:deepseek": "tsx scripts/test-openai-call.ts deepseek",
-    "test:kimi": "tsx scripts/test-openai-call.ts kimi",
-    "recover:stage4-events:dry-run": "tsx scripts/dry-run-stage4-event-recovery.ts"
+    "test:kimi": "tsx scripts/test-openai-call.ts kimi"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

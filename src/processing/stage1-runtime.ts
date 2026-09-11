@@ -41,6 +41,21 @@ export async function loadStage1Runtime(
   };
 }
 
+/** Optional observability lineage: absence of a runtime must not block DB-backed stages. */
+export async function loadOptionalStage1Runtime(
+  rootDir: string,
+  stage1RunDirOption?: string,
+  dailyDate?: string,
+): Promise<LoadedStage1Runtime | null> {
+  try {
+    return await loadStage1Runtime(rootDir, stage1RunDirOption, dailyDate);
+  } catch (error) {
+    if (isMissingPathError(error)) return null;
+    if (error instanceof Error && error.message.startsWith("No successful Stage 1 runtime run")) return null;
+    throw error;
+  }
+}
+
 async function findLatestSuccessfulStage1RunDir(
   rootDir: string,
   dailyDate?: string,

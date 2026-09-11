@@ -5,6 +5,7 @@ import { Pool } from "pg";
 import {
   resolveCatchupPublishedAtScope,
   resolveDailyScope,
+  readCatchupPublishedAtScopeFromEnv,
 } from "../src/lib/daily-scope.js";
 import {
   completeRawArticleContent,
@@ -26,7 +27,9 @@ config({ path: ".env.local", override: true });
 async function main() {
   const startedAt = new Date();
   const dailyScope = resolveDailyScope(process.env.DAILY_DATE, startedAt);
-  const scope = resolveCatchupPublishedAtScope(dailyScope);
+  const scope =
+    readCatchupPublishedAtScopeFromEnv(process.env) ??
+    (process.env.DAILY_DATE ? dailyScope : resolveCatchupPublishedAtScope(dailyScope));
 
   const options = {
     sourceNames: parseSourceNames(process.env.CONTENT_COMPLETION_SOURCE_NAMES),

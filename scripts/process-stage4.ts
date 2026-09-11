@@ -30,6 +30,7 @@ async function main() {
   try {
     const result = await processStage4(pool, {
       stage3RunDir: inheritedStage3RunDir ?? process.env.STAGE4_STAGE3_RUN_DIR,
+      dailyDate: process.env.DAILY_DATE,
       concurrency: parseOptionalPositiveInt(process.env.STAGE4_CONCURRENCY),
     });
     await writeRunPointer(result.runDir);

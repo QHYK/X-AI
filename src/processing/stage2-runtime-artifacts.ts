@@ -21,9 +21,9 @@ export async function writeStage2RuntimeArtifacts(
     startedAt: Date;
     finishedAt?: Date;
     rootDir?: string;
-    stage1RunDir: string;
-    stage1StartedAt: string;
-    stage1FinishedAt: string;
+    stage1RunDir?: string | null;
+    stage1StartedAt?: string | null;
+    stage1FinishedAt?: string | null;
   },
 ): Promise<Stage2RuntimeArtifact> {
   const finishedAt = options.finishedAt ?? new Date();

@@ -54,6 +54,7 @@ async function main() {
             process.env.STAGE1_COLLECTED_WITHIN_HOURS,
         ),
         publishedAtScope,
+        dailyDate: process.env.DAILY_DATE,
         batchSize: optionalPositiveInteger(process.env.STAGE1_BATCH_SIZE),
         batchMaxContentChars: optionalPositiveInteger(
           process.env.STAGE1_BATCH_MAX_CONTENT_CHARS,

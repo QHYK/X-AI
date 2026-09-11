@@ -31,9 +31,9 @@
              ↓            │        │           │
       [AI] Event Rank     │        │           │
              ↓            │        │           │
-       [Code] Top 15      │        │           │
+       [DB] Review Snapshot│       │           │
              ↓            │        │           │
-      [AI] Stage 4        │        │           │
+      [AI] Stage 4 Top N  │        │           │
        Enrichment         │        │           │
           ↙   ↘           │        │           │
    sources     optional   │        │           │
@@ -74,10 +74,10 @@ flowchart LR
     S1 -->|Ignore| X["丢弃"]
 
     EC --> S2["[AI] Stage 2<br/>事件合并"]
-    S2 --> EG["[运行时] Event Groups"]
+    S2 --> EG["[DB] Event Groups"]
     EG --> ER["[AI] Stage 3<br/>Event Ranking"]
     ER --> ERDB["[DB] Event Top 50<br/>Review Snapshot"]
-    ER --> TOP["[代码] Top 15 Events"]
+    ER --> TOP["[DB] Event Review Snapshot"]
 
     TOP --> XD["[代码] Cross-channel Exact Dedup"]
     D --> XD
@@ -89,7 +89,7 @@ flowchart LR
 
     XD --> LR["[AI] Stage 3<br/>Long-form Ranking"]
 
-    TOP --> S4["[AI] Stage 4<br/>Selected Event Enrichment"]
+    TOP --> S4["[AI] Stage 4<br/>display_rank Top N Enrichment"]
     S4 -. "需要时" .-> WS["[工具] Optional Web Search"]
     WS -.-> S4
 
@@ -113,17 +113,14 @@ flowchart LR
 
 Daily Orchestrator 在启动时按 Asia/Shanghai 08:30 boundary 固定一次 24 小时 Daily scope。
 Content Completion 与 Stage 1 以该 `daily_end` 倒推 72 小时的 `published_at` catch-up window
-处理延迟进入 RSS 的文章。Stage 2 Event 与 Stage 3 Digest / Long-form 只消费本次 Stage 1
-`started_at` 至 `finished_at` 之间新创建、且仍为 `selected` 的 `processed_contents`；Stage 3 Event
-继续读取本次 Stage 2 runtime。编排器将本次 Stage 1 runtime 传给 Stage 2、本次 Stage 2 runtime
-传给 Stage 3，再将本次 Stage 3 runtime 传给 Stage 4。手动 Stage 2 / Stage 3 可回退到最近一次
-successful Stage 1 runtime。
+处理延迟进入 RSS 的文章；新 Selected 内容写入本次 workflow 的 `processed_contents.daily_date`。
+Stage 2 Event 与 Stage 3 Digest / Long-form 都按该 Daily attribution 全量读取、且仍为 `selected` 的
+内容；Stage 3 Event 从 DB Event Groups 读取，Stage 4 从 DB Review snapshot 读取。编排器仍传递 runtime
+路径供 observability，但 runtime 不再是下游业务输入的必要条件。
 
-`GET /api/brief?date=YYYY-MM-DD` 使用同一新闻发布时间 scope 归属 Daily：
-`Daily YYYY-MM-DD = 前一天 08:30 <= raw_articles.published_at < 当天 08:30`
-（Asia/Shanghai）。`collected_at` 只表示系统采集时间；Processed 内容通过关联 Raw Article
-归属，Event 通过其 Event Candidates 关联的 Raw Article 归属，而非按结果 `created_at`。
-retry / backfill 不改变 Daily membership；`published_at IS NULL` 的文章不进入任何 Daily。
+`GET /api/brief?date=YYYY-MM-DD` 的 Event 通过 `stage4_runs.daily_date` 归属，只读取
+`publication_status='published'` 的 Events。`events.event_date` 是成员文章时间推导的事件属性，
+不决定简报归属；其它内容仍通过 `processed_contents.daily_date` 归属。
 
 ## 四个 AI Stage
 
@@ -134,7 +131,7 @@ Stage 3  各 Channel：决定相对重要性 / 阅读价值
 Stage 4  Top Events：生成最终事件内容，必要时补充 Web Search
 ```
 
-Stage 3 Event Ranking 每次成功后将完整 Top 50（不足时保存全部）写成新的 UUID Review snapshot。Event 正式 cutoff 为 Top 15；Long-form 正式 cutoff 为 Top 10。
+Stage 3 Event Ranking 每次成功后将完整 Top 50（不足时保存全部）写成新的 UUID Review snapshot。Stage 4 按 `display_rank` 选择前 N（默认 15）生成 draft，全部成功后原子发布；Long-form 正式 cutoff 为 Top 10。
 Human Review 位于初始 Stage 4 后：保存 Event 排名会同步 `event_review_items.display_rank` 与
 `events.display_rank`。新的最终 Top 15 若缺少最终 Event，则仅对该 Event 按需执行 Stage 4；
 已有 enrichment 直接复用。LLM 失败时不提交本次排序，用户主动移动仍按原规则记录 feedback。

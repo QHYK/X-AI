@@ -174,13 +174,12 @@ Final Daily Brief
 ```
 Human Review v1 已实现 Event 与 Long-form Ranking Review：
 + 调整 `display_rank`，永久保留 AI 原始 `ai_rank`；
-+ Event 使用最新 Stage 3 Top 50 ranking snapshot，正式展示 cutoff 为 Top 15；
++ Event 使用最新 Stage 3 Top 50 ranking snapshot；Stage 3 只完成完整排序，Stage 4 按其配置的前 N（当前 15）生成并发布最终 Event；
 + Long-form 使用指定 Daily 已参与排名的全部内容，正式展示 cutoff 为 Top 10；
 + 用户主动移动且跨越 cutoff 时分别记录 False Positive / False Negative；未跨越 cutoff 的主动调整记录 Ranking Error；
 + 被其他 Item 挤动的被动 rank 变化不代表人工判断，不写 Feedback。
 
-Event Review 保存后会将人工 `display_rank` 同步到最终 `events.display_rank`，使 Final Daily Brief 立即采用人工顺序。若最终 Top 15 有此前从未 enrichment 的 Event，只为该 Event 按需调用一次 Stage 4。Stage 4 失败时
-不保存此次 Review 排名。
+Event Review 保存后更新 snapshot 的 `display_rank`。下一次 Stage 4 从最新 snapshot 按该顺序生成完整 draft 并原子发布；不会在 Review API 内直接拼接或发布 Event。
 
 
 ## Success Metrics

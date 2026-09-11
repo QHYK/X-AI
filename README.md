@@ -149,7 +149,6 @@ DAILY_DATE=2026-mm-dd npm run daily
 STAGE1_LIMIT=20 npm run process:stage1
 STAGE1_CONCURRENCY=2 npm run process:stage1
 STAGE1_PUBLISHED_WITHIN_HOURS=24 npm run process:stage1
-STAGE3_EVENT_TOP_N=10 npm run process:stage3
 STAGE4_CONCURRENCY=3 npm run process:stage4
 ```
 Daily 内部使用 `DAILY_PUBLISHED_SCOPE_START_AT` / `DAILY_PUBLISHED_SCOPE_END_AT` 传递固定 scope；

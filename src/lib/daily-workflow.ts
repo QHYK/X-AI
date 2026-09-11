@@ -30,13 +30,17 @@ export function buildDailyStepEnv(options: {
   step: DailyStageName;
   lineage: DailyLineage;
   runPointerPath?: string;
+  useCatchupWindow?: boolean;
 }): Record<string, string> {
   const env = toDailyScopeEnv(options.scope);
 
   if (options.runPointerPath) {
     env.DAILY_STAGE_RUN_POINTER = options.runPointerPath;
   }
-  if (options.step === "complete:content" || options.step === "process:stage1") {
+  if (
+    options.useCatchupWindow !== false &&
+    (options.step === "complete:content" || options.step === "process:stage1")
+  ) {
     const catchupScope = resolveCatchupPublishedAtScope(options.scope);
     env.DAILY_CATCHUP_SCOPE_START_AT = catchupScope.startAt;
     env.DAILY_CATCHUP_SCOPE_END_AT = catchupScope.endAt;

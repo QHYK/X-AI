@@ -115,6 +115,31 @@ export function isDailyScopeCompleted(
 }
 
 /**
+ * 为未归属的历史内容按发布时间推导所属 Daily。
+ *
+ * Daily 的右边界是当天 08:30：边界前的发布时间归入当天，边界时刻及之后
+ * 归入下一天。该函数只用于无法恢复原始 workflow 归属的 legacy backfill；
+ * 新内容仍由 Stage 1 写入实际运行的 workflow.dailyDate。
+ */
+export function deriveDailyDateFromPublishedAt(value: Date | string): string {
+  const publishedAt = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(publishedAt.getTime())) {
+    throw new Error(`published_at must be a valid timestamp, got "${String(value)}".`);
+  }
+
+  const shanghai = new Date(
+    publishedAt.getTime() + SHANGHAI_UTC_OFFSET_HOURS * 60 * 60 * 1000,
+  );
+  const shanghaiDate = formatUtcDate(shanghai);
+  const shanghaiMinutes = shanghai.getUTCHours() * 60 + shanghai.getUTCMinutes();
+  const boundaryMinutes = DAILY_BOUNDARY_HOUR * 60 + DAILY_BOUNDARY_MINUTE;
+
+  return shanghaiMinutes < boundaryMinutes
+    ? shanghaiDate
+    : shiftDailyDate(shanghaiDate, 1);
+}
+
+/**
  * 读取 Daily 传给 Stage 的显式 published_at scope。
  * 旧 DAILY_SCOPE_* 名称仅作为部署兼容 alias，新旧配置都必须成对出现。
  */

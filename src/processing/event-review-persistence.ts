@@ -16,6 +16,7 @@ export type EventReviewSnapshotItem = {
   reviewRunId: string;
   dailyDate: string;
   eventTempId: string;
+  eventGroupId: string;
   eventHint: string;
   aiRank: number;
   displayRank: number;
@@ -50,6 +51,7 @@ export function buildEventReviewSnapshotItems(options: {
         reviewRunId: options.reviewRunId,
         dailyDate: options.dailyDate,
         eventTempId: ranking.id,
+        eventGroupId: ranking.id,
         eventHint: event.event_hint,
         aiRank: ranking.rank,
         displayRank: ranking.rank,
@@ -93,17 +95,19 @@ async function insertEventReviewSnapshotItems(
           review_run_id,
           daily_date,
           event_temp_id,
+          event_group_id,
           event_hint,
           ai_rank,
           display_rank,
           member_content_ids
         )
-        values ($1::uuid, $2::date, $3, $4, $5, $6, $7::uuid[])
+        values ($1::uuid, $2::date, $3, $4::uuid, $5, $6, $7, $8::uuid[])
       `,
       [
         item.reviewRunId,
         item.dailyDate,
         item.eventTempId,
+        item.eventGroupId,
         item.eventHint,
         item.aiRank,
         item.displayRank,

@@ -41,8 +41,7 @@ export type PreparedStage2Input = {
 export async function loadStage2EventCandidates(
   queryable: Queryable,
   options: {
-    stage1StartedAt: string;
-    stage1FinishedAt: string;
+    dailyDate: string;
   },
 ): Promise<Stage2CandidateRow[]> {
   const result = await queryable.query<Stage2CandidateRow>(
@@ -61,14 +60,13 @@ export async function loadStage2EventCandidates(
       join sources s on s.id = ra.source_id
       where pc.routing = 'event'
         and ra.stage1_status = 'selected'
-        and pc.created_at >= $1::timestamptz
-        and pc.created_at <= $2::timestamptz
+        and pc.daily_date = $1::date
       order by
         pc.created_at asc,
         s.name,
         pc.id
     `,
-    [options.stage1StartedAt, options.stage1FinishedAt],
+    [options.dailyDate],
   );
 
   return result.rows;

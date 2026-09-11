@@ -64,7 +64,7 @@ export type Stage2LlmResult = Stage2LlmSuccess | Stage2LlmFailure;
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE2_LLM_TIMEOUT_MS ?? 240_000);
 const DEFAULT_MAX_RETRIES = Number(process.env.STAGE2_LLM_MAX_RETRIES ?? 0);
-const DEFAULT_MAX_OUTPUT_TOKENS = Number(
+export const DEFAULT_STAGE2_MAX_OUTPUT_TOKENS = Number(
   process.env.STAGE2_LLM_MAX_OUTPUT_TOKENS ?? 64_000,
 );
 const RETRY_DELAY_MS = Number(process.env.STAGE2_LLM_RETRY_DELAY_MS ?? 1_000);
@@ -109,7 +109,7 @@ export async function runStage2MergeLlm(
               ],
             },
           ],
-          max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
+          max_output_tokens: DEFAULT_STAGE2_MAX_OUTPUT_TOKENS,
           store: false,
           text: {
             format: {

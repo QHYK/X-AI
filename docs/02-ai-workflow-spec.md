@@ -20,7 +20,7 @@ Stage 2 — Merge Events                (Event only)
     │
     └── Event Candidates → Event Groups → Global Ranking
                                               ↓
-                                       Top N Event Selection         ← Code
+                                  Stage 4 reads top N by display_rank ← Code
                                               ↓
                                 Collect selected Event source items  ← Code
                                               ↓
@@ -93,8 +93,8 @@ invented ID 会被记录，但暂不阻断输出。这是已知实现限制，�
 根据不同 Channel 的目标，对候选内容进行相对重要性排序。
 
 **Execution**
-1. Event Groups 全局筛选并返回最重要的 Top 50 排序
-2. Code 选择 Top N Events
+1. Event Groups 全局排序并返回完整的最多 Top 50 Ranking snapshot
+2. Stage 3 不选择 Stage 4 的最终处理数量；该 cutoff 属于 Stage 4
 3. Code 排除已被 Selected Events 覆盖的 exact duplicates
 4. Digest 全局 exact dedup 后，按 Category 分别排序
 5. Long-form 全局排序
@@ -129,7 +129,7 @@ Long-form   → 全局排序：什么最值得投入阅读时间？
 只对最终入选的 Event Groups 生成可直接展示的完整 Event；必要时使用 Web Search 补充关键背景或澄清冲突。
 
 **Input**
-- Selected Event Group
+- 目标 `daily_date` 的最新 Event Review snapshot，按 `display_rank` 取前 N（默认 15）
 - Corresponding Event Candidates
 
 **Output**
@@ -141,6 +141,7 @@ Long-form   → 全局排序：什么最值得投入阅读时间？
 - External Context
 
 `event_date` 由 Application Code 根据 source article timestamps 推导，不由 LLM 输出。
+`daily_date` 是 Daily Brief attribution；Stage 4 Run 和 API 用它决定简报归属，不能以 `event_date` 替代。
 
 **Definition of Done**
 - 准确说明发生了什么

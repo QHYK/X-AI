@@ -52,7 +52,9 @@ type DailyRun = {
 
 async function main() {
   const startedAt = new Date();
-  const scope = resolveDailyScope(process.env.DAILY_DATE, startedAt);
+  const requestedDailyDate = readDailyDateOption() ?? process.env.DAILY_DATE;
+  const scope = resolveDailyScope(requestedDailyDate, startedAt);
+  const isHistoricalRun = scope.dailyDate !== resolveDailyScope(undefined, startedAt).dailyDate;
   const runDir = join(process.cwd(), "runtime/daily", toRunTimestamp(startedAt));
   const runPath = join(runDir, "run.json");
   const run: DailyRun = {
@@ -106,6 +108,7 @@ async function main() {
         stage3Run: run.stage3_run,
       },
       runPointerPath: pointerPath ?? undefined,
+      useCatchupWindow: !isHistoricalRun,
     });
     let exitCode = await runNpmScript(name, {
       ...process.env,
@@ -143,6 +146,11 @@ async function main() {
   finishRun(run, startedAt, finishedAt, "success", null);
   await writeRun(runPath, run);
   console.log(`\n[daily] Workflow success (${run.duration_ms} ms)`);
+}
+
+function readDailyDateOption(): string | undefined {
+  const option = process.argv.find((value) => value.startsWith("--date="));
+  return option?.slice("--date=".length) || undefined;
 }
 
 function runNpmScript(name: StepName, env: NodeJS.ProcessEnv): Promise<number> {

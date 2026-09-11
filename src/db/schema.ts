@@ -77,6 +77,7 @@ export const eventReviewItems = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     reviewRunId: uuid("review_run_id").notNull(),
     dailyDate: date("daily_date").notNull(),
+    eventGroupId: uuid("event_group_id").references(() => eventGroups.id, { onDelete: "set null" }),
     eventTempId: text("event_temp_id").notNull(),
     eventHint: text("event_hint").notNull(),
     aiRank: integer("ai_rank").notNull(),
@@ -98,8 +99,39 @@ export const eventReviewItems = pgTable(
       table.reviewRunId,
       table.displayRank,
     ),
+    uniqueIndex("event_review_items_run_group_unique").on(table.reviewRunId, table.eventGroupId),
   ],
 );
+
+/** Stage 2 对某期 Daily 的完整、可替换 Event Group snapshot。 */
+export const eventGroups = pgTable("event_groups", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  dailyDate: date("daily_date").notNull(),
+  eventHint: text("event_hint").notNull(),
+  ...timestamps,
+}, (table) => [index("event_groups_daily_date_idx").on(table.dailyDate)]);
+
+export const eventGroupItems = pgTable("event_group_items", {
+  eventGroupId: uuid("event_group_id").notNull().references(() => eventGroups.id, { onDelete: "cascade" }),
+  processedContentId: uuid("processed_content_id").notNull().references(() => processedContents.id),
+}, (table) => [
+  uniqueIndex("event_group_items_group_content_unique").on(table.eventGroupId, table.processedContentId),
+  uniqueIndex("event_group_items_content_unique").on(table.processedContentId),
+]);
+
+export const stage4Runs = pgTable("stage4_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  dailyDate: date("daily_date").notNull(),
+  reviewRunId: uuid("review_run_id").notNull(),
+  status: text("status").notNull(),
+  expectedCount: integer("expected_count").notNull(),
+  successCount: integer("success_count").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+}, (table) => [
+  index("stage4_runs_daily_date_idx").on(table.dailyDate),
+  uniqueIndex("stage4_runs_review_run_unique").on(table.reviewRunId),
+]);
 
 export const events = pgTable(
   "events",
@@ -118,6 +150,8 @@ export const events = pgTable(
     externalContext: jsonb("external_context"),
     // 新生成的最终 Event 指向其确切的 Stage 3 Review snapshot item，避免依赖成员集合猜测关联。
     eventReviewItemId: uuid("event_review_item_id").references(() => eventReviewItems.id),
+    stage4RunId: uuid("stage4_run_id").references(() => stage4Runs.id),
+    publicationStatus: text("publication_status").notNull().default("published"),
     aiRank: integer("ai_rank"),
     displayRank: integer("display_rank"),
     ...timestamps,
@@ -125,7 +159,9 @@ export const events = pgTable(
   (table) => [
     index("events_event_date_idx").on(table.eventDate),
     index("events_display_rank_idx").on(table.displayRank),
-    uniqueIndex("events_event_review_item_id_unique").on(table.eventReviewItemId),
+    index("events_stage4_run_id_idx").on(table.stage4RunId),
+    index("events_publication_status_idx").on(table.publicationStatus),
+    uniqueIndex("events_run_review_item_unique").on(table.stage4RunId, table.eventReviewItemId),
   ],
 );
 
@@ -136,6 +172,7 @@ export const processedContents = pgTable(
     rawArticleId: uuid("raw_article_id")
       .notNull()
       .references(() => rawArticles.id),
+    dailyDate: date("daily_date"),
     routing: text("routing").notNull(),
     category: text("category").notNull(),
     tags: text("tags").array(),
@@ -154,6 +191,7 @@ export const processedContents = pgTable(
     index("processed_contents_routing_idx").on(table.routing),
     index("processed_contents_event_id_idx").on(table.eventId),
     index("processed_contents_display_rank_idx").on(table.displayRank),
+    index("processed_contents_daily_date_idx").on(table.dailyDate),
     check(
       "processed_contents_routing_check",
       sql`${table.routing} in ('event', 'digest', 'long_form', 'inspiration')`,

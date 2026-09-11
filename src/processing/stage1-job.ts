@@ -20,6 +20,7 @@ import type { PublishedAtScope } from "../lib/daily-scope.js";
 type Queryable = Pick<Pool | PoolClient, "query">;
 
 export type Stage1JobOptions = Stage1LlmOptions & {
+  dailyDate?: string;
   limit?: number;
   concurrency?: number;
   publishedWithinHours?: number;
@@ -373,7 +374,7 @@ export async function loadStage1EvaluationArticlesByIds(
 async function processStage1MicroBatch(
   pool: Pool,
   articles: Stage1ArticleRow[],
-  options: Stage1LlmOptions = {},
+  options: Stage1JobOptions = {},
   inheritedAttempts = 0,
   batchId = "batch",
   parentBatchId: string | null = null,
@@ -404,6 +405,7 @@ async function processStage1MicroBatch(
       singletonBatchCount: articles.length === 1 ? 1 : 0,
       results: await persistSuccessfulBatch(pool, articles, llmResult.output.results, {
         attempts: inheritedAttempts + llmResult.attempts,
+        dailyDate: options.dailyDate,
       }),
     };
   }
@@ -451,7 +453,7 @@ async function persistSuccessfulBatch(
   pool: Pool,
   articles: Stage1ArticleRow[],
   outputResults: Stage1BatchOutputResult[],
-  options: { attempts: number },
+  options: { attempts: number; dailyDate?: string },
 ): Promise<Stage1JobArticleResult[]> {
   const outputByTempId = new Map(outputResults.map((result) => [result.temp_id, result]));
 
@@ -462,7 +464,7 @@ async function persistSuccessfulBatch(
       throw new Error(`Validated Stage 1 output is missing ${tempId}.`);
     }
 
-    return persistStage1Output(pool, article, toStage1Output(outputResult), options.attempts);
+    return persistStage1Output(pool, article, toStage1Output(outputResult), options.attempts, options.dailyDate);
   });
 }
 
@@ -505,6 +507,7 @@ async function persistStage1Output(
   article: Stage1ArticleRow,
   output: Stage1Output,
   attempts: number,
+  dailyDate?: string,
 ): Promise<Stage1JobArticleResult> {
   try {
     if (output.routing === "Ignore") {
@@ -521,7 +524,7 @@ async function persistStage1Output(
       };
     }
 
-    const processedContentInserted = await persistStage1Selected(pool, article.id, output);
+    const processedContentInserted = await persistStage1Selected(pool, article.id, output, dailyDate);
     return {
       rawArticleId: article.id,
       sourceName: article.sourceName,
@@ -627,11 +630,13 @@ export async function persistStage1Selected(
   queryable: Queryable,
   rawArticleId: string,
   output: Stage1Output,
+  dailyDate?: string,
 ): Promise<boolean> {
   const result = await queryable.query<{ id: string }>(
     `
       insert into processed_contents (
         raw_article_id,
+        daily_date,
         routing,
         category,
         tags,
@@ -643,12 +648,13 @@ export async function persistStage1Selected(
         created_at,
         updated_at
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
+      values ($1, $2::date, $3, $4, $5, $6, $7, $8, $9, $10, now(), now())
       on conflict (raw_article_id) do nothing
       returning id
     `,
     [
       rawArticleId,
+      dailyDate ?? null,
       toDatabaseRouting(output.routing),
       output.category,
       output.tags,

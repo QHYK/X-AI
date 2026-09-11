@@ -93,6 +93,7 @@ export function prepareStage4Event(
   group: Stage4EventGroup,
   sourceCandidates: Map<string, Stage4SourceCandidate>,
   workflowRunTimestamp: Date,
+  dailyDate?: string,
 ): PreparedStage4Event {
   const candidates = group.processedContentIds.map((id) => {
     const candidate = sourceCandidates.get(id);
@@ -115,7 +116,9 @@ export function prepareStage4Event(
         url: candidate.url,
       })),
     },
-    eventDate: deriveEventDate({ publishedAtValues, workflowRunTimestamp }),
+    eventDate: dailyDate
+      ? { eventDate: dailyDate, source: "daily_attribution" }
+      : deriveEventDate({ publishedAtValues, workflowRunTimestamp }),
     publishedAtValues,
   };
 }

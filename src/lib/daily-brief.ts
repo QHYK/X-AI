@@ -5,19 +5,8 @@
  */
 import type { Pool } from "pg";
 import type { ShanghaiDayRange } from "./brief-date.js";
-import {
-  resolveDailyScope,
-  type DailyScope,
-  type PublishedAtScope,
-} from "./daily-scope.js";
-import {
-  DEFAULT_EVENT_TOP_N,
-  LONG_FORM_DISPLAY_CUTOFF,
-} from "./ranking-config.js";
-
-export type DailyBriefOptions = {
-  publishedAtScope?: PublishedAtScope;
-};
+import { resolveDailyScope, type DailyScope } from "./daily-scope.js";
+import { LONG_FORM_DISPLAY_CUTOFF } from "./ranking-config.js";
 
 export const DIGEST_CATEGORY_KEYS = [
   "Finance & Economy",
@@ -81,7 +70,7 @@ export type DailyBriefResponse = {
   inspiration: BriefInspirationItem[];
   meta: {
     timezone: "Asia/Shanghai";
-    date_basis: "raw_articles.published_at";
+    date_basis: "workflow_daily_date";
     generated_at: string;
     event_count: number;
     digest_count: number;
@@ -136,18 +125,16 @@ type InspirationRow = Omit<ContentRow, "rank" | "category" | "hasFullContent"> &
 
 /**
  * 读取一个 Brief 的 Events、Digest、Long-form 与 Inspiration。
- * 可选 publishedAtScope 让重跑后的处理结果仍归属于其新闻发布时间期次。
  */
 export async function getDailyBrief(
   pool: Pool,
   range: ShanghaiDayRange,
-  options: DailyBriefOptions = {},
 ): Promise<DailyBriefResponse> {
   const [events, digests, longForm, inspiration] = await Promise.all([
-    loadEvents(pool, range, options.publishedAtScope),
-    loadDigestItems(pool, range, options.publishedAtScope),
-    loadLongFormItems(pool, range, options.publishedAtScope),
-    loadInspirationItems(pool, range, options.publishedAtScope),
+    loadEvents(pool, range),
+    loadDigestItems(pool, range),
+    loadLongFormItems(pool, range),
+    loadInspirationItems(pool, range),
   ]);
   const digestCountByCategory = countDigestsByCategory(digests);
 
@@ -159,7 +146,7 @@ export async function getDailyBrief(
     inspiration,
     meta: {
       timezone: "Asia/Shanghai",
-      date_basis: "raw_articles.published_at",
+      date_basis: "workflow_daily_date",
       generated_at: new Date().toISOString(),
       event_count: events.length,
       digest_count: Object.values(digests).reduce((sum, items) => sum + items.length, 0),
@@ -175,15 +162,11 @@ export function getDailyBriefForDailyScope(
   pool: Pool,
   scope: DailyScope,
 ): Promise<DailyBriefResponse> {
-  return getDailyBrief(
-    pool,
-    {
-      date: scope.dailyDate,
-      startUtc: new Date(scope.startAt),
-      endUtc: new Date(scope.endAt),
-    },
-    { publishedAtScope: scope },
-  );
+  return getDailyBrief(pool, {
+    date: scope.dailyDate,
+    startUtc: new Date(scope.startAt),
+    endUtc: new Date(scope.endAt),
+  });
 }
 
 export function getDailyBriefForDailyDate(
@@ -196,46 +179,33 @@ export function getDailyBriefForDailyDate(
 async function loadEvents(
   pool: Pool,
   range: ShanghaiDayRange,
-  publishedAtScope?: PublishedAtScope,
 ): Promise<BriefEvent[]> {
-  // Event 可能关联多篇候选稿；exists 避免 join 扩张导致同一 Event 重复返回。
-  const scopePredicate = publishedAtScope
-    ? `
-        exists (
-          select 1
-          from processed_contents pc
-          join raw_articles ra on ra.id = pc.raw_article_id
-          where pc.event_id = events.id
-            and pc.routing = 'event'
-            and ra.published_at >= $1::timestamptz
-            and ra.published_at < $2::timestamptz
-        )
-      `
-    : `created_at >= $1::timestamptz and created_at < $2::timestamptz`;
+  // Daily ownership comes from the published Stage 4 run, not the event's own date.
   const eventResult = await pool.query<EventRow>(
     `
       select
-        id,
-        coalesce(display_rank, ai_rank) as rank,
-        to_char(event_date, 'YYYY-MM-DD') as event_date,
-        created_at,
-        title,
-        title_zh,
-        summary,
-        summary_zh,
-        tags,
-        tags_zh,
-        entities,
-        entities_zh,
-        source_perspectives,
-        external_context
+        events.id,
+        coalesce(events.display_rank, events.ai_rank) as rank,
+        to_char(events.event_date, 'YYYY-MM-DD') as event_date,
+        events.created_at,
+        events.title,
+        events.title_zh,
+        events.summary,
+        events.summary_zh,
+        events.tags,
+        events.tags_zh,
+        events.entities,
+        events.entities_zh,
+        events.source_perspectives,
+        events.external_context
       from events
-      where ${scopePredicate}
-        and coalesce(display_rank, ai_rank) is not null
-      order by coalesce(display_rank, ai_rank) asc, created_at asc, id asc
-      limit ${DEFAULT_EVENT_TOP_N}
+      join stage4_runs on stage4_runs.id = events.stage4_run_id
+      where stage4_runs.daily_date = $1::date
+        and events.publication_status = 'published'
+        and coalesce(events.display_rank, events.ai_rank) is not null
+      order by coalesce(events.display_rank, events.ai_rank) asc, events.created_at asc, events.id asc
     `,
-    scopeValues(range, publishedAtScope),
+    [range.date],
   );
 
   const eventIds = eventResult.rows.map((row) => row.id);
@@ -301,7 +271,6 @@ async function loadEventSources(
 async function loadDigestItems(
   pool: Pool,
   range: ShanghaiDayRange,
-  publishedAtScope?: PublishedAtScope,
 ): Promise<Record<string, BriefContentItem[]>> {
   const result = await pool.query<ContentRow>(
     `
@@ -323,10 +292,10 @@ async function loadDigestItems(
       join sources s on s.id = ra.source_id
       where pc.routing = 'digest'
         and coalesce(pc.display_rank, pc.ai_rank) is not null
-        and ${publishedAtScopePredicate(publishedAtScope, "pc.created_at", "ra")}
+        and pc.daily_date = $1::date
       order by pc.category asc, coalesce(pc.display_rank, pc.ai_rank) asc, pc.created_at asc, pc.id asc
     `,
-    scopeValues(range, publishedAtScope),
+    [range.date],
   );
 
   const digests = createEmptyDigests();
@@ -341,7 +310,6 @@ async function loadDigestItems(
 async function loadLongFormItems(
   pool: Pool,
   range: ShanghaiDayRange,
-  publishedAtScope?: PublishedAtScope,
 ): Promise<BriefContentItem[]> {
   const result = await pool.query<ContentRow>(
     `
@@ -363,11 +331,11 @@ async function loadLongFormItems(
       join sources s on s.id = ra.source_id
       where pc.routing = 'long_form'
         and coalesce(pc.display_rank, pc.ai_rank) is not null
-        and ${publishedAtScopePredicate(publishedAtScope, "pc.created_at", "ra")}
+        and pc.daily_date = $1::date
       order by coalesce(pc.display_rank, pc.ai_rank) asc, pc.created_at asc, pc.id asc
       limit ${LONG_FORM_DISPLAY_CUTOFF}
     `,
-    scopeValues(range, publishedAtScope),
+    [range.date],
   );
 
   return result.rows.map(toBriefContentItem);
@@ -376,7 +344,6 @@ async function loadLongFormItems(
 async function loadInspirationItems(
   pool: Pool,
   range: ShanghaiDayRange,
-  publishedAtScope?: PublishedAtScope,
 ): Promise<BriefInspirationItem[]> {
   const result = await pool.query<InspirationRow>(
     `
@@ -395,10 +362,10 @@ async function loadInspirationItems(
       join raw_articles ra on ra.id = pc.raw_article_id
       join sources s on s.id = ra.source_id
       where pc.routing = 'inspiration'
-        and ${publishedAtScopePredicate(publishedAtScope, "pc.created_at", "ra")}
+        and pc.daily_date = $1::date
       order by pc.created_at asc, pc.id asc
     `,
-    scopeValues(range, publishedAtScope),
+    [range.date],
   );
 
   return result.rows.map((row) => ({
@@ -413,25 +380,6 @@ async function loadInspirationItems(
     published_at: toIsoString(row.published_at),
     created_at: toIsoString(row.created_at) ?? "",
   }));
-}
-
-function publishedAtScopePredicate(
-  publishedAtScope: PublishedAtScope | undefined,
-  createdAtColumn: string,
-  rawArticleAlias: string,
-): string {
-  return publishedAtScope
-    ? `${rawArticleAlias}.published_at >= $1::timestamptz and ${rawArticleAlias}.published_at < $2::timestamptz`
-    : `${createdAtColumn} >= $1::timestamptz and ${createdAtColumn} < $2::timestamptz`;
-}
-
-function scopeValues(
-  range: ShanghaiDayRange,
-  publishedAtScope: PublishedAtScope | undefined,
-): [Date, Date] | [string, string] {
-  return publishedAtScope
-    ? [publishedAtScope.startAt, publishedAtScope.endAt]
-    : [range.startUtc, range.endUtc];
 }
 
 function createEmptyDigests(): Record<string, BriefContentItem[]> {

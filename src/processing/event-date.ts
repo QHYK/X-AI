@@ -2,7 +2,7 @@
  * Stage 4 Event 日期推导规则。
  * 优先采用关联稿件最早发布时间；缺失时才回退到 workflow 执行日，保持可解释性。
  */
-export type EventDateDerivationSource = "earliest_published_at" | "workflow_date_fallback";
+export type EventDateDerivationSource = "earliest_published_at" | "workflow_date_fallback" | "daily_attribution";
 
 export type EventDateDerivation = {
   eventDate: string;

@@ -18,13 +18,13 @@ type ApiMode = "responses" | "chat-completions" | "chat-completions-structured";
 
 async function main() {
   const apiMode = resolveApiMode(process.argv[2]);
-  const baseURL = process.env.CODEX_PROXY_BASE_URL ?? DEFAULT_BASE_URL;
-  const apiKey = process.env.CODEX_PROXY_API_KEY;
-  const model = process.env.CODEX_PROXY_MODEL ?? DEFAULT_MODEL;
+  const baseURL = process.env.CODEX_BASE_URL ?? DEFAULT_BASE_URL;
+  const apiKey = process.env.CODEX_API_KEY;
+  const model = process.env.CODEX_MODEL ?? DEFAULT_MODEL;
   const timeoutMs = Number(process.env.TEST_CODEX_TIMEOUT_MS ?? 30_000);
 
   if (!apiKey) {
-    throw new Error("CODEX_PROXY_API_KEY is required.");
+    throw new Error("CODEX_API_KEY is required.");
   }
 
   const client = new OpenAI({

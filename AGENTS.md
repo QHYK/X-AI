@@ -13,9 +13,10 @@ Do not treat this file as a replacement for the Specs.
 2. 如果任务影响产品行为，阅读 `01-product-spec.md`。
 3. 如果任务影响 AI Workflow，阅读 `02-ai-workflow-spec.md`。
 4. 如果任务涉及 LLM 行为或 Prompt，阅读 `03-prompt-spec.md`。
-5. 如果任务涉及架构、数据库、Workflow 或项目结构，阅读 `04-technical-spec.md`。
-6. 如果任务涉及项目工作流程，阅读 `06-workflow-overview.md`。
-7. 只读取实现当前任务范围内的内容。
+5. 如果任务涉及 Architecture、Runtime、Workflow 或项目结构，阅读 `04-technical-spec.md`。
+6. 涉及数据库 Schema / 表关系 / Index，阅读 `docs/04a-data-model.md`
+7. 如果任务涉及项目工作流程，阅读 `06-workflow-overview.md`。
+8. 只读取实现当前任务范围内的内容。
 
 如果实现需求与现有 Spec 冲突，不要自行修改架构或绕过 Spec，应先明确指出冲突。
 

@@ -42,10 +42,9 @@ import type {
 import { inferSciencePublication } from "./science-publication.js";
 import { resolveStageLlmModel } from "./llm-client.js";
 import { normalizeArticleUrl } from "./url-normalization.js";
-import { loadStage1Runtime } from "./stage1-runtime.js";
 import type { PublishedAtScope } from "../lib/daily-scope.js";
 import { resolveDailyScope } from "../lib/daily-scope.js";
-import { EVENT_DISPLAY_CUTOFF } from "../lib/ranking-config.js";
+import { loadEventGroupsForRanking } from "./event-group-persistence.js";
 import {
   buildEventReviewSnapshotItems,
   persistEventReviewSnapshot,
@@ -131,7 +130,6 @@ export type Stage3JobOptions = {
   stage1RunDir?: string;
   publishedWithinHours?: number;
   publishedAtScope?: PublishedAtScope;
-  eventTopN?: number;
   model?: string;
   rootDir?: string;
   dailyDate?: string;
@@ -184,7 +182,6 @@ export async function processStage3(
   const digestDir = join(runDir, "digest");
   const longFormDir = join(runDir, "long-form");
   const model = resolveStageLlmModel("stage3", options.model);
-  const eventTopN = options.eventTopN ?? EVENT_DISPLAY_CUTOFF;
   const publishedWithinHours = options.publishedWithinHours ?? DEFAULT_LOOKBACK_HOURS;
   const dailyDate = options.dailyDate ?? resolveDailyScope(undefined, startedAt).dailyDate;
 
@@ -194,9 +191,9 @@ export async function processStage3(
   await mkdir(longFormDir, { recursive: true });
 
   let sourceStage2RunDir = "";
-  let sourceStage1RunDir = "";
-  let stage1StartedAt = "";
-  let stage1FinishedAt = "";
+  const sourceStage1RunDir = "";
+  const stage1StartedAt = "";
+  const stage1FinishedAt = "";
   let eventGroupCount = 0;
   let eventSelectedCount = 0;
   let crossChannelRemovedCount = 0;
@@ -213,34 +210,21 @@ export async function processStage3(
   let error: string | null = null;
 
   try {
-    const stage2 = await loadStage2RunForStage3(rootDir, options.stage2RunDir);
-    sourceStage2RunDir = stage2.runDir;
-    const stage1 = await loadStage1Runtime(
-      rootDir,
-      stage2.run.stage1_run_dir ?? options.stage1RunDir,
-    );
-    sourceStage1RunDir = stage1.runDir;
-    stage1StartedAt = stage2.run.stage1_started_at ?? stage1.run.started_at;
-    stage1FinishedAt = stage2.run.stage1_finished_at ?? stage1.run.finished_at;
-    const eventBundle = buildStage3EventRankingInput(
-      stage2.input,
-      stage2.output,
-      stage2.idMap,
-    );
+    // Runtime is retained as optional lineage only. DB event_groups is the business input.
+    if (options.stage2RunDir) sourceStage2RunDir = options.stage2RunDir;
+    const eventBundle = await buildStage3EventRankingInputFromDb(pool, dailyDate);
     eventGroupCount = eventBundle.input.events.length;
     await writeJson(join(eventsDir, "input.json"), eventBundle.input);
 
     const digestRows = await loadStage3RankingRows(
       pool,
       "digest",
-      stage1StartedAt,
-      stage1FinishedAt,
+      dailyDate,
     );
     const longFormRows = await loadStage3RankingRows(
       pool,
       "long_form",
-      stage1StartedAt,
-      stage1FinishedAt,
+      dailyDate,
     );
     const digestRecords = buildDigestRecords(digestRows);
     const longFormRecords = buildLongFormRecords(longFormRows);
@@ -269,7 +253,7 @@ export async function processStage3(
       rankingOutput: eventRanking.output,
       eventInput: eventBundle.input,
       eventIdMap: eventBundle.idMap,
-      topN: eventTopN,
+      topN: eventBundle.input.events.length,
     });
     eventSelectedCount = selectedEvents.events.length;
     await writeJson(join(eventsDir, "selected.json"), selectedEvents);
@@ -581,6 +565,39 @@ export function buildStage3EventRankingInput(
   };
 }
 
+/** 从正式 Event Group snapshot 读取 Event Ranking 输入；不依赖 runtime temp id。 */
+export async function buildStage3EventRankingInputFromDb(
+  queryable: Queryable,
+  dailyDate: string,
+): Promise<{ input: Stage3EventRankingInput; idMap: Record<string, string[]> }> {
+  const rows = await loadEventGroupsForRanking(queryable, dailyDate);
+  const groups = new Map<string, {
+    event_hint: string;
+    sources: Array<{ source: string; title: string; summary: string }>;
+    members: string[];
+  }>();
+  for (const row of rows) {
+    const group = groups.get(row.eventGroupId) ?? {
+      event_hint: row.eventHint,
+      sources: [],
+      members: [],
+    };
+    group.sources.push({ source: row.source, title: row.title, summary: row.summary ?? "" });
+    group.members.push(row.processedContentId);
+    groups.set(row.eventGroupId, group);
+  }
+  const events = [...groups.entries()].map(([id, group]) => ({
+    id,
+    event_hint: group.event_hint,
+    source_count: group.sources.length,
+    sources: group.sources,
+  }));
+  return {
+    input: { events },
+    idMap: Object.fromEntries([...groups.entries()].map(([id, group]) => [id, group.members])),
+  };
+}
+
 function validateStage2IdMap(input: Stage2Input, idMap: Stage2IdMap) {
   const expectedIds = input.event_candidates.map((candidate) => candidate.temp_id);
   if (Object.keys(idMap).length !== expectedIds.length) {
@@ -605,8 +622,7 @@ function validateStage2IdMap(input: Stage2Input, idMap: Stage2IdMap) {
 export async function loadStage3RankingRows(
   queryable: Queryable,
   routing: "digest" | "long_form",
-  stage1StartedAt: string,
-  stage1FinishedAt: string,
+  dailyDate: string,
 ): Promise<RankingCandidateRow[]> {
   const result = await queryable.query<RankingCandidateRow>(
     `
@@ -623,15 +639,14 @@ export async function loadStage3RankingRows(
       join sources s on s.id = ra.source_id
       where pc.routing = $1
         and ra.stage1_status = 'selected'
-        and pc.created_at >= $2::timestamptz
-        and pc.created_at <= $3::timestamptz
+        and pc.daily_date = $2::date
       order by
         pc.category,
         pc.created_at asc,
         s.name,
         pc.id
     `,
-    [routing, stage1StartedAt, stage1FinishedAt],
+    [routing, dailyDate],
   );
 
   return result.rows;

@@ -8,6 +8,7 @@ import { buildDailyStepEnv } from "../src/lib/daily-workflow.js";
 import { loadPendingStage1Articles } from "../src/processing/stage1-job.js";
 import { loadStage2EventCandidates } from "../src/processing/stage2-candidates.js";
 import { loadStage3RankingRows } from "../src/processing/stage3-job.js";
+import { DEFAULT_STAGE2_MAX_OUTPUT_TOKENS } from "../src/processing/stage2-llm.js";
 
 type CapturedQuery = {
   text: string;
@@ -36,6 +37,10 @@ const expectedScope = {
   endAt: "2026-08-25T00:30:00.000Z",
 };
 
+checks.push({
+  name: "Stage 2 default output budget is 64k",
+  passed: DEFAULT_STAGE2_MAX_OUTPUT_TOKENS === 64_000,
+});
 checks.push({
   name: "same DAILY_DATE is deterministic at 08:30, 14:00, and 22:00 Shanghai",
   passed: scopes.every((scope) => JSON.stringify(scope) === JSON.stringify(expectedScope)),
@@ -84,19 +89,13 @@ checks.push({
 const scopedQueries: CapturedQuery[] = [];
 const scopedQueryable = createCapturingQueryable(scopedQueries);
 await loadPendingStage1Articles(scopedQueryable, { publishedAtScope: scope });
-const stage1Lineage = {
-  startedAt: "2026-08-25T02:00:00.000Z",
-  finishedAt: "2026-08-25T02:10:00.000Z",
-};
 await loadStage2EventCandidates(scopedQueryable, {
-  stage1StartedAt: stage1Lineage.startedAt,
-  stage1FinishedAt: stage1Lineage.finishedAt,
+  dailyDate: scope.dailyDate,
 });
 await loadStage3RankingRows(
   scopedQueryable,
   "digest",
-  stage1Lineage.startedAt,
-  stage1Lineage.finishedAt,
+  scope.dailyDate,
 );
 
 checks.push({
@@ -106,16 +105,15 @@ checks.push({
     scopedQueries[0]?.text.includes("ra.published_at >=") &&
     scopedQueries[0]?.text.includes("ra.published_at <") &&
     scopedQueries.slice(1).every((query) =>
-      query.text.includes("pc.created_at >=") &&
-      query.text.includes("pc.created_at <=") &&
+      query.text.includes("pc.daily_date =") &&
       query.text.includes("ra.stage1_status = 'selected'"),
     ) &&
     JSON.stringify(scopedQueries[0]?.values) ===
       JSON.stringify([expectedScope.startAt, expectedScope.endAt]) &&
     JSON.stringify(scopedQueries[1]?.values) ===
-      JSON.stringify([stage1Lineage.startedAt, stage1Lineage.finishedAt]) &&
+      JSON.stringify([scope.dailyDate]) &&
     JSON.stringify(scopedQueries[2]?.values) ===
-      JSON.stringify(["digest", stage1Lineage.startedAt, stage1Lineage.finishedAt]),
+      JSON.stringify(["digest", scope.dailyDate]),
   detail: scopedQueries,
 });
 

@@ -38,7 +38,6 @@ async function main() {
           process.env.STAGE3_COLLECTED_WITHIN_HOURS,
       ),
       publishedAtScope: inheritedDailyScope ?? readPublishedAtScopeFromEnv(process.env),
-      eventTopN: parseOptionalPositiveInt(process.env.STAGE3_EVENT_TOP_N),
       dailyDate: inheritedDailyDate,
     });
     await writeRunPointer(result.runDir);
