@@ -5,3 +5,4 @@
 这是新的输入通道，会碰 parsing、newsletter 拆分、source mapping，复杂度明显更高。
 + Editorial Memory / 人工知识加权
 这个最值得最后做，因为它会真正改变 Stage1/Stage3 决策行为，应该建立在我们已经有足够真实 review 数据之后，不然很容易把“临时偏好”写成长期规则。
++ content text > 2000 就展示read more；API对应的用content调llm也可以。
