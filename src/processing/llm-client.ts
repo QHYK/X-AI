@@ -6,7 +6,7 @@
 import OpenAI from "openai";
 import { Agent, fetch as undiciFetch } from "undici";
 
-export type LlmProvider = "openai" | "deepseek" | "kimi";
+export type LlmProvider = "openai" | "deepseek" | "kimi" | "codex";
 export type LlmStage = "stage1" | "stage2" | "stage3" | "stage4";
 
 export type LlmClientOptions = {
@@ -90,11 +90,13 @@ type LlmRequestDiagnostic = {
 const DEFAULT_OPENAI_BASE_URL = "https://128api.cn/v1";
 const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_KIMI_BASE_URL = "https://api.moonshot.ai/v1";
+const DEFAULT_CODEX_BASE_URL = "http://127.0.0.1:8317/v1";
 
 const DEFAULT_MODELS: Record<LlmProvider, string> = {
   openai: "gpt-5.4-mini",
   deepseek: "deepseek-v4-pro",
   kimi: "kimi-k3",
+  codex: "gpt-5.6-terra",
 };
 
 const DEFAULT_STAGE_PROVIDERS: Record<LlmStage, LlmProvider> = {
@@ -106,11 +108,11 @@ const DEFAULT_STAGE_PROVIDERS: Record<LlmStage, LlmProvider> = {
 
 export function resolveLlmProvider(value = process.env.LLM_PROVIDER): LlmProvider {
   const provider = value?.trim().toLowerCase() || "openai";
-  if (provider === "openai" || provider === "deepseek" || provider === "kimi") {
+  if (provider === "openai" || provider === "deepseek" || provider === "kimi" || provider === "codex") {
     return provider;
   }
   throw new Error(
-    `Unsupported LLM_PROVIDER "${value}". Expected openai, deepseek, or kimi.`,
+    `Unsupported LLM_PROVIDER "${value}". Expected openai, deepseek, kimi, or codex.`,
   );
 }
 
@@ -162,7 +164,8 @@ export function assertStageLlmConfiguration(stage: LlmStage): LlmConfig {
 
 /**
  * 创建统一的最小 Responses 接口。
- * 非 OpenAI Provider 经 Chat Completions 适配，调用方无需了解协议差异。
+ * OpenAI / Codex 支持 Responses API；
+ * 普通 Structured Output 默认使用 Chat Completions。
  */
 export function createLlmClient(options: LlmClientOptions = {}) {
   const config = resolveLlmConfig({ provider: options.provider });
@@ -190,8 +193,8 @@ export function createLlmClient(options: LlmClientOptions = {}) {
         request: ResponseRequest,
         requestOptions: { timeout?: number } = {},
       ): Promise<LlmResponse> =>
-        config.provider === "openai"
-          ? createOpenAiResponse(client, request, requestOptions)
+        config.provider === "openai" || config.provider === "codex"
+          ? createOpenAiResponse(client, config.provider,request, requestOptions)
           : createChatCompletionResponse(client, config.provider, request, requestOptions),
     },
     /** 普通 Structured Output 默认走 Chat Completions；Web Search 保留使用 responses。 */
@@ -205,12 +208,14 @@ export function createLlmClient(options: LlmClientOptions = {}) {
   };
 }
 
+// 目前只给stage 4用
 async function createOpenAiResponse(
   client: OpenAI,
+  provider: LlmProvider,
   request: ResponseRequest,
   requestOptions: { timeout?: number },
 ): Promise<LlmResponse> {
-  const diagnostic = buildRequestDiagnostic("openai", client.baseURL, request);
+  const diagnostic = buildRequestDiagnostic(provider, client.baseURL, request);
   logRequestDiagnostic(diagnostic);
   try {
     const response = await client.responses.create(
@@ -260,7 +265,7 @@ async function createChatCompletionResponse(
   const format = request.text?.format;
   const instructions = buildChatInstructions(provider, request.instructions, format?.schema);
   const responseFormat = format
-    ? provider === "openai" || provider === "kimi"
+    ? provider === "openai" || provider === "kimi" || provider === "codex"
       ? {
           type: "json_schema" as const,
           json_schema: {
@@ -355,9 +360,10 @@ function buildRequestDiagnostic(
   baseUrl: string,
   request: ResponseRequest,
   chatResponseFormat?: unknown,
-  apiMode: "responses" | "chat_completions" = provider === "openai"
-    ? "responses"
-    : "chat_completions",
+  apiMode: "responses" | "chat_completions" = 
+    provider === "openai" || provider === "codex"
+      ? "responses"
+      : "chat_completions",
 ): LlmRequestDiagnostic {
   const isResponsesApi = apiMode === "responses";
   return {
@@ -513,6 +519,9 @@ function resolveApiKey(provider: LlmProvider): string | undefined {
   if (provider === "deepseek") {
     return process.env.DEEPSEEK_API_KEY;
   }
+  if (provider === "codex") {
+    return process.env.CODEX_API_KEY;
+  }
   return process.env.KIMI_API_KEY ?? process.env.MOONSHOT_API_KEY;
 }
 
@@ -522,6 +531,9 @@ function resolveBaseUrl(provider: LlmProvider): string {
   }
   if (provider === "deepseek") {
     return process.env.DEEPSEEK_BASE_URL ?? DEFAULT_DEEPSEEK_BASE_URL;
+  }
+  if (provider === "codex") {
+    return process.env.CODEX_BASE_URL ?? DEFAULT_CODEX_BASE_URL;
   }
   return process.env.KIMI_BASE_URL ?? DEFAULT_KIMI_BASE_URL;
 }
@@ -541,6 +553,9 @@ export function resolveProviderLlmModel(provider: LlmProvider): string {
   if (provider === "deepseek") {
     return process.env.DEEPSEEK_MODEL ?? DEFAULT_MODELS.deepseek;
   }
+  if (provider === "codex") {
+    return process.env.CODEX_MODEL ?? DEFAULT_MODELS.codex;
+  }
   return process.env.KIMI_MODEL ?? DEFAULT_MODELS.kimi;
 }
 
@@ -550,6 +565,9 @@ function credentialDescription(provider: LlmProvider): string {
   }
   if (provider === "deepseek") {
     return "DEEPSEEK_API_KEY";
+  }
+  if (provider === "codex") {
+    return "CODEX_API_KEY";
   }
   return "KIMI_API_KEY (or MOONSHOT_API_KEY)";
 }
