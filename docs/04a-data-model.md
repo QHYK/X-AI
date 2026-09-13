@@ -210,7 +210,25 @@ created_at, updated_at
 
 `stage4_runs` 记录来源 Review snapshot、`daily_date`、`expected_count`、`success_count` 和 `running` / `partial` / `success` 状态。每个 enrichment 成功后立即写入对应 Run 的 draft Event；仅在 drafts 数量等于 `expected_count` 时才原子 publish。
 
-### 3.7 `feedback`
+### 3.7 `pipeline_runs`
+
+跨机器持久化的 Pipeline 执行摘要，供 Dashboard 的运行观测与后续手动 Retry 使用；不保存完整
+runtime artifact 或原始模型输出。
+
+```text
+id, daily_date, step, status, trigger_source, provider, model,
+started_at, finished_at, metrics, error_summary, created_at, updated_at
+```
+
+- `step`: `daily`、`content_completion`、`exact_duplicate_filter`、`stage1` 至 `stage4`。
+- `status`: `running`、`success`、`partial`、`failed`；Stage 4 的 `partial` 与其 business table
+  `stage4_runs.status` 保持同一 canonical 值。
+- `trigger_source`: `daily_orchestrator`、`standalone`、`dashboard`。
+- `metrics` 为小型 JSONB 摘要（调用数、重试、耗时、Stage 特有计数等），不机械复制 runtime JSON。
+- Dashboard 对指定 `daily_date + step` 选择 `started_at` 最新的一条，即 Latest Attempt。
+- 索引：`(daily_date, step, started_at DESC)`。
+
+### 3.8 `feedback`
 当前保留简单结构，结构未来根据实际 Feedback / Eval 需求再调整。
 
 | Field           | Type        | Constraint / Notes        |
@@ -238,7 +256,7 @@ display_rank 更新
 feedback 写入修改记录
 ```
 
-### 3.7 `evaluation_inputs` / `evaluation_runs` / `evaluation_outputs`
+### 3.9 `evaluation_inputs` / `evaluation_runs` / `evaluation_outputs`
 
 Model Evaluation 使用三张独立表保存人工实验：
 
@@ -276,7 +294,7 @@ Dashboard API 会先创建持久化的 `running` runs，再用固定 detached CL
 原子更新为 `cancelled`，不影响同一 Frozen Input 的其他模型；已 `success`、`failed` 或
 `cancelled` 的 Run 不可再次取消。
 
-### 3.8 Initial Indexes
+### 3.10 Initial Indexes
 
 MVP 只建立明确需要的索引：
 ```text

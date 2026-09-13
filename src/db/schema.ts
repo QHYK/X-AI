@@ -210,6 +210,24 @@ export const feedback = pgTable("feedback", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** Durable, cross-machine execution summaries. Detailed artifacts remain on the local runtime filesystem. */
+export const pipelineRuns = pgTable("pipeline_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  dailyDate: date("daily_date").notNull(),
+  step: text("step").notNull(),
+  status: text("status").notNull(),
+  triggerSource: text("trigger_source").notNull(),
+  provider: text("provider"),
+  model: text("model"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  metrics: jsonb("metrics").$type<Record<string, unknown>>().notNull().default({}),
+  errorSummary: text("error_summary"),
+  ...timestamps,
+}, (table) => [
+  index("pipeline_runs_daily_step_started_idx").on(table.dailyDate, table.step, table.startedAt),
+]);
+
 /** 人工触发的模型评测所冻结的 Stage 输入；与正式业务表完全隔离。 */
 export const evaluationInputs = pgTable(
   "evaluation_inputs",

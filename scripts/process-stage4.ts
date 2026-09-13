@@ -1,8 +1,10 @@
 import { config } from "dotenv";
 import { writeFile } from "node:fs/promises";
 import { Pool } from "pg";
-import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
+import { assertStageLlmConfiguration, resolveStageLlmModel, resolveStageLlmProvider } from "../src/processing/llm-client.js";
 import { processStage4 } from "../src/processing/stage4-job.js";
+import { resolveDailyScope } from "../src/lib/daily-scope.js";
+import { pipelineTriggerSource, safelyFinishPipelineRun, safelyStartPipelineRun } from "../src/processing/pipeline-run-log.js";
 
 const inheritedStage3RunDir = process.env.STAGE4_STAGE3_RUN_DIR;
 const inheritedRunPointer = process.env.DAILY_STAGE_RUN_POINTER;
@@ -28,15 +30,32 @@ async function main() {
   });
 
   try {
+    const startedAt = new Date();
+    const dailyDate = resolveDailyScope(process.env.DAILY_DATE, startedAt).dailyDate;
+    const pipelineRunId = await safelyStartPipelineRun(pool, { dailyDate, step: "stage4", triggerSource: pipelineTriggerSource(process.env.PIPELINE_TRIGGER_SOURCE), startedAt });
+    try {
     const result = await processStage4(pool, {
       stage3RunDir: inheritedStage3RunDir ?? process.env.STAGE4_STAGE3_RUN_DIR,
       dailyDate: process.env.DAILY_DATE,
       concurrency: parseOptionalPositiveInt(process.env.STAGE4_CONCURRENCY),
     });
     await writeRunPointer(result.runDir);
+    const status = result.success ? "success" : result.enrichmentSuccessCount > 0 ? "partial" : "failed";
+    await safelyFinishPipelineRun(pool, pipelineRunId, {
+      status, provider: resolveStageLlmProvider("stage4"), model: resolveStageLlmModel("stage4"),
+      metrics: { selected_count: result.selectedEventCount, ready_count: result.enrichmentSuccessCount,
+        failed_count: status === "partial" ? 1 : result.success ? 0 : result.selectedEventCount,
+        draft_count: status === "partial" ? result.enrichmentSuccessCount : 0,
+        published_count: result.success ? result.eventsCreated : 0, llm_calls: result.llmCalls,
+        retry_count: result.retryCount, duration_ms: result.llmDurationMs }, errorSummary: result.error,
+    });
     console.log(JSON.stringify(result, null, 2));
     if (!result.success) {
       process.exitCode = 1;
+    }
+    } catch (error) {
+      await safelyFinishPipelineRun(pool, pipelineRunId, { status: "failed", provider: resolveStageLlmProvider("stage4"), model: resolveStageLlmModel("stage4"), errorSummary: error instanceof Error ? error.message : String(error) });
+      throw error;
     }
   } finally {
     await pool.end();

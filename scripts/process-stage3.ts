@@ -4,6 +4,9 @@ import { Pool } from "pg";
 import { readPublishedAtScopeFromEnv } from "../src/lib/daily-scope.js";
 import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
 import { processStage3 } from "../src/processing/stage3-job.js";
+import { resolveDailyScope } from "../src/lib/daily-scope.js";
+import { resolveStageLlmModel, resolveStageLlmProvider } from "../src/processing/llm-client.js";
+import { pipelineTriggerSource, safelyFinishPipelineRun, safelyStartPipelineRun } from "../src/processing/pipeline-run-log.js";
 
 const inheritedDailyScope = readPublishedAtScopeFromEnv(process.env);
 const inheritedDailyDate = process.env.DAILY_DATE;
@@ -31,6 +34,10 @@ async function main() {
   });
 
   try {
+    const startedAt = new Date();
+    const dailyDate = resolveDailyScope(inheritedDailyDate, startedAt).dailyDate;
+    const pipelineRunId = await safelyStartPipelineRun(pool, { dailyDate, step: "stage3", triggerSource: pipelineTriggerSource(process.env.PIPELINE_TRIGGER_SOURCE), startedAt });
+    try {
     const result = await processStage3(pool, {
       stage2RunDir: inheritedStage2RunDir ?? process.env.STAGE3_STAGE2_RUN_DIR,
       publishedWithinHours: parseOptionalPositiveInt(
@@ -41,10 +48,21 @@ async function main() {
       dailyDate: inheritedDailyDate,
     });
     await writeRunPointer(result.runDir);
+    await safelyFinishPipelineRun(pool, pipelineRunId, {
+      status: result.success ? "success" : "failed", provider: resolveStageLlmProvider("stage3"), model: resolveStageLlmModel("stage3"),
+      metrics: { event_group_count: result.eventGroupCount, selected_count: result.eventSelectedCount,
+        digest_before_dedup: result.digestBeforeDedup, digest_after_dedup: result.digestAfterDedup,
+        long_form_count: result.longFormCount, llm_calls: result.llmCallCount, retry_count: result.retryCount,
+        llm_duration_ms: result.llmDurationMs }, errorSummary: result.error,
+    });
 
     console.log(JSON.stringify(result, null, 2));
     if (!result.success) {
       process.exitCode = 1;
+    }
+    } catch (error) {
+      await safelyFinishPipelineRun(pool, pipelineRunId, { status: "failed", provider: resolveStageLlmProvider("stage3"), model: resolveStageLlmModel("stage3"), errorSummary: error instanceof Error ? error.message : String(error) });
+      throw error;
     }
   } finally {
     await pool.end();

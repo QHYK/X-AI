@@ -429,6 +429,7 @@ db          → Schema / DB connection
 lib         → API composition / shared application helpers
 app.        → HTTP presentation layer
 runtime     → Debug / operational artifacts，不是数据库
+pipeline_runs → 跨机器可见的执行摘要 / Dashboard observability
 ```
 
 ### 7.3 Engineering Principles
@@ -497,6 +498,7 @@ DAILY_DATE=2026-08-25 npm run daily
 
 Stage 4 rebuild 使用 runtime artifacts 识别同一 `event_date` scope 的上一轮派生 Events。runtime artifacts 也用于 Debug、Review 和必要时的数据恢复分析；不要把它作为 Stage 间传递数据的正式接口。
 
-Internal Dashboard 按 Asia/Shanghai 运行日期读取每天最新一次 Content Completion runtime，
-展示 Completion success/selected、remaining backlog、duration，并在 Date Details 展示完整计数。
-缺少 runtime 时显示 `N/A`，不从当前数据库状态反推历史指标。
+`pipeline_runs` 保存每次 Daily、Completion、Exact Duplicate Filter 与 Stage 1–4 execution 的轻量摘要。
+Dashboard 对目标 `daily_date + step` 按 `started_at DESC` 读取 Latest Attempt（包括最新 failed / partial），
+因此跨机器可见。业务真相仍来自业务表；完整 input、output、raw response 与 debug 诊断仍留在本地
+`runtime/`。没有对应 DB run 的迁移前历史数据才回退读取 runtime artifact。

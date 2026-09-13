@@ -47,6 +47,7 @@
     "test:model-evaluation-background": "tsx scripts/test-model-evaluation-background.ts",
     "test:model-evaluation-cancel": "tsx scripts/test-model-evaluation-cancel.ts",
     "test:content-completion-runtime": "tsx scripts/test-content-completion-runtime.ts",
+    "test:pipeline-run-log": "tsx scripts/test-pipeline-run-log.ts",
     "test:openai": "tsx scripts/test-openai-call.ts openai",
     "test:openai:chat": "tsx scripts/test-openai-call.ts openai chat-completions",
     "test:openai:chat:structured": "tsx scripts/test-openai-call.ts openai chat-completions-structured",

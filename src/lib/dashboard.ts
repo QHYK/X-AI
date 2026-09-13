@@ -62,6 +62,18 @@ type ContentFunnelRow = {
 
 type JsonObject = Record<string, unknown>;
 
+type PipelineRunRow = {
+  daily_date: string;
+  step: string;
+  status: string;
+  provider: string | null;
+  model: string | null;
+  started_at: Date | string;
+  finished_at: Date | string | null;
+  metrics: unknown;
+  error_summary: string | null;
+};
+
 type Stage4BusinessRow = {
   date: string;
   status: string | null;
@@ -266,6 +278,7 @@ export async function getDashboardData(
     duplicateFilterByDate,
     contentFunnel,
     stage4BusinessResult,
+    pipelineRunsResult,
   ] = await Promise.all([
     pool.query<TotalRow>(`
       select
@@ -378,6 +391,7 @@ export async function getDashboardData(
       left join events e on e.stage4_run_id = all_runs.id
       group by latest_runs.date, latest_runs.status, latest_runs.id, latest_runs.success_count
     `, [[...requestedRuntimeDates]]),
+    loadPipelineRunsByDate(pool, requestedRuntimeDates),
   ]);
 
   const totals = totalsResult.rows[0];
@@ -389,6 +403,7 @@ export async function getDashboardData(
   const processedByDate = rowsByDate(processedResult.rows);
   const eventsByDate = rowsByDate(eventsResult.rows);
   const stage4BusinessByDate = new Map(stage4BusinessResult.rows.map((row) => [row.date, row]));
+  const pipelineRunsByDate = groupPipelineRunsByDate(pipelineRunsResult);
 
   const days = scopes.map((scope) => {
     const raw = rawByDate.get(scope.dailyDate);
@@ -396,9 +411,10 @@ export async function getDashboardData(
     const event = eventsByDate.get(scope.dailyDate);
     const stages = emptyStageMap();
     const runtimeStages = runtimeByDate.get(scope.dailyDate);
+    const pipelineRuns = pipelineRunsByDate.get(scope.dailyDate);
 
     for (const stage of STAGES) {
-      stages[stage] = runtimeStages?.get(stage) ?? null;
+      stages[stage] = pipelineRuns?.get(stage) ? stageMetricsFromPipelineRun(stage, pipelineRuns.get(stage)!) : runtimeStages?.get(stage) ?? null;
     }
     stages.stage4 = mergeStage4BusinessMetrics(stages.stage4, stage4BusinessByDate.get(scope.dailyDate));
 
@@ -425,10 +441,10 @@ export async function getDashboardData(
       events: { published: count(event?.published), draft: count(event?.draft) },
       completionBacklog: count(raw?.completion_backlog),
       runtime: {
-        contentCompletion: completionByDate.get(scope.dailyDate) ?? null,
-        duplicateFilter: duplicateFilterByDate.get(scope.dailyDate) ?? null,
+        contentCompletion: pipelineRuns?.get("content_completion") ? completionMetricsFromPipelineRun(pipelineRuns.get("content_completion")!) : completionByDate.get(scope.dailyDate) ?? null,
+        duplicateFilter: pipelineRuns?.get("exact_duplicate_filter") ? duplicateMetricsFromPipelineRun(pipelineRuns.get("exact_duplicate_filter")!) : duplicateFilterByDate.get(scope.dailyDate) ?? null,
         stages,
-        llmCalls: sumKnown(availableStages.map((stage) => stage.llmCalls)),
+        llmCalls: sumRequired(STAGES.map((stage) => stages[stage]?.llmCalls ?? null)),
         inputTokens: sumKnown(availableStages.map((stage) => stage.inputTokens)),
         outputTokens: sumKnown(availableStages.map((stage) => stage.outputTokens)),
         totalTokens: sumKnown(availableStages.map((stage) => stage.totalTokens)),
@@ -441,8 +457,9 @@ export async function getDashboardData(
   const runtimeDetailStages = detailScopeCompleted
     ? runtimeByDate.get(detailScope.dailyDate)
     : undefined;
+  const detailPipelineRuns = pipelineRunsByDate.get(detailScope.dailyDate);
   for (const stage of STAGES) {
-    detailStages[stage] = runtimeDetailStages?.get(stage) ?? null;
+    detailStages[stage] = detailPipelineRuns?.get(stage) ? stageMetricsFromPipelineRun(stage, detailPipelineRuns.get(stage)!) : runtimeDetailStages?.get(stage) ?? null;
   }
   detailStages.stage4 = mergeStage4BusinessMetrics(
     detailStages.stage4,
@@ -465,10 +482,10 @@ export async function getDashboardData(
       processedByCategory: categoryCounts(processedCategoriesResult.rows),
       digestByCategory: categoryCounts(digestCategoriesResult.rows),
       contentCompletion: detailScopeCompleted
-        ? completionByDate.get(detailScope.dailyDate) ?? null
+        ? detailPipelineRuns?.get("content_completion") ? completionMetricsFromPipelineRun(detailPipelineRuns.get("content_completion")!) : completionByDate.get(detailScope.dailyDate) ?? null
         : null,
       duplicateFilter: detailScopeCompleted
-        ? duplicateFilterByDate.get(detailScope.dailyDate) ?? null
+        ? detailPipelineRuns?.get("exact_duplicate_filter") ? duplicateMetricsFromPipelineRun(detailPipelineRuns.get("exact_duplicate_filter")!) : duplicateFilterByDate.get(detailScope.dailyDate) ?? null
         : null,
       stages: detailStages,
     },
@@ -547,6 +564,11 @@ function countDailyBriefCharacters(brief: DailyBriefResponse): number {
 
 function characterLength(value: string | null): number {
   return value === null ? 0 : Array.from(value).length;
+}
+
+function toIsoString(value: Date | string | null): string | null {
+  if (value === null) return null;
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
 /**
@@ -653,6 +675,89 @@ function mergeStage4BusinessMetrics(
   };
 }
 
+function groupPipelineRunsByDate(rows: PipelineRunRow[]): Map<string, Map<string, PipelineRunRow>> {
+  const result = new Map<string, Map<string, PipelineRunRow>>();
+  for (const row of rows) {
+    const steps = result.get(row.daily_date) ?? new Map<string, PipelineRunRow>();
+    steps.set(row.step, row);
+    result.set(row.daily_date, steps);
+  }
+  return result;
+}
+
+/** The deployed schema may predate pipeline_runs; runtime remains the explicit compatibility path. */
+async function loadPipelineRunsByDate(pool: Pool, dates: Set<string>): Promise<PipelineRunRow[]> {
+  try {
+    const result = await pool.query<PipelineRunRow>(`
+      select distinct on (daily_date, step)
+        daily_date::text, step, status, provider, model, started_at, finished_at, metrics, error_summary
+      from pipeline_runs
+      where daily_date = any($1::date[])
+        and step = any($2::text[])
+      order by daily_date, step, started_at desc, id desc
+    `, [[...dates], ["content_completion", "exact_duplicate_filter", ...STAGES]]);
+    return result.rows;
+  } catch (error) {
+    if (isMissingTable(error, "pipeline_runs")) return [];
+    throw error;
+  }
+}
+
+function isMissingTable(error: unknown, table: string): boolean {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? (error as { code?: string }).code
+      : undefined;
+  return code === "42P01" ||
+    (error instanceof Error && error.message.includes(`relation \"${table}\" does not exist`));
+}
+
+function stageMetricsFromPipelineRun(stage: DashboardStage, row: PipelineRunRow): DashboardStageMetrics {
+  const metrics = asObject(row.metrics) ?? {};
+  const startedAt = toIsoString(row.started_at)!;
+  const finishedAt = toIsoString(row.finished_at);
+  const selectedEventCount = numberFrom(metrics, "selected_count", "event_selected_count");
+  return {
+    ...emptyStageMetrics(stage), stage, status: row.status, startedAt, model: row.model,
+    durationMs: numberFrom(metrics, "duration_ms") ?? durationBetween(startedAt, finishedAt),
+    llmDurationMs: numberFrom(metrics, "llm_duration_ms"),
+    llmCalls: numberFrom(metrics, "llm_calls"), retryCount: numberFrom(metrics, "retry_count"),
+    inputTokens: numberFrom(metrics, "input_tokens"), outputTokens: numberFrom(metrics, "output_tokens"),
+    totalTokens: numberFrom(metrics, "total_tokens"), candidateCount: numberFrom(metrics, "candidate_count"),
+    groupCount: numberFrom(metrics, "group_count", "event_group_count"), selectedEventCount,
+    digestBeforeDedup: numberFrom(metrics, "digest_before_dedup"), digestAfterDedup: numberFrom(metrics, "digest_after_dedup"),
+    longFormCount: numberFrom(metrics, "long_form_count"), enrichmentSuccessCount: numberFrom(metrics, "ready_count"),
+    enrichmentFailureCount: numberFrom(metrics, "failed_count"), eventsCreated: numberFrom(metrics, "published_count"),
+    webSearchEventCount: numberFrom(metrics, "web_search_event_count"), totalWebSearchCalls: numberFrom(metrics, "total_web_search_calls"),
+    batchCount: numberFrom(metrics, "batch_count"), fallbackBatchCount: numberFrom(metrics, "fallback_batch_count"),
+    splitCount: numberFrom(metrics, "split_count"), singletonBatchCount: numberFrom(metrics, "singleton_batch_count"),
+    readyCount: numberFrom(metrics, "ready_count"), draftCount: numberFrom(metrics, "draft_count"), publishedCount: numberFrom(metrics, "published_count"),
+  };
+}
+
+function completionMetricsFromPipelineRun(row: PipelineRunRow): DashboardContentCompletionMetrics {
+  const metrics = asObject(row.metrics) ?? {};
+  const startedAt = toIsoString(row.started_at)!;
+  return {
+    status: row.status, startedAt,
+    durationMs: numberFrom(metrics, "duration_ms") ?? durationBetween(startedAt, toIsoString(row.finished_at)),
+    candidateCount: numberFrom(metrics, "candidate_count"), selectedCount: numberFrom(metrics, "selected_count"),
+    successCount: numberFrom(metrics, "success_count"), failedCount: numberFrom(metrics, "failed_count"),
+    skippedCount: numberFrom(metrics, "skipped_count"), remainingCount: numberFrom(metrics, "remaining_count"),
+    limit: numberFrom(metrics, "limit"), perSourceLimit: numberFrom(metrics, "per_source_limit"),
+  };
+}
+
+function duplicateMetricsFromPipelineRun(row: PipelineRunRow): DashboardDuplicateFilterMetrics {
+  const metrics = asObject(row.metrics) ?? {};
+  return {
+    inputCount: numberFrom(metrics, "input_count") ?? 0, duplicateCount: numberFrom(metrics, "duplicate_count") ?? 0,
+    outputCount: numberFrom(metrics, "output_count") ?? 0, duplicateRate: numberFrom(metrics, "duplicate_rate") ?? 0,
+    sameUrlCount: numberFrom(metrics, "same_url_count") ?? 0, sameTitleCount: numberFrom(metrics, "same_title_count") ?? 0,
+    sameUrlAndTitleCount: numberFrom(metrics, "same_url_and_title_count") ?? 0,
+  };
+}
+
 /** Daily run 记录 duplicate-filter runtime path；Dashboard 直接读取该 artifact，不查询业务表估算。 */
 export async function loadDuplicateFilterRuntimeByDate(
   rootDir: string,
@@ -725,19 +830,20 @@ export async function loadRuntimeMetricsByDate(
               throw new Error("run.json must contain a JSON object.");
             }
 
-            const startedAt = stringValue(artifact.started_at) ?? parseRunName(runName);
+            const normalizedArtifact = await normalizeRuntimeArtifact(stage, runDir, artifact);
+            const startedAt = stringValue(normalizedArtifact.started_at) ?? parseRunName(runName);
             if (!startedAt) {
               throw new Error("run.json has no valid started_at timestamp.");
             }
 
-            const date = dailyDateForRuntime(artifact, startedAt);
+            const date = dailyDateForRuntime(normalizedArtifact, startedAt);
             if (!requestedDates.has(date)) {
               return null;
             }
 
             return {
               date,
-              metrics: await parseStageMetrics(stage, runDir, artifact, startedAt),
+              metrics: await parseStageMetrics(stage, runDir, normalizedArtifact, startedAt),
             };
           } catch (error) {
             if (!isMissingFile(error)) {
@@ -773,6 +879,59 @@ export async function loadRuntimeMetricsByDate(
   }
 
   return byDate;
+}
+
+/** Normalize the two real historical runtime contracts once, before generic metric parsing. */
+async function normalizeRuntimeArtifact(
+  stage: DashboardStage,
+  runDir: string,
+  artifact: JsonObject,
+): Promise<JsonObject> {
+  if (stage === "stage1") {
+    try {
+      const summary = asObject(JSON.parse(await readFile(join(runDir, "summary.json"), "utf8")));
+      if (!summary) return artifact;
+      const tokenUsage = asObject(summary.tokenUsage);
+      return {
+        ...artifact,
+        model: artifact.model ?? summary.model,
+        total_duration_ms: artifact.total_duration_ms ?? artifact.duration_ms ?? summary.durationMs,
+        candidate_count: artifact.candidate_count ?? summary.loadedCount,
+        batch_count: artifact.batch_count ?? summary.batchCount,
+        fallback_batch_count: artifact.fallback_batch_count ?? summary.fallbackBatchCount,
+        split_count: artifact.split_count ?? summary.splitCount,
+        singleton_batch_count: artifact.singleton_batch_count ?? summary.singletonBatchCount,
+        llm_call_count: artifact.llm_call_count ?? summary.llmCallCount ?? summary.llmRequestCount,
+        retry_count: artifact.retry_count ?? summary.retryCount,
+        llm_duration_ms: artifact.llm_duration_ms ?? summary.llmDurationMs,
+        input_tokens: artifact.input_tokens ?? tokenUsage?.inputTokens,
+        output_tokens: artifact.output_tokens ?? tokenUsage?.outputTokens,
+        total_tokens: artifact.total_tokens ?? tokenUsage?.totalTokens,
+      };
+    } catch (error) {
+      if (!isMissingFile(error)) console.error(`Failed to read Stage1 summary artifact ${runDir}.`, error);
+      return artifact;
+    }
+  }
+
+  if (stage === "stage4") {
+    return {
+      ...artifact,
+      daily_date: artifact.daily_date ?? artifact.dailyDate,
+      started_at: artifact.started_at ?? artifact.startedAt,
+      finished_at: artifact.finished_at ?? artifact.finishedAt,
+      stage4_run_id: artifact.stage4_run_id ?? artifact.stage4RunId,
+      selected_event_count: artifact.selected_event_count ?? artifact.selectedEventCount,
+      enrichment_success_count: artifact.enrichment_success_count ?? artifact.enrichmentSuccessCount,
+      enrichment_failure_count: artifact.enrichment_failure_count ?? artifact.enrichmentFailureCount,
+      retry_count: artifact.retry_count ?? artifact.retryCount,
+      llm_duration_ms: artifact.llm_duration_ms ?? artifact.llmDurationMs,
+      web_search_event_count: artifact.web_search_event_count ?? artifact.webSearchEventCount,
+      total_web_search_calls: artifact.total_web_search_calls ?? artifact.totalWebSearchCalls,
+      events_created: artifact.events_created ?? artifact.eventsCreated,
+    };
+  }
+  return artifact;
 }
 
 async function loadDailyStage1Metrics(
@@ -836,7 +995,7 @@ async function loadDailyStage1Metrics(
 }
 
 function dailyDateForRuntime(artifact: JsonObject, startedAt: string): string {
-  const recordedDailyDate = stringValue(artifact.daily_date);
+  const recordedDailyDate = stringValue(artifact.daily_date) ?? stringValue(artifact.dailyDate);
   if (recordedDailyDate && parseBriefDate(recordedDailyDate)) {
     return recordedDailyDate;
   }
@@ -926,7 +1085,13 @@ async function parseStageMetrics(
       numberFrom(artifact, "total_duration_ms", "duration_ms") ??
       durationBetween(startedAt, finishedAt),
     llmDurationMs: numberFrom(artifact, "llm_duration_ms"),
-    llmCalls: numberFrom(artifact, "llm_calls", "llm_call_count"),
+    // Older Stage 4 artifacts used llm_calls / llmCalls for completed enrichments,
+    // not provider requests. The current llm_call_count includes the context
+    // decision and every enrichment attempt, including retries.
+    llmCalls:
+      stage === "stage4"
+        ? numberFrom(artifact, "llm_call_count")
+        : numberFrom(artifact, "llm_calls", "llm_call_count"),
     retryCount: numberFrom(artifact, "retry_count"),
     inputTokens: numberFrom(artifact, "input_tokens") ?? diagnosticTokens?.inputTokens ?? null,
     outputTokens:
@@ -1025,6 +1190,12 @@ function count(value: number | string | undefined): number {
 function sumKnown(values: Array<number | null>): number | null {
   const known = values.filter((value): value is number => value !== null);
   return known.length > 0 ? known.reduce((sum, value) => sum + value, 0) : null;
+}
+
+/** A Daily LLM total is meaningful only when every Stage reports actual provider requests. */
+function sumRequired(values: Array<number | null>): number | null {
+  const known = values.filter((value): value is number => value !== null);
+  return known.length === values.length ? known.reduce((sum, value) => sum + value, 0) : null;
 }
 
 function numberFrom(value: JsonObject, ...keys: string[]): number | null {

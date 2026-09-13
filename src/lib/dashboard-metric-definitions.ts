@@ -7,10 +7,10 @@ export const dashboardMetricDefinitions: DashboardMetricSection[] = [
     { metric: "Completion Backlog", source: "PostgreSQL · raw_articles", rule: "同一 intake scope 内 pending、有 URL、正文低于 Completion 阈值的当前数量。", notes: "不同于 Completion run 的 Remaining。" },
     { metric: "Processed Total / Event / Digest / Long-form / Inspiration", source: "PostgreSQL · processed_contents", rule: "按 processed_contents.daily_date = target Daily，按 routing 统计当前 DB 快照。", notes: "late-arrival 仍归入实际参与的 workflow Daily。" },
     { metric: "Published Events / Draft Events", source: "PostgreSQL · stage4_runs + events", rule: "按 stage4_runs.daily_date 归属，分别统计 publication_status=published 和 draft。", notes: "archived 不在 Daily Volume 主表。" },
-    { metric: "LLM Calls", source: "Mixed · Stage1–4 runtime", rule: "同 Daily 各 Stage 最新 artifact 的实际 provider request 总和。", notes: "含 retry 与 Stage4 context-decision；不含 Web Search tool call。" },
+    { metric: "LLM Calls", source: "PostgreSQL · pipeline_runs", rule: "同 Daily 各 Stage Latest Attempt 的实际 provider request 总和；无 DB run 才回退 runtime。", notes: "含 retry 与 Stage4 context-decision；不含 Web Search tool call。" },
   ] },
   { title: "2. Content Completion", metrics: [
-    { metric: "Candidates", source: "Content Completion runtime", rule: "run 开始时，在 artifact 的 daily_date / scope_start_at / scope_end_at 中全部 eligible 候选。", notes: "正常 Daily 通常是约 72 小时 catch-up，不等于 24h Raw。" },
+    { metric: "Candidates", source: "PostgreSQL · pipeline_runs", rule: "目标 Daily 最新 Completion attempt 的 candidate_count；无 DB run 才回退 artifact。", notes: "正常 Daily 通常是约 72 小时 catch-up，不等于 24h Raw。" },
     { metric: "Selected / Succeeded / Failed", source: "Content Completion runtime", rule: "limit 后本次实际处理，以及处理成功/失败数。", notes: "Failed 只是这次尝试失败。" },
     { metric: "Remaining", source: "Content Completion runtime", rule: "run 结束后，按同一 eligibility 与 scope 重查的候选数。", notes: "包括未被 limit 选中与仍未补全成功的文章；Remaining != Failed。" },
     { metric: "Limit / Duration", source: "Content Completion runtime", rule: "artifact 的 global limit 与 wall-clock duration。", notes: "per-source limit 已记录但卡片未展示。" },
@@ -21,7 +21,7 @@ export const dashboardMetricDefinitions: DashboardMetricSection[] = [
     { metric: "URL only / Title only / URL + Title", source: "Duplicate filter runtime", rule: "按每个 loser 与其他 candidate/reference 的 exact match 分类。", notes: "统计 loser 数，而非 duplicate group 数。" },
   ] },
   { title: "4. Stage 1", metrics: [
-    { metric: "Status / Model / Prompt / Duration", source: "Stage1 runtime", rule: "按 artifact.daily_date 选择 started_at 最新 Stage1 attempt。", notes: "runtime 是执行观测，最新 failed attempt 也会展示。" },
+    { metric: "Status / Model / Prompt / Duration", source: "PostgreSQL · pipeline_runs", rule: "按 daily_date + step 选择 started_at 最新 Stage1 attempt；无 DB run 才回退 artifact。", notes: "最新 failed attempt 也会展示。" },
     { metric: "LLM Calls / Retries / Tokens", source: "Stage1 runtime", rule: "llm_call_count 是实际模型 requests；retry_count 是额外请求。", notes: "不重复展示 Daily Volume 的输入结果。" },
     { metric: "Batches / Fallback batches / Splits / Singleton batches", source: "Stage1 runtime", rule: "Stage1JobSummary 的 micro-batch 实际执行统计。", notes: "用于解释 batch fallback 行为。" },
   ] },

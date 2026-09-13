@@ -2,13 +2,16 @@ import { config } from "dotenv";
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Pool } from "pg";
-import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
+import { assertStageLlmConfiguration, resolveStageLlmModel } from "../src/processing/llm-client.js";
 import { processStage1Batch } from "../src/processing/stage1-job.js";
 import { buildStage1BatchInput } from "../src/processing/stage1-contract.js";
 import { STAGE1_PROMPT_VERSION } from "../src/prompts/stage1-content-understanding.js";
+import { pipelineTriggerSource, safelyFinishPipelineRun, safelyStartPipelineRun } from "../src/processing/pipeline-run-log.js";
+import { resolveStageLlmProvider } from "../src/processing/llm-client.js";
 import {
   readCatchupPublishedAtScopeFromEnv,
   readPublishedAtScopeFromEnv,
+  resolveDailyScope,
 } from "../src/lib/daily-scope.js";
 
 const inheritedDailyScope = readPublishedAtScopeFromEnv(process.env);
@@ -38,6 +41,8 @@ async function main() {
 
   try {
     const startedAt = new Date();
+    const dailyDate = resolveDailyScope(process.env.DAILY_DATE, startedAt).dailyDate;
+    const pipelineRunId = await safelyStartPipelineRun(pool, { dailyDate, step: "stage1", triggerSource: pipelineTriggerSource(process.env.PIPELINE_TRIGGER_SOURCE), startedAt });
     const runDir = join(process.cwd(), "runtime/stage1", toRunTimestamp(startedAt));
     const attemptsPath = join(runDir, "attempts.jsonl");
     const publishedAtScope =
@@ -111,6 +116,14 @@ async function main() {
         }, null, 2)}\n`,
       );
       await writeRunPointer(runDir);
+      await safelyFinishPipelineRun(pool, pipelineRunId, {
+        status: "success", provider: resolveStageLlmProvider("stage1"), model: summary.model,
+        metrics: { llm_calls: summary.llmCallCount, retry_count: summary.retryCount, duration_ms: artifact.durationMs,
+          llm_duration_ms: summary.llmDurationMs, input_tokens: summary.tokenUsage?.inputTokens ?? null,
+          output_tokens: summary.tokenUsage?.outputTokens ?? null, total_tokens: summary.tokenUsage?.totalTokens ?? null,
+          batch_count: summary.batchCount, fallback_batch_count: summary.fallbackBatchCount,
+          split_count: summary.splitCount, singleton_batch_count: summary.singletonBatchCount },
+      });
       console.log(JSON.stringify({ ...summary, runtimeDir: runDir }, null, 2));
     } catch (error) {
       await writeFile(
@@ -123,9 +136,27 @@ async function main() {
           finished_at: new Date().toISOString(),
           scope_start_at: publishedAtScope?.startAt ?? null,
           scope_end_at: publishedAtScope?.endAt ?? null,
+          model: resolveStageLlmModel("stage1"),
+          prompt_version: STAGE1_PROMPT_VERSION,
+          duration_ms: Date.now() - startedAt.getTime(),
+          candidate_count: null,
+          selected_count: null,
+          ignored_count: null,
+          failed_count: null,
+          batch_count: null,
+          fallback_batch_count: null,
+          split_count: null,
+          singleton_batch_count: null,
+          llm_call_count: null,
+          retry_count: null,
+          llm_duration_ms: null,
+          input_tokens: null,
+          output_tokens: null,
+          total_tokens: null,
           error: error instanceof Error ? error.message : String(error),
         }, null, 2)}\n`,
       );
+      await safelyFinishPipelineRun(pool, pipelineRunId, { status: "failed", provider: resolveStageLlmProvider("stage1"), errorSummary: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   } finally {

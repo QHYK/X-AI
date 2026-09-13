@@ -105,6 +105,9 @@ update raw_articles.content_text and content_completion metadata
 每次 `npm run complete:content` 写入独立的
 `runtime/content-completion/<timestamp>/run.json`。其中：
 
+同一次 execution 也写入 `pipeline_runs` 的轻量 metrics 摘要，供跨机器 Dashboard 查询；raw Markdown
+和完整运行诊断仍只保存于 runtime artifact。
+
 - `candidate_count`：执行开始时符合相同 eligibility 条件的总数，不受总 LIMIT 和 per-source limit 影响；
 - `selected_count`：应用 per-source limit 和总 LIMIT 后实际进入本次处理的数量；
 - `success_count` / `failed_count` / `skipped_count`：本次所选内容的真实处理结果；

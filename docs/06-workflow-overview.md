@@ -118,6 +118,10 @@ Stage 2 Event 与 Stage 3 Digest / Long-form 都按该 Daily attribution 全量�
 内容；Stage 3 Event 从 DB Event Groups 读取，Stage 4 从 DB Review snapshot 读取。编排器仍传递 runtime
 路径供 observability，但 runtime 不再是下游业务输入的必要条件。
 
+每次 Daily、Content Completion、Exact Duplicate Filter 与 Stage 1–4 execution 同时写入
+PostgreSQL `pipeline_runs` 的轻量摘要（状态、模型、耗时及指标）。它是跨机器的 Dashboard observability
+source；`runtime/` 仍保留完整调试 artifact，二者不互相替代。
+
 `GET /api/brief?date=YYYY-MM-DD` 的 Event 通过 `stage4_runs.daily_date` 归属，只读取
 `publication_status='published'` 的 Events。`events.event_date` 是成员文章时间推导的事件属性，
 不决定简报归属；其它内容仍通过 `processed_contents.daily_date` 归属。

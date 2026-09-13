@@ -1,12 +1,18 @@
 import { spawn } from "node:child_process";
+import { config } from "dotenv";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { Pool } from "pg";
 import { resolveDailyScope } from "../src/lib/daily-scope.js";
 import { STAGE1_PROMPT_VERSION } from "../src/prompts/stage1-content-understanding.js";
 import {
   buildDailyStepEnv,
   type DailyStageName,
 } from "../src/lib/daily-workflow.js";
+import { safelyFinishPipelineRun, safelyStartPipelineRun } from "../src/processing/pipeline-run-log.js";
+
+config({ path: ".env" });
+config({ path: ".env.local", override: true });
 
 const STEPS = [
   "collect:rss",
@@ -57,6 +63,12 @@ async function main() {
   const isHistoricalRun = scope.dailyDate !== resolveDailyScope(undefined, startedAt).dailyDate;
   const runDir = join(process.cwd(), "runtime/daily", toRunTimestamp(startedAt));
   const runPath = join(runDir, "run.json");
+  const logPool = process.env.DATABASE_URL
+    ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined })
+    : null;
+  const pipelineRunId = logPool
+    ? await safelyStartPipelineRun(logPool, { dailyDate: scope.dailyDate, step: "daily", triggerSource: "daily_orchestrator", startedAt })
+    : null;
   const run: DailyRun = {
     daily_date: scope.dailyDate,
     timezone: scope.timezone,
@@ -113,6 +125,7 @@ async function main() {
     let exitCode = await runNpmScript(name, {
       ...process.env,
       ...stepEnv,
+      PIPELINE_TRIGGER_SOURCE: "daily_orchestrator",
     });
     if (pointerPath) {
       try {
@@ -135,6 +148,8 @@ async function main() {
     if (exitCode !== 0) {
       finishRun(run, startedAt, stepFinishedAt, "failed", name);
       await writeRun(runPath, run);
+      if (logPool) await safelyFinishPipelineRun(logPool, pipelineRunId, { status: "failed", metrics: { duration_ms: run.duration_ms, failed_step: name }, errorSummary: `${name} exited with ${exitCode}` });
+      await logPool?.end();
       process.exitCode = exitCode;
       return;
     }
@@ -145,6 +160,8 @@ async function main() {
   const finishedAt = new Date();
   finishRun(run, startedAt, finishedAt, "success", null);
   await writeRun(runPath, run);
+  if (logPool) await safelyFinishPipelineRun(logPool, pipelineRunId, { status: "success", metrics: { duration_ms: run.duration_ms } });
+  await logPool?.end();
   console.log(`\n[daily] Workflow success (${run.duration_ms} ms)`);
 }
 

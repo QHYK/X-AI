@@ -78,6 +78,7 @@
 }
 
 .summaryGrid,
+.detailSummaryGrid,
 .detailGrid,
 .stageGrid {
   display: grid;
@@ -89,6 +90,11 @@
 
 .summaryGrid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.detailSummaryGrid {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
   margin-bottom: 16px;
 }
 
@@ -320,7 +326,6 @@
 
 .funnelCard {
   padding: 20px 24px;
-  margin-bottom: 16px;
 }
 
 .scopeNotice {
@@ -558,6 +563,7 @@
   }
 
   .summaryGrid,
+  .detailSummaryGrid,
   .detailGrid,
   .funnelRatios,
   .stageGrid {

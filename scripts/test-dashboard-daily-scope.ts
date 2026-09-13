@@ -238,9 +238,18 @@ try {
   });
   await writeRun(runtimeRoot, "runtime/stage1/complete-contract", {
     stage: "stage1", daily_date: "2026-08-20", started_at: "2026-08-24T16:33:00.000Z",
-    finished_at: "2026-08-24T16:33:01.000Z", status: "success", model: "stage1-model",
-    prompt_version: "stage1-fixture-v6", llm_call_count: 5, retry_count: 1, batch_count: 3,
-    fallback_batch_count: 1, split_count: 2, singleton_batch_count: 1,
+    finished_at: "2026-08-24T16:33:01.000Z", status: "success", prompt_version: "stage1-fixture-v6",
+  });
+  await writeFile(join(runtimeRoot, "runtime/stage1/complete-contract/summary.json"), `${JSON.stringify({
+    model: "stage1-model", durationMs: 1000, llmCallCount: 5, retryCount: 1, llmDurationMs: 800,
+    batchCount: 3, fallbackBatchCount: 1, splitCount: 2, singletonBatchCount: 1,
+    tokenUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+  })}\n`);
+  await writeRun(runtimeRoot, "runtime/stage4/camel-partial", {
+    stage: "stage4", status: "partial", dailyDate: "2026-08-20",
+    startedAt: "2026-08-25T16:32:00.000Z", finishedAt: "2026-08-25T16:32:01.000Z",
+    selectedEventCount: 15, enrichmentSuccessCount: 6, enrichmentFailureCount: 1,
+    llmCalls: 14, retryCount: 1, llmDurationMs: 900, webSearchEventCount: 1, totalWebSearchCalls: 1,
   });
   await writeRun(runtimeRoot, "runtime/daily/fixture", {
     daily_date: "2026-08-20",
@@ -278,6 +287,22 @@ try {
     sameTitleCount: 1,
     sameUrlAndTitleCount: 1,
   });
+  await writeRun(runtimeRoot, "runtime/stage1/daily-llm-total", {
+    stage: "stage1", daily_date: "2026-08-21", started_at: "2026-08-21T09:00:00.000Z",
+    finished_at: "2026-08-21T09:00:01.000Z", status: "success", llm_call_count: 5,
+  });
+  await writeRun(runtimeRoot, "runtime/stage2/daily-llm-total", {
+    stage: "stage2", daily_date: "2026-08-21", started_at: "2026-08-21T09:01:00.000Z",
+    finished_at: "2026-08-21T09:01:01.000Z", status: "success", llm_calls: 3,
+  });
+  await writeRun(runtimeRoot, "runtime/stage3/daily-llm-total", {
+    stage: "stage3", daily_date: "2026-08-21", started_at: "2026-08-21T09:02:00.000Z",
+    finished_at: "2026-08-21T09:02:01.000Z", status: "success", llm_call_count: 4,
+  });
+  await writeRun(runtimeRoot, "runtime/stage4/daily-llm-total", {
+    stage: "stage4", daily_date: "2026-08-21", started_at: "2026-08-21T09:03:00.000Z",
+    finished_at: "2026-08-21T09:03:01.000Z", status: "success", llm_call_count: 17,
+  });
 
   const dates = new Set(["2026-08-20", "2026-08-19"]);
   const stageRuntime = await loadRuntimeMetricsByDate(runtimeRoot, dates);
@@ -296,7 +321,8 @@ try {
     passed:
       stages?.get("stage1")?.model === "stage1-model" && stages.get("stage1")?.llmCalls === 5 &&
       stages.get("stage1")?.batchCount === 3 && stages.get("stage1")?.fallbackBatchCount === 1 &&
-      stages.get("stage1")?.splitCount === 2 && stages.get("stage1")?.singletonBatchCount === 1,
+      stages.get("stage1")?.splitCount === 2 && stages.get("stage1")?.singletonBatchCount === 1 &&
+      stages.get("stage1")?.inputTokens === 100 && stages.get("stage1")?.totalTokens === 150,
   });
   checks.push({
     name: "Dashboard runtime returns Exact Duplicate Filter statistics from the Daily run artifact",
@@ -307,7 +333,18 @@ try {
       duplicateFilterRuntime.get("2026-08-20")?.sameTitleCount === 1 &&
       duplicateFilterRuntime.get("2026-08-20")?.sameUrlAndTitleCount === 1,
   });
+  checks.push({
+    name: "Dashboard normalizes the deployed camelCase Stage4 partial artifact to its target daily_date without treating its legacy llmCalls as request counts",
+    passed:
+      stages?.get("stage4")?.status === "partial" && stages.get("stage4")?.selectedEventCount === 15 &&
+      stages.get("stage4")?.enrichmentSuccessCount === 6 && stages.get("stage4")?.enrichmentFailureCount === 1 &&
+      stages.get("stage4")?.llmCalls === null,
+  });
   const dashboardWithDuplicateFilter = await getDashboardData(createDashboardPool([]), {
+    now: new Date("2026-08-20T16:30:00.000Z"),
+    rootDir: runtimeRoot,
+  });
+  const dashboardWithoutPipelineRunsTable = await getDashboardData(createDashboardPool([], { missingPipelineRunsTable: true }), {
     now: new Date("2026-08-20T16:30:00.000Z"),
     rootDir: runtimeRoot,
   });
@@ -319,25 +356,39 @@ try {
       dashboardWithDuplicateFilter.details.duplicateFilter?.outputCount === 7,
   });
   checks.push({
+    name: "Dashboard keeps runtime-only Stage metrics when the pipeline_runs migration is absent",
+    passed:
+      dashboardWithoutPipelineRunsTable.details.stages.stage1?.model === "stage1-model" &&
+      dashboardWithoutPipelineRunsTable.details.stages.stage4?.status === "partial",
+  });
+  const dashboardWithCompleteLlmCounts = await getDashboardData(createDashboardPool([]), {
+    now: new Date("2026-08-21T16:30:00.000Z"),
+    rootDir: runtimeRoot,
+  });
+  checks.push({
+    name: "Daily Volume sums actual runtime LLM requests from all four Stages only when every count is available",
+    passed: dashboardWithCompleteLlmCounts.days.find((day) => day.date === "2026-08-21")?.runtime.llmCalls === 29,
+    detail: dashboardWithCompleteLlmCounts.days.map((day) => ({ date: day.date, llmCalls: day.runtime.llmCalls })),
+  });
+  checks.push({
     name: "legacy runtime without a prompt version remains N/A",
     passed: stageRuntime.get("2026-08-19")?.get("stage2")?.promptVersion === null,
   });
   checks.push({
-    name: "Dashboard reads real prompt versions without merging Stage 3 prompts",
+    name: "Dashboard reads real Stage 1–3 prompt versions without merging Stage 3 prompts",
     passed:
       stages?.get("stage1")?.promptVersion === "stage1-fixture-v6" &&
       stages.get("stage2")?.promptVersion === "stage2-fixture-v1" &&
       stages.get("stage3")?.promptVersion === null &&
       stages.get("stage3")?.promptVersions?.event === "event-fixture-v1" &&
       stages.get("stage3")?.promptVersions?.digest === "digest-fixture-v2" &&
-      stages.get("stage3")?.promptVersions?.longForm === "long-form-fixture-v3" &&
-      stages.get("stage4")?.promptVersion === "stage4-fixture-v4",
+      stages.get("stage3")?.promptVersions?.longForm === "long-form-fixture-v3",
   });
   checks.push({
     name: "Dashboard keeps Stage 4 Web Search Events and Calls as separate metrics",
     passed:
-      stages?.get("stage4")?.webSearchEventCount === 2 &&
-      stages.get("stage4")?.totalWebSearchCalls === 5,
+      stages?.get("stage4")?.webSearchEventCount === 1 &&
+      stages.get("stage4")?.totalWebSearchCalls === 1,
   });
 } finally {
   await rm(runtimeRoot, { recursive: true, force: true });
@@ -349,10 +400,16 @@ if (failures.length > 0) {
   process.exitCode = 1;
 }
 
-function createDashboardPool(queries: CapturedQuery[]): Pool {
+function createDashboardPool(
+  queries: CapturedQuery[],
+  options: { missingPipelineRunsTable?: boolean } = {},
+): Pool {
   return {
     query: (async (text: string, values?: unknown[]) => {
       queries.push({ text, values });
+      if (options.missingPipelineRunsTable && text.includes("from pipeline_runs")) {
+        throw Object.assign(new Error('relation "pipeline_runs" does not exist'), { code: "42P01" });
+      }
       if (text.includes("as raw_articles")) {
         return { rows: [{ raw_articles: 0, processed_contents: 0, events: 0 }] };
       }

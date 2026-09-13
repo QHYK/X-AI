@@ -18,6 +18,7 @@ import {
   writeContentCompletionResults,
   type ContentCompletionRuntimeArtifact,
 } from "../src/processing/content-completion-runtime.js";
+import { pipelineTriggerSource, safelyFinishPipelineRun, safelyStartPipelineRun } from "../src/processing/pipeline-run-log.js";
 
 const inheritedRunPointer = process.env.DAILY_STAGE_RUN_POINTER;
 
@@ -73,6 +74,7 @@ async function main() {
   await writeRunPointer(runDir);
 
   let pool: Pool | null = null;
+  let pipelineRunId: string | null = null;
 
   try {
     const databaseUrl = process.env.DATABASE_URL;
@@ -89,6 +91,7 @@ async function main() {
             }
           : undefined,
     });
+    pipelineRunId = await safelyStartPipelineRun(pool, { dailyDate: dailyScope.dailyDate, step: "content_completion", triggerSource: pipelineTriggerSource(process.env.PIPELINE_TRIGGER_SOURCE), startedAt });
     const summary = await completeRawArticleContent(pool, options, (metrics) => {
       applyMetrics(artifact, metrics);
     });
@@ -100,6 +103,7 @@ async function main() {
     await writeContentCompletionResults(runDir, runtimeResults);
     finishArtifact(artifact, startedAt, "success", null);
     await writeContentCompletionRuntime(runDir, artifact);
+    await safelyFinishPipelineRun(pool, pipelineRunId, { status: "success", metrics: completionMetrics(artifact) });
 
     // Log the summary, but exclude the rawMarkdown content
     const { results: _results, ...summaryForLog } = summary;
@@ -121,10 +125,20 @@ async function main() {
       error instanceof Error ? error.message : String(error),
     );
     await writeContentCompletionRuntime(runDir, artifact);
+    if (pool) {
+      // The row may not exist when connection creation itself failed; the helper handles that safely.
+      await safelyFinishPipelineRun(pool, pipelineRunId, { status: "failed", metrics: completionMetrics(artifact), errorSummary: artifact.error });
+    }
     throw error;
   } finally {
     await pool?.end();
   }
+}
+
+function completionMetrics(artifact: ContentCompletionRuntimeArtifact) {
+  return { candidate_count: artifact.candidate_count, selected_count: artifact.selected_count,
+    success_count: artifact.success_count, failed_count: artifact.failed_count, skipped_count: artifact.skipped_count,
+    remaining_count: artifact.remaining_count, retry_count: artifact.retry_count, duration_ms: artifact.duration_ms };
 }
 
 async function writeRawMarkdown(

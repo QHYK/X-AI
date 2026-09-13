@@ -164,9 +164,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
         {data.details.scopeCompleted && data.details.contentFunnel ? (
           <>
-            <ContentFunnel funnel={data.details.contentFunnel} />
-
-            <div className={styles.detailGrid}>
+            <div className={styles.detailSummaryGrid}>
+              <ContentFunnel funnel={data.details.contentFunnel} />
               <CategoryPanel
                 title="Processed by Category"
                 counts={data.details.processedByCategory}
@@ -303,7 +302,7 @@ function DuplicateFilterCard({ metrics }: { metrics: DashboardDuplicateFilterMet
       <Metric label="Dedup rate" value={`${(metrics.duplicateRate * 100).toFixed(1)}%`} />
       <Metric label="Remaining unique articles" value={formatMetric(metrics.outputCount)} info="本次 Exact Duplicate Filter 的输出数量，即 inputCount - duplicateCount。不是当前 DB 中全部 unique articles，也不是 Completion Remaining。" />
     </dl>
-    <summary>Duplicate categories</summary>
+    <summary style={{marginTop: '10px'}}>Duplicate categories</summary>
     <dl className={styles.metricList}>
       <Metric label="URL only" value={formatMetric(metrics.sameUrlCount)} />
       <Metric label="Title only" value={formatMetric(metrics.sameTitleCount)} />
@@ -366,7 +365,7 @@ function StageCard({
   return (
     <article className={styles.stageCard}>
       <div className={styles.stageHeader}>
-        <h3>{label}</h3>
+        <h3>{label} <MetricInfo text="该状态来自目标 Daily 对应的最新 runtime artifact，表示此步骤最近一次执行。" /></h3>
         <StatusBadge status={metrics.status} partialReady={metrics.readyCount ?? metrics.enrichmentSuccessCount} />
       </div>
       <dl className={styles.metricList}>
