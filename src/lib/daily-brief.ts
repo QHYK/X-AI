@@ -64,6 +64,8 @@ export type BriefInspirationItem = Omit<
 
 export type DailyBriefResponse = {
   date: string;
+  /** Published is authoritative; partial is a draft-only fallback, never a mixed set. */
+  events_status: "published" | "partial" | "empty";
   events: BriefEvent[];
   digests: Record<string, BriefContentItem[]>;
   long_form: BriefContentItem[];
@@ -130,7 +132,7 @@ export async function getDailyBrief(
   pool: Pool,
   range: ShanghaiDayRange,
 ): Promise<DailyBriefResponse> {
-  const [events, digests, longForm, inspiration] = await Promise.all([
+  const [eventResult, digests, longForm, inspiration] = await Promise.all([
     loadEvents(pool, range),
     loadDigestItems(pool, range),
     loadLongFormItems(pool, range),
@@ -140,7 +142,8 @@ export async function getDailyBrief(
 
   return {
     date: range.date,
-    events,
+    events: eventResult.events,
+    events_status: eventResult.status,
     digests,
     long_form: longForm,
     inspiration,
@@ -148,7 +151,7 @@ export async function getDailyBrief(
       timezone: "Asia/Shanghai",
       date_basis: "workflow_daily_date",
       generated_at: new Date().toISOString(),
-      event_count: events.length,
+      event_count: eventResult.events.length,
       digest_count: Object.values(digests).reduce((sum, items) => sum + items.length, 0),
       digest_count_by_category: digestCountByCategory,
       long_form_count: longForm.length,
@@ -179,9 +182,9 @@ export function getDailyBriefForDailyDate(
 async function loadEvents(
   pool: Pool,
   range: ShanghaiDayRange,
-): Promise<BriefEvent[]> {
+): Promise<{ events: BriefEvent[]; status: DailyBriefResponse["events_status"] }> {
   // Daily ownership comes from the published Stage 4 run, not the event's own date.
-  const eventResult = await pool.query<EventRow>(
+  const publishedResult = await pool.query<EventRow>(
     `
       select
         events.id,
@@ -208,10 +211,40 @@ async function loadEvents(
     [range.date],
   );
 
-  const eventIds = eventResult.rows.map((row) => row.id);
+  if (publishedResult.rows.length > 0) {
+    return { events: await attachEventSources(pool, publishedResult.rows), status: "published" };
+  }
+
+  const fallbackRun = await pool.query<{ id: string }>(
+    `select id from stage4_runs
+      where daily_date = $1::date and status in ('running', 'partial')
+      order by created_at desc, id desc limit 1`,
+    [range.date],
+  );
+  const stage4RunId = fallbackRun.rows[0]?.id;
+  if (!stage4RunId) return { events: [], status: "empty" };
+  const draftResult = await pool.query<EventRow>(
+    `select events.id, coalesce(events.display_rank, events.ai_rank) as rank,
+        to_char(events.event_date, 'YYYY-MM-DD') as event_date, events.created_at,
+        events.title, events.title_zh, events.summary, events.summary_zh, events.tags,
+        events.tags_zh, events.entities, events.entities_zh, events.source_perspectives,
+        events.external_context
+      from events
+      where events.stage4_run_id = $1::uuid
+        and events.publication_status = 'draft'
+        and coalesce(events.display_rank, events.ai_rank) is not null
+      order by coalesce(events.display_rank, events.ai_rank) asc, events.created_at asc, events.id asc`,
+    [stage4RunId],
+  );
+  if (draftResult.rows.length === 0) return { events: [], status: "empty" };
+  return { events: await attachEventSources(pool, draftResult.rows), status: "partial" };
+}
+
+async function attachEventSources(pool: Pool, rows: EventRow[]): Promise<BriefEvent[]> {
+  const eventIds = rows.map((row) => row.id);
   const sourcesByEventId = await loadEventSources(pool, eventIds);
 
-  return eventResult.rows.map((row) => ({
+  return rows.map((row) => ({
     id: row.id,
     rank: row.rank,
     event_date: row.event_date,

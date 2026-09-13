@@ -129,6 +129,21 @@
   overflow: hidden;
 }
 
+.metricAuditList {
+  max-width: 1600px;
+  margin: 0;
+  padding: 18px 42px 24px;
+  color: #4d5d55;
+  line-height: 1.6;
+}
+
+.table small {
+  display: inline-block;
+  margin-top: 6px;
+  color: #68756f;
+  font-weight: 500;
+}
+
 .panelHeading {
   padding: 22px 24px 18px;
   border-bottom: 1px solid #e5e9e7;
@@ -441,6 +456,51 @@
   font-size: 0.82rem;
   font-weight: 750;
   font-variant-numeric: tabular-nums;
+}
+
+.metricInfo {
+  position: relative;
+  display: inline-flex;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.metricInfoButton {
+  display: inline-grid;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid #aebbb4;
+  border-radius: 50%;
+  background: #fff;
+  color: #66756d;
+  cursor: help;
+  font: 700 10px/1 serif;
+}
+
+.metricInfoButton:focus-visible { outline: 2px solid #719782; outline-offset: 2px; }
+
+.metricInfoPopover {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 7px);
+  left: 50%;
+  width: min(320px, calc(100vw - 32px));
+  height: auto;
+  max-height: none;
+  padding: 8px 10px;
+  transform: translateX(-50%);
+  border-radius: 7px;
+  background: #24362d;
+  color: #fff;
+  font-size: 0.73rem;
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  box-shadow: 0 5px 14px rgb(19 36 28 / 18%);
 }
 
 .stageGrid {

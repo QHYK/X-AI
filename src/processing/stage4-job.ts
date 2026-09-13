@@ -26,6 +26,7 @@ import {
 } from "./stage4-persistence.js";
 import { DEFAULT_STAGE4_EVENT_LIMIT } from "./stage4-config.js";
 import { classifyStage4LlmError } from "./stage4-llm.js";
+import { STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION } from "../prompts/stage4-event-enrichment.js";
 import { resolveDailyScope } from "../lib/daily-scope.js";
 
 type Stage3RunArtifact = {
@@ -376,7 +377,12 @@ async function processStage4FromDb(pool: Pool, options: Stage4JobOptions): Promi
     const selected = await loadLatestStage4Selection(pool, dailyDate, DEFAULT_STAGE4_EVENT_LIMIT);
     selectedEventCount = selected.length;
     if (selected.length === 0) {
-      await writeRunJson(join(runDir, "run.json"), { startedAt, finishedAt: new Date(), status: "success", dailyDate, selectedEventCount: 0, enrichmentSuccessCount: 0 });
+      await writeRunJson(join(runDir, "run.json"), stage4RuntimeArtifact({
+        startedAt, finishedAt: new Date(), status: "success", dailyDate, stage4RunId: null,
+        model, selectedEventCount: 0, enrichmentSuccessCount: 0, enrichmentFailureCount: 0,
+        llmCalls: 0, retryCount: 0, llmDurationMs: 0, webSearchEventCount: 0,
+        totalWebSearchCalls: 0, eventsCreated: 0, error: null,
+      }));
       return { success: true, runDir, sourceStage3RunDir: null, selectedEventCount: 0, enrichmentSuccessCount: 0, llmCalls: 0, retryCount: 0, llmDurationMs: 0, webSearchEventCount: 0, totalWebSearchCalls: 0, eventsCreated: 0, processedContentEventIdUpdated: 0, associationCoverage: emptyCoverage, persistence: null, error: null };
     }
     const reviewRunId = selected[0]!.reviewRunId;
@@ -393,7 +399,9 @@ async function processStage4FromDb(pool: Pool, options: Stage4JobOptions): Promi
       await writeJson(join(eventDir, "input.json"), prepared.input);
       try {
         const enriched = await enrichStage4Event(prepared, { model });
-        llmCalls++; retryCount += enriched.llm.attempts - 1; llmDurationMs += enriched.llm.elapsedMs;
+        llmCalls += enriched.llm.llmCallCount;
+        retryCount += enriched.llm.attempts - 1;
+        llmDurationMs += enriched.llm.elapsedMs;
         if (enriched.toolUsage.webSearchPerformed) webSearchEventCount++;
         totalWebSearchCalls += enriched.toolUsage.webSearchCallCount;
         const inserted = await persistStage4Draft(pool, stage4Run.id, toEventToPersist(enriched));
@@ -401,6 +409,11 @@ async function processStage4FromDb(pool: Pool, options: Stage4JobOptions): Promi
         await writeJson(join(eventDir, "output.json"), enriched.output);
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : String(caught);
+        if (caught instanceof Stage4EnrichmentError) {
+          llmCalls += caught.llmCallCount;
+          retryCount += Math.max(0, caught.attempts - 1);
+          llmDurationMs += caught.elapsedMs;
+        }
         failures.push(message);
         await writeJson(join(eventDir, "failure.json"), { error: message });
         if (classifyStage4LlmError(message) === "quota_or_auth_unavailable") break;
@@ -408,16 +421,53 @@ async function processStage4FromDb(pool: Pool, options: Stage4JobOptions): Promi
     }
     if (failures.length) {
       await updateStage4RunProgress(pool, stage4Run.id, "partial");
-      await writeRunJson(join(runDir, "run.json"), { startedAt, finishedAt: new Date(), status: "partial", dailyDate, stage4RunId: stage4Run.id, selectedEventCount, enrichmentSuccessCount, error: failures.join("; ") });
+      await writeRunJson(join(runDir, "run.json"), stage4RuntimeArtifact({
+        startedAt, finishedAt: new Date(), status: "partial", dailyDate, stage4RunId: stage4Run.id,
+        model, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: failures.length,
+        llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls,
+        eventsCreated: 0, error: failures.join("; "),
+      }));
       return { success: false, runDir, sourceStage3RunDir: null, selectedEventCount, enrichmentSuccessCount, llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls, eventsCreated: 0, processedContentEventIdUpdated: 0, associationCoverage: { ...emptyCoverage, expected: candidateIds.length }, persistence: null, error: failures.join("; ") };
     }
     const published = await publishStage4Run(pool, stage4Run.id);
-    await writeRunJson(join(runDir, "run.json"), { startedAt, finishedAt: new Date(), status: "success", dailyDate, stage4RunId: stage4Run.id, selectedEventCount, enrichmentSuccessCount });
+    await writeRunJson(join(runDir, "run.json"), stage4RuntimeArtifact({
+      startedAt, finishedAt: new Date(), status: "success", dailyDate, stage4RunId: stage4Run.id,
+      model, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: 0,
+      llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls,
+      eventsCreated: published.publishedCount, error: null,
+    }));
     return { success: true, runDir, sourceStage3RunDir: null, selectedEventCount, enrichmentSuccessCount, llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls, eventsCreated: published.publishedCount, processedContentEventIdUpdated: published.associationCount, associationCoverage: { ...emptyCoverage, expected: candidateIds.length, updated: published.associationCount }, persistence: null, error: null };
   } catch (caught) {
     const error = caught instanceof Error ? caught.message : String(caught);
+    await writeRunJson(join(runDir, "run.json"), stage4RuntimeArtifact({
+      startedAt, finishedAt: new Date(), status: "failed", dailyDate, stage4RunId: null,
+      model, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: 0,
+      llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls,
+      eventsCreated: 0, error,
+    }));
     return { success: false, runDir, sourceStage3RunDir: null, selectedEventCount, enrichmentSuccessCount, llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls, eventsCreated: 0, processedContentEventIdUpdated: 0, associationCoverage: emptyCoverage, persistence: null, error };
   }
+}
+
+function stage4RuntimeArtifact(value: {
+  startedAt: Date; finishedAt: Date; status: "success" | "partial" | "failed"; dailyDate: string;
+  stage4RunId: string | null; model: string; selectedEventCount: number; enrichmentSuccessCount: number;
+  enrichmentFailureCount: number; llmCalls: number; retryCount: number; llmDurationMs: number;
+  webSearchEventCount: number; totalWebSearchCalls: number; eventsCreated: number; error: string | null;
+}): Record<string, unknown> {
+  return {
+    stage: "stage4", status: value.status, started_at: value.startedAt.toISOString(),
+    finished_at: value.finishedAt.toISOString(), daily_date: value.dailyDate,
+    stage4_run_id: value.stage4RunId, model: value.model,
+    prompt_version: STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
+    selected_event_count: value.selectedEventCount,
+    enrichment_success_count: value.enrichmentSuccessCount,
+    enrichment_failure_count: value.enrichmentFailureCount,
+    llm_call_count: value.llmCalls, retry_count: value.retryCount,
+    llm_duration_ms: value.llmDurationMs, web_search_event_count: value.webSearchEventCount,
+    total_web_search_calls: value.totalWebSearchCalls, events_created: value.eventsCreated,
+    error: value.error,
+  };
 }
 
 /** 解析明确 lineage，或在独立执行时查找最近成功的 Stage 3 run。 */

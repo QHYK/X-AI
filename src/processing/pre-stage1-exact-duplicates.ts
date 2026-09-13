@@ -19,7 +19,7 @@ export type PreStage1DuplicateSummary = {
   sameUrlAndTitleCount: number;
 };
 
-/** 在 Content Completion 前标记同一 Daily scope 中的 URL/title exact duplicates。 */
+/** 在 Content Completion 前标记当前候选中、或与此前 72 小时参考文章重合的 exact duplicates。 */
 export async function ignorePreStage1ExactDuplicates(
   pool: Pool,
   scope: PublishedAtScope,
@@ -33,6 +33,14 @@ export async function ignorePreStage1ExactDuplicates(
     [scope.startAt, scope.endAt],
   );
   const rows = result.rows;
+  const historical = await pool.query<DuplicateRow>(
+    `select ra.id, ra.title, ra.url, ra.content_text as "contentText", s.name as "sourceName"
+       from raw_articles ra join sources s on s.id = ra.source_id
+      where ra.published_at >= $1::timestamptz - interval '72 hours'
+        and ra.published_at < $1::timestamptz
+      order by ra.id asc`,
+    [scope.startAt],
+  );
   const groups = new Map<string, DuplicateRow[]>();
   for (const row of rows) {
     for (const key of duplicateKeys(row)) {
@@ -40,6 +48,10 @@ export async function ignorePreStage1ExactDuplicates(
     }
   }
   const losers = new Set<string>();
+  const historicalKeys = new Set(historical.rows.flatMap(duplicateKeys));
+  for (const row of rows) {
+    if (duplicateKeys(row).some((key) => historicalKeys.has(key))) losers.add(row.id);
+  }
   for (const group of groups.values()) {
     if (group.length < 2) continue;
     const winner = [...group].sort(compareDuplicateWinner)[0];
@@ -53,7 +65,7 @@ export async function ignorePreStage1ExactDuplicates(
     if (!row) continue;
     const url = row.url?.trim();
     const title = row.title.trim();
-    const matchingRows = rows.filter((candidate) => candidate.id !== id);
+    const matchingRows = [...rows, ...historical.rows].filter((candidate) => candidate.id !== id);
     const sameUrl = Boolean(url && matchingRows.some((candidate) => candidate.url?.trim() === url));
     const sameTitle = Boolean(title && matchingRows.some((candidate) => candidate.title.trim() === title));
     const sameUrlAndTitle = Boolean(

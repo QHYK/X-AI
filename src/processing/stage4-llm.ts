@@ -49,6 +49,8 @@ export type Stage4LlmSuccess = {
   promptVersion: string;
   responseId: string;
   attempts: number;
+  /** All provider requests for this Event: context decision plus enrichment attempts. */
+  llmCallCount: number;
   elapsedMs: number;
   rawOutputText: string;
 };
@@ -59,6 +61,7 @@ export type Stage4LlmFailure = {
   model: string;
   promptVersion: string;
   attempts: number;
+  llmCallCount: number;
   elapsedMs: number;
   error: string;
   rawOutputText: string | null;
@@ -89,7 +92,8 @@ export async function runStage4EventEnrichmentLlm(
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
-  const useWebSearch = await determineWhetherExternalContextIsNeeded(client, model, input, timeoutMs);
+  const contextDecision = await determineWhetherExternalContextIsNeeded(client, model, input, timeoutMs);
+  const useWebSearch = contextDecision.needExternalContext;
 
   let rawOutputText: string | null = null;
   let lastError = "Unknown Stage 4 LLM failure.";
@@ -157,6 +161,7 @@ export async function runStage4EventEnrichmentLlm(
         promptVersion: STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
         responseId: response.id,
         attempts: attempt,
+        llmCallCount: contextDecision.llmCallCount + attempt,
         elapsedMs: Date.now() - startedAt,
         rawOutputText,
       };
@@ -179,6 +184,7 @@ export async function runStage4EventEnrichmentLlm(
     model,
     promptVersion: STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
     attempts: attemptsUsed,
+    llmCallCount: contextDecision.llmCallCount + attemptsUsed,
     elapsedMs: Date.now() - startedAt,
     error: lastError,
     rawOutputText,
@@ -194,7 +200,7 @@ async function determineWhetherExternalContextIsNeeded(
   model: string,
   input: Stage4EventEnrichmentInput,
   timeoutMs: number,
-): Promise<boolean> {
+): Promise<{ needExternalContext: boolean; llmCallCount: number }> {
   try {
     const response = await client.structured.create({
       model,
@@ -221,13 +227,14 @@ async function determineWhetherExternalContextIsNeeded(
         },
       },
     }, { timeout: timeoutMs });
-    return parseStage4ExternalContextDecision(response.output_text);
+    return { needExternalContext: parseStage4ExternalContextDecision(response.output_text), llmCallCount: 1 };
   } catch (error) {
     console.warn(
       "Stage 4 external-context decision failed; continuing without Web Search.",
       sanitizeLlmError(error instanceof Error ? error.message : String(error)),
     );
-    return false;
+    // The decision request still reached the provider even if it could not be parsed or returned.
+    return { needExternalContext: false, llmCallCount: 1 };
   }
 }
 

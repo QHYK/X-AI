@@ -22,7 +22,9 @@ async function main() {
     const summary = await ignorePreStage1ExactDuplicates(pool, scope);
     await writeFile(join(runDir, "run.json"), `${JSON.stringify({
       status: "success", started_at: startedAt.toISOString(),
-      finished_at: new Date().toISOString(), ...summary,
+      finished_at: new Date().toISOString(), daily_date: process.env.DAILY_DATE ?? null,
+      scope_start_at: scope.startAt, scope_end_at: scope.endAt,
+      historical_reference_hours: 72, ...summary,
     }, null, 2)}\n`);
     const runPointer = inheritedRunPointer ?? process.env.DAILY_STAGE_RUN_POINTER;
     if (runPointer) {

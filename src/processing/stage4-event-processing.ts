@@ -51,6 +51,7 @@ export class Stage4EnrichmentError extends Error {
   constructor(
     message: string,
     readonly attempts: number,
+    readonly llmCallCount: number,
     readonly elapsedMs: number,
     readonly rawOutputText: string | null,
   ) {
@@ -133,6 +134,7 @@ export async function enrichStage4Event(
     throw new Stage4EnrichmentError(
       `Stage 4 enrichment failed for ${prepared.group.eventGroupId}: ${result.error}`,
       result.attempts,
+      result.llmCallCount,
       result.elapsedMs,
       result.rawOutputText,
     );

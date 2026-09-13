@@ -24,6 +24,7 @@ export async function writeStage2RuntimeArtifacts(
     stage1RunDir?: string | null;
     stage1StartedAt?: string | null;
     stage1FinishedAt?: string | null;
+    dailyDate?: string;
   },
 ): Promise<Stage2RuntimeArtifact> {
   const finishedAt = options.finishedAt ?? new Date();
@@ -47,6 +48,7 @@ export async function writeStage2RuntimeArtifacts(
 
   await writeJson(runPath, {
     stage: "stage2",
+    daily_date: options.dailyDate ?? null,
     stage1_run_dir: options.stage1RunDir,
     stage1_started_at: options.stage1StartedAt,
     stage1_finished_at: options.stage1FinishedAt,

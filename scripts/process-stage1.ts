@@ -5,6 +5,7 @@ import { Pool } from "pg";
 import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
 import { processStage1Batch } from "../src/processing/stage1-job.js";
 import { buildStage1BatchInput } from "../src/processing/stage1-contract.js";
+import { STAGE1_PROMPT_VERSION } from "../src/prompts/stage1-content-understanding.js";
 import {
   readCatchupPublishedAtScopeFromEnv,
   readPublishedAtScopeFromEnv,
@@ -90,6 +91,23 @@ async function main() {
           finished_at: summary.finishedAt,
           scope_start_at: summary.scopeStartAt,
           scope_end_at: summary.scopeEndAt,
+          model: summary.model,
+          prompt_version: STAGE1_PROMPT_VERSION,
+          duration_ms: artifact.durationMs,
+          candidate_count: summary.loadedCount,
+          selected_count: summary.selectedCount,
+          ignored_count: summary.ignoredCount,
+          failed_count: summary.failedCount,
+          batch_count: summary.batchCount,
+          fallback_batch_count: summary.fallbackBatchCount,
+          split_count: summary.splitCount,
+          singleton_batch_count: summary.singletonBatchCount,
+          llm_call_count: summary.llmCallCount,
+          retry_count: summary.retryCount,
+          llm_duration_ms: summary.llmDurationMs,
+          input_tokens: summary.tokenUsage?.inputTokens ?? null,
+          output_tokens: summary.tokenUsage?.outputTokens ?? null,
+          total_tokens: summary.tokenUsage?.totalTokens ?? null,
         }, null, 2)}\n`,
       );
       await writeRunPointer(runDir);

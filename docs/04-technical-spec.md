@@ -238,14 +238,16 @@ Daily YYYY-MM-DD
 
 - Digest / Long-form / Inspiration 通过 `processed_contents.daily_date` 归属；`published_at` 仍返回，
   但不再是最终展示归属，确保 late-arrival 能显示在其实际参与的 Daily。
-- Event 通过 `events ← processed_contents.event_id ← raw_articles` 归属；只要至少一条
-  `routing = event` 的 Candidate 属于 scope 即归入该 Daily，且一个 Event 只返回一次。
+- Event 通过 `events.stage4_run_id → stage4_runs.daily_date` 归属，不使用 `event_date` 或成员 Raw
+  Article 的 `published_at` 决定 Brief 期次。若该 Daily 有 `published` Events，只返回正式集合；仅当
+  没有 published Events 且最新 `running` / `partial` Stage 4 Run 存在 drafts 时，回退只返回该 Run 的
+  draft 集合，绝不混合。response 的 `events_status` 为 `published`、`partial` 或 `empty`。
 - `/api/brief` 不使用 `processed_contents.created_at` 或 `events.created_at` 判断 Daily 归属。
 - `collected_at` 只表示系统采集时间；`published_at IS NULL` 的 Raw Article 不归入任何 Daily。
 - retry / backfill 继续使用同一 `published_at` scope，不改变 Daily membership。
 
 返回：
-- `events` — Top 10
+- `events` — published set，或在没有 published set 时的最新 partial draft set
 - `digests` — 按 Category 分组，返回全部 ranked contents
 - `long_form` — Top 10
 - `inspiration`

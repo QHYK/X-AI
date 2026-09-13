@@ -72,21 +72,18 @@ checks.push({
 const topScopeQueries = completedQueries.filter((query) =>
   query.text.includes("with scopes as (") && query.text.includes("from scopes scope"),
 );
+const rawAggregateQuery = completedQueries.find((query) => query.text.includes("completion_backlog"));
 checks.push({
-  name: "all seven-day DB aggregates receive the same Daily scope arrays",
+  name: "Raw intake uses published_at scope while workflow aggregates receive the target daily_date values",
   passed:
-    topScopeQueries.length === 3 &&
-    topScopeQueries.every(
-      (query) =>
-        query.text.includes("ra.published_at >= scope.start_at") &&
-        query.text.includes("ra.published_at < scope.end_at") &&
-        !query.text.includes("ra.collected_at >= scope.start_at") &&
-        JSON.stringify(query.values?.slice(0, 3)) ===
-        JSON.stringify([
-          recentScopes.map((scope) => scope.dailyDate),
-          recentScopes.map((scope) => scope.startAt),
-          recentScopes.map((scope) => scope.endAt),
-        ]),
+    rawAggregateQuery?.text.includes("ra.published_at >= scope.start_at") === true &&
+    rawAggregateQuery.text.includes("ra.published_at < scope.end_at") &&
+    JSON.stringify(rawAggregateQuery.values?.slice(0, 3)) === JSON.stringify([
+      recentScopes.map((scope) => scope.dailyDate), recentScopes.map((scope) => scope.startAt), recentScopes.map((scope) => scope.endAt),
+    ]) &&
+    topScopeQueries.filter((query) => query.text.includes("unnest($1::text[]) as date")).length === 2 &&
+    topScopeQueries.filter((query) => query.text.includes("unnest($1::text[]) as date")).every(
+      (query) => JSON.stringify(query.values) === JSON.stringify([recentScopes.map((scope) => scope.dailyDate)]),
     ),
   detail: topScopeQueries.map((query) => query.values),
 });
@@ -109,18 +106,15 @@ const processedDetailQueries = completedQueries.filter(
     query.text.includes("as processed_summary_chars"),
 );
 checks.push({
-  name: "late Processed retries remain attributed to the Raw Article Daily scope",
+  name: "Processed counts use workflow daily_date rather than raw published_at or processed created_at",
   passed:
-    processedAggregateQuery?.text.includes("left join raw_articles ra") === true &&
-    processedAggregateQuery.text.includes("pc.raw_article_id = ra.id") &&
+    processedAggregateQuery?.text.includes("pc.daily_date = scope.date::date") === true &&
+    !processedAggregateQuery.text.includes("raw_articles") &&
     !processedAggregateQuery.text.includes("pc.created_at >=") &&
     processedDetailQueries.length === 3 &&
     processedDetailQueries.every(
       (query) =>
-        query.text.includes("join raw_articles ra on ra.id = pc.raw_article_id") &&
-        query.text.includes("ra.published_at >=") &&
-        query.text.includes("ra.published_at <") &&
-        !query.text.includes("ra.collected_at >=") &&
+        (query.text.includes("pc.daily_date = $1::date") || query.text.includes("ra.published_at >=")) &&
         !query.text.includes("pc.created_at >="),
     ),
   detail: {
@@ -132,19 +126,17 @@ checks.push({
 });
 
 const eventAggregateQuery = completedQueries.find((query) =>
-  query.text.includes("count(distinct e.id)::int as total"),
+  query.text.includes("left join stage4_runs s4r"),
 );
 checks.push({
-  name: "Events are attributed through Event Candidates in the Raw scope and counted once",
+  name: "Events are attributed through stage4_runs.daily_date and split by publication state",
   passed:
-    eventAggregateQuery?.text.includes("count(distinct e.id)::int") === true &&
-    eventAggregateQuery.text.includes("left join raw_articles ra") &&
-    eventAggregateQuery.text.includes("pc.raw_article_id = ra.id") &&
-    eventAggregateQuery.text.includes("pc.event_id is not null") &&
-    eventAggregateQuery.text.includes("pc.routing = 'event'") &&
-    eventAggregateQuery.text.includes("ra.published_at >= scope.start_at") &&
-    !eventAggregateQuery.text.includes("e.created_at >="),
-  detail: "Multiple in-scope Event Candidates for one event produce one count.",
+    eventAggregateQuery?.text.includes("stage4_runs s4r on s4r.daily_date = scope.date::date") === true &&
+    eventAggregateQuery.text.includes("publication_status = 'published'") &&
+    eventAggregateQuery.text.includes("publication_status = 'draft'") &&
+    !eventAggregateQuery.text.includes("raw_articles") &&
+    !eventAggregateQuery.text.includes("events.event_date"),
+  detail: "Published and draft Event counts follow Stage4 workflow ownership.",
 });
 
 const futureQueries: CapturedQuery[] = [];
@@ -192,6 +184,17 @@ checks.push({
 checks.push({ name: "API Event attribution does not filter by events.event_date", passed: apiQueries.some((query) => query.text.includes("join stage4_runs") && !query.text.includes("events.event_date =")) && adjacentApiQueries.some((query) => JSON.stringify(query.values) === JSON.stringify([adjacentScope.dailyDate])) });
 checks.push({ name: "API Event query excludes draft and archived by status", passed: apiQueries.some((query) => query.text.includes("events.publication_status = 'published'")) });
 
+const fallbackQueries: CapturedQuery[] = [];
+const fallbackBrief = await getDailyBriefForDailyDate(createFallbackBriefPool(fallbackQueries), detailScope.dailyDate);
+checks.push({
+  name: "API falls back to drafts only when no published Events exist for the Daily",
+  passed:
+    fallbackBrief.events_status === "partial" && fallbackBrief.events.length === 1 &&
+    fallbackQueries.some((query) => query.text.includes("publication_status = 'published'")) &&
+    fallbackQueries.some((query) => query.text.includes("status in ('running', 'partial')")) &&
+    fallbackQueries.some((query) => query.text.includes("publication_status = 'draft'")),
+});
+
 const runtimeRoot = await mkdtemp(join(tmpdir(), "x-ai-field-dashboard-runtime-"));
 try {
   await writeRun(runtimeRoot, "runtime/stage2/fixture", {
@@ -233,6 +236,12 @@ try {
     total_web_search_calls: 5,
     status: "success",
   });
+  await writeRun(runtimeRoot, "runtime/stage1/complete-contract", {
+    stage: "stage1", daily_date: "2026-08-20", started_at: "2026-08-24T16:33:00.000Z",
+    finished_at: "2026-08-24T16:33:01.000Z", status: "success", model: "stage1-model",
+    prompt_version: "stage1-fixture-v6", llm_call_count: 5, retry_count: 1, batch_count: 3,
+    fallback_batch_count: 1, split_count: 2, singleton_batch_count: 1,
+  });
   await writeRun(runtimeRoot, "runtime/daily/fixture", {
     daily_date: "2026-08-20",
     started_at: "2026-08-24T16:29:00.000Z",
@@ -272,6 +281,7 @@ try {
 
   const dates = new Set(["2026-08-20", "2026-08-19"]);
   const stageRuntime = await loadRuntimeMetricsByDate(runtimeRoot, dates);
+  const stages = stageRuntime.get("2026-08-20");
   const completionRuntime = await loadContentCompletionRuntimeByDate(runtimeRoot, dates);
   const duplicateFilterRuntime = await loadDuplicateFilterRuntimeByDate(runtimeRoot, dates);
   checks.push({
@@ -280,6 +290,13 @@ try {
       stageRuntime.get("2026-08-20")?.get("stage2")?.candidateCount === 7 &&
       completionRuntime.get("2026-08-20")?.candidateCount === 11 &&
       completionRuntime.get("2026-08-20")?.remainingCount === 7,
+  });
+  checks.push({
+    name: "Dashboard reads the current Stage1 runtime contract including model and batch metrics",
+    passed:
+      stages?.get("stage1")?.model === "stage1-model" && stages.get("stage1")?.llmCalls === 5 &&
+      stages.get("stage1")?.batchCount === 3 && stages.get("stage1")?.fallbackBatchCount === 1 &&
+      stages.get("stage1")?.splitCount === 2 && stages.get("stage1")?.singletonBatchCount === 1,
   });
   checks.push({
     name: "Dashboard runtime returns Exact Duplicate Filter statistics from the Daily run artifact",
@@ -305,11 +322,10 @@ try {
     name: "legacy runtime without a prompt version remains N/A",
     passed: stageRuntime.get("2026-08-19")?.get("stage2")?.promptVersion === null,
   });
-  const stages = stageRuntime.get("2026-08-20");
   checks.push({
     name: "Dashboard reads real prompt versions without merging Stage 3 prompts",
     passed:
-      stages?.get("stage1")?.promptVersion === "stage1-fixture-v5" &&
+      stages?.get("stage1")?.promptVersion === "stage1-fixture-v6" &&
       stages.get("stage2")?.promptVersion === "stage2-fixture-v1" &&
       stages.get("stage3")?.promptVersion === null &&
       stages.get("stage3")?.promptVersions?.event === "event-fixture-v1" &&
@@ -397,6 +413,28 @@ function createBriefPool(queries: CapturedQuery[]): Pool {
       return { rows: [] };
     }) as Pool["query"],
   } as Pool;
+}
+
+function createFallbackBriefPool(queries: CapturedQuery[]): Pool {
+  return {
+    query: (async (text: string, values?: unknown[]) => {
+      queries.push({ text, values });
+      if (text.includes("join stage4_runs")) return { rows: [] };
+      if (text.includes("status in ('running', 'partial')")) return { rows: [{ id: "partial-run" }] };
+      if (text.includes("events.stage4_run_id")) return { rows: [briefEventRow("draft-event")] };
+      if (text.includes("where pc.event_id = any")) return { rows: [] };
+      if (text.includes("pc.routing = 'digest'") || text.includes("pc.routing = 'long_form'") || text.includes("pc.routing = 'inspiration'")) return { rows: [] };
+      return { rows: [] };
+    }) as Pool["query"],
+  } as Pool;
+}
+
+function briefEventRow(id: string) {
+  return {
+    id, rank: 1, event_date: "2026-08-24", created_at: "2026-08-26T02:00:00.000Z",
+    title: "Event", title_zh: "事件", summary: "Event summary", summary_zh: "事件摘要",
+    tags: [], tags_zh: [], entities: [], entities_zh: [], source_perspectives: {}, external_context: null,
+  };
 }
 
 function briefContentRow(id: string, title: string) {

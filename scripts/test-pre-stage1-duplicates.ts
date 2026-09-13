@@ -6,11 +6,13 @@ await check("0 duplicate", [row("a", "A", "https://a"), row("b", "B", "https://b
 await check("URL duplicate", [row("a", "A", "https://same", "long"), row("b", "B", "https://same")], [1, 1, 0]);
 await check("title duplicate", [row("a", "Same", "https://a", "long"), row("b", "Same", "https://b")], [1, 0, 1]);
 await check("URL and title duplicate", [row("a", "Same", "https://same", "long"), row("b", "Same", "https://same")], [1, 0, 0, 1]);
+await check("historical reference makes only the current candidate a loser", [row("b", "Same", "https://same")], [1, 0, 0, 1], [row("a", "Same", "https://same", "long")]);
 
-async function check(name: string, rows: Row[], expected: number[]) {
+async function check(name: string, rows: Row[], expected: number[], historical: Row[] = []) {
   const updates: string[][] = [];
+  let selectCount = 0;
   const pool = { query: async (text: string, values?: unknown[]) => {
-    if (text.includes("select ra.id")) return { rows };
+    if (text.includes("select ra.id")) return { rows: selectCount++ === 0 ? rows : historical };
     if (text.includes("update raw_articles")) { updates.push(values?.[0] as string[]); return { rows: [] }; }
     throw new Error(`Unexpected query: ${text}`);
   } };

@@ -56,6 +56,7 @@ async function main() {
       stage1RunDir: stage1?.runDir ?? null,
       stage1StartedAt: stage1?.run.started_at ?? null,
       stage1FinishedAt: stage1?.run.finished_at ?? null,
+      dailyDate: scope.dailyDate,
     });
     await writeRunPointer(artifacts.runDir);
 

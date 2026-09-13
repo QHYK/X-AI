@@ -1,7 +1,7 @@
 /**
  * Dashboard 的服务端数据聚合层。
  *
- * 数据库指标按 Daily raw input scope 归属；runtime 仅补充运行观测数据，不作为业务数据来源。
+ * 数据库指标以 workflow daily_date 为业务归属；runtime 仅补充运行观测数据，不作为业务数据来源。
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -39,6 +39,8 @@ type CountRow = {
   digest?: number | string;
   long_form?: number | string;
   inspiration?: number | string;
+  published?: number | string;
+  draft?: number | string;
 };
 
 type CategoryRow = {
@@ -60,10 +62,19 @@ type ContentFunnelRow = {
 
 type JsonObject = Record<string, unknown>;
 
+type Stage4BusinessRow = {
+  date: string;
+  status: string | null;
+  ready: number | string;
+  draft: number | string;
+  published: number | string;
+};
+
 export type DashboardStageMetrics = {
   stage: DashboardStage;
   status: string | null;
   startedAt: string | null;
+  model: string | null;
   promptVersion: string | null;
   promptVersions: {
     event: string | null;
@@ -88,6 +99,13 @@ export type DashboardStageMetrics = {
   eventsCreated: number | null;
   webSearchEventCount: number | null;
   totalWebSearchCalls: number | null;
+  batchCount: number | null;
+  fallbackBatchCount: number | null;
+  splitCount: number | null;
+  singletonBatchCount: number | null;
+  readyCount: number | null;
+  draftCount: number | null;
+  publishedCount: number | null;
 };
 
 export type DashboardContentCompletionMetrics = {
@@ -143,7 +161,7 @@ export type DashboardDay = {
     failed: number;
   };
   processed: Record<Routing, number> & { total: number };
-  events: number;
+  events: { published: number; draft: number };
   completionBacklog: number;
   runtime: {
     contentCompletion: DashboardContentCompletionMetrics | null;
@@ -211,13 +229,11 @@ export async function getDashboardData(
           `
             select category, count(*)::int as count
             from processed_contents pc
-            join raw_articles ra on ra.id = pc.raw_article_id
-            where ra.published_at >= $1::timestamptz
-              and ra.published_at < $2::timestamptz
+            where pc.daily_date = $1::date
             group by category
             order by count desc, category asc
           `,
-          [detailScope.startAt, detailScope.endAt],
+          [detailScope.dailyDate],
         )
       : Promise.resolve({ rows: [] });
   const digestCategoriesPromise: Promise<{ rows: CategoryRow[] }> =
@@ -226,14 +242,12 @@ export async function getDashboardData(
           `
             select category, count(*)::int as count
             from processed_contents pc
-            join raw_articles ra on ra.id = pc.raw_article_id
-            where ra.published_at >= $1::timestamptz
-              and ra.published_at < $2::timestamptz
+            where pc.daily_date = $1::date
               and pc.routing = 'digest'
             group by category
             order by count desc, category asc
           `,
-          [detailScope.startAt, detailScope.endAt],
+          [detailScope.dailyDate],
         )
       : Promise.resolve({ rows: [] });
   const contentFunnelPromise = detailScopeCompleted
@@ -251,6 +265,7 @@ export async function getDashboardData(
     completionByDate,
     duplicateFilterByDate,
     contentFunnel,
+    stage4BusinessResult,
   ] = await Promise.all([
     pool.query<TotalRow>(`
       select
@@ -304,12 +319,7 @@ export async function getDashboardData(
     pool.query<CountRow>(
       `
         with scopes as (
-          select *
-          from unnest(
-            $1::text[],
-            $2::timestamptz[],
-            $3::timestamptz[]
-          ) as scope(date, start_at, end_at)
+          select unnest($1::text[]) as date
         )
         select
           scope.date,
@@ -319,39 +329,26 @@ export async function getDashboardData(
           count(pc.id) filter (where pc.routing = 'long_form')::int as long_form,
           count(pc.id) filter (where pc.routing = 'inspiration')::int as inspiration
         from scopes scope
-        left join raw_articles ra
-          on ra.published_at >= scope.start_at
-          and ra.published_at < scope.end_at
-        left join processed_contents pc on pc.raw_article_id = ra.id
+        left join processed_contents pc on pc.daily_date = scope.date::date
         group by scope.date
       `,
-      [scopeDates, scopeStarts, scopeEnds],
+      [scopeDates],
     ),
     pool.query<CountRow>(
       `
         with scopes as (
-          select *
-          from unnest(
-            $1::text[],
-            $2::timestamptz[],
-            $3::timestamptz[]
-          ) as scope(date, start_at, end_at)
+          select unnest($1::text[]) as date
         )
         select
           scope.date,
-          count(distinct e.id)::int as total
+          count(e.id) filter (where e.publication_status = 'published')::int as published,
+          count(e.id) filter (where e.publication_status = 'draft')::int as draft
         from scopes scope
-        left join raw_articles ra
-          on ra.published_at >= scope.start_at
-          and ra.published_at < scope.end_at
-        left join processed_contents pc
-          on pc.raw_article_id = ra.id
-          and pc.event_id is not null
-          and pc.routing = 'event'
-        left join events e on e.id = pc.event_id
+        left join stage4_runs s4r on s4r.daily_date = scope.date::date
+        left join events e on e.stage4_run_id = s4r.id
         group by scope.date
       `,
-      [scopeDates, scopeStarts, scopeEnds],
+      [scopeDates],
     ),
     processedCategoriesPromise,
     digestCategoriesPromise,
@@ -362,6 +359,25 @@ export async function getDashboardData(
     ),
     loadDuplicateFilterRuntimeByDate(options.rootDir ?? process.cwd(), requestedRuntimeDates),
     contentFunnelPromise,
+    pool.query<Stage4BusinessRow>(`
+      with dates as (select unnest($1::text[]) as date),
+      latest_runs as (
+        select dates.date, s.id, s.status, s.success_count
+        from dates left join lateral (
+          select id, status, success_count from stage4_runs
+          where daily_date = dates.date::date
+          order by created_at desc, id desc limit 1
+        ) s on true
+      )
+      select latest_runs.date, latest_runs.status,
+        coalesce(latest_runs.success_count, 0)::int as ready,
+        count(e.id) filter (where e.stage4_run_id = latest_runs.id and e.publication_status = 'draft')::int as draft,
+        count(e.id) filter (where e.publication_status = 'published')::int as published
+      from latest_runs
+      left join stage4_runs all_runs on all_runs.daily_date = latest_runs.date::date
+      left join events e on e.stage4_run_id = all_runs.id
+      group by latest_runs.date, latest_runs.status, latest_runs.id, latest_runs.success_count
+    `, [[...requestedRuntimeDates]]),
   ]);
 
   const totals = totalsResult.rows[0];
@@ -372,6 +388,7 @@ export async function getDashboardData(
   const rawByDate = rowsByDate(rawResult.rows);
   const processedByDate = rowsByDate(processedResult.rows);
   const eventsByDate = rowsByDate(eventsResult.rows);
+  const stage4BusinessByDate = new Map(stage4BusinessResult.rows.map((row) => [row.date, row]));
 
   const days = scopes.map((scope) => {
     const raw = rawByDate.get(scope.dailyDate);
@@ -383,6 +400,7 @@ export async function getDashboardData(
     for (const stage of STAGES) {
       stages[stage] = runtimeStages?.get(stage) ?? null;
     }
+    stages.stage4 = mergeStage4BusinessMetrics(stages.stage4, stage4BusinessByDate.get(scope.dailyDate));
 
     const availableStages = Object.values(stages).filter(
       (metrics): metrics is DashboardStageMetrics => metrics !== null,
@@ -404,7 +422,7 @@ export async function getDashboardData(
         long_form: count(processed?.long_form),
         inspiration: count(processed?.inspiration),
       },
-      events: count(event?.total),
+      events: { published: count(event?.published), draft: count(event?.draft) },
       completionBacklog: count(raw?.completion_backlog),
       runtime: {
         contentCompletion: completionByDate.get(scope.dailyDate) ?? null,
@@ -426,6 +444,10 @@ export async function getDashboardData(
   for (const stage of STAGES) {
     detailStages[stage] = runtimeDetailStages?.get(stage) ?? null;
   }
+  detailStages.stage4 = mergeStage4BusinessMetrics(
+    detailStages.stage4,
+    stage4BusinessByDate.get(detailScope.dailyDate),
+  );
 
   return {
     timezone: "Asia/Shanghai",
@@ -613,6 +635,21 @@ function contentCompletionMetricsFromArtifact(
     remainingCount: numberFrom(artifact, "remaining_count"),
     limit: numberFrom(artifact, "limit"),
     perSourceLimit: numberFrom(artifact, "per_source_limit"),
+  };
+}
+
+function mergeStage4BusinessMetrics(
+  runtime: DashboardStageMetrics | null,
+  business: Stage4BusinessRow | undefined,
+): DashboardStageMetrics | null {
+  if (!runtime && !business) return null;
+  const base = runtime ?? emptyStageMetrics("stage4");
+  return {
+    ...base,
+    status: business?.status ?? base.status,
+    readyCount: business ? count(business.ready) : base.readyCount,
+    draftCount: business ? count(business.draft) : base.draftCount,
+    publishedCount: business ? count(business.published) : base.publishedCount,
   };
 }
 
@@ -814,6 +851,7 @@ function stage1MetricsFromDailyStep(
     stage: "stage1",
     status: stringValue(step.status),
     startedAt,
+    model: stringValue(step.model),
     promptVersion: stringValue(step.prompt_version),
     promptVersions: null,
     durationMs: numberFrom(step, "duration_ms"),
@@ -834,6 +872,26 @@ function stage1MetricsFromDailyStep(
     eventsCreated: null,
     webSearchEventCount: null,
     totalWebSearchCalls: null,
+    batchCount: null,
+    fallbackBatchCount: null,
+    splitCount: null,
+    singletonBatchCount: null,
+    readyCount: null,
+    draftCount: null,
+    publishedCount: null,
+  };
+}
+
+function emptyStageMetrics(stage: DashboardStage): DashboardStageMetrics {
+  return {
+    stage, status: null, startedAt: null, model: null, promptVersion: null, promptVersions: null,
+    durationMs: null, llmDurationMs: null, llmCalls: null, retryCount: null,
+    inputTokens: null, outputTokens: null, totalTokens: null, candidateCount: null,
+    groupCount: null, selectedEventCount: null, digestBeforeDedup: null,
+    digestAfterDedup: null, longFormCount: null, enrichmentSuccessCount: null,
+    enrichmentFailureCount: null, eventsCreated: null, webSearchEventCount: null,
+    totalWebSearchCalls: null, batchCount: null, fallbackBatchCount: null, splitCount: null,
+    singletonBatchCount: null, readyCount: null, draftCount: null, publishedCount: null,
   };
 }
 
@@ -854,6 +912,7 @@ async function parseStageMetrics(
     stage,
     status: stringValue(artifact.status),
     startedAt,
+    model: stringValue(artifact.model),
     promptVersion: stringValue(artifact.prompt_version),
     promptVersions:
       stage === "stage3"
@@ -881,12 +940,17 @@ async function parseStageMetrics(
     longFormCount: numberFrom(artifact, "long_form_count"),
     enrichmentSuccessCount,
     enrichmentFailureCount:
-      selectedEventCount !== null && enrichmentSuccessCount !== null
-        ? Math.max(0, selectedEventCount - enrichmentSuccessCount)
-        : null,
+      numberFrom(artifact, "enrichment_failure_count"),
     eventsCreated: numberFrom(artifact, "events_created"),
     webSearchEventCount: numberFrom(artifact, "web_search_event_count"),
     totalWebSearchCalls: numberFrom(artifact, "total_web_search_calls"),
+    batchCount: numberFrom(artifact, "batch_count"),
+    fallbackBatchCount: numberFrom(artifact, "fallback_batch_count"),
+    splitCount: numberFrom(artifact, "split_count"),
+    singletonBatchCount: numberFrom(artifact, "singleton_batch_count"),
+    readyCount: enrichmentSuccessCount,
+    draftCount: null,
+    publishedCount: null,
   };
 }
 

@@ -17,6 +17,7 @@ import {
   isDailyWorkflowRunning,
 } from "@/lib/daily-workflow-retry.js";
 import { DailyRetryButton } from "./daily-retry-button.js";
+import { MetricInfo } from "./metric-info.js";
 import styles from "./dashboard.module.css";
 
 export const runtime = "nodejs";
@@ -54,6 +55,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         <div className={styles.headerActions}>
           <a href={`./review/events?date=${data.latestDailyDate}`}>Event Review</a>
           <a href={`./review/long-form?date=${data.latestDailyDate}`}>Long-form Review</a>
+          <a href="./dashboard/metrics">指标说明</a>
           <div className={styles.today}>Latest Daily · {data.latestDailyDate}</div>
         </div>
       </header>
@@ -83,7 +85,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 <th>Ignored</th>
                 <th>Failed</th>
                 <th>Completion</th>
-                <th>Backlog</th>
+                <th>Completion Backlog <MetricInfo text="当前 24h intake scope 中仍符合 Content Completion 条件的文章数。不同于 Content Completion 卡片中的 Remaining；Remaining 使用该次 Completion run 自己的 candidate scope。" /></th>
                 <th>Completion Duration</th>
                 <th>Stage1 Duration</th>
                 <th>Processed Total</th>
@@ -93,8 +95,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 <th>Inspiration</th>
                 <th>Stage2 Groups</th>
                 <th>Stage3 Events</th>
-                <th>Stage4 Events</th>
-                <th>LLM Calls</th>
+                <th>Published Events</th>
+                <th>Draft Events</th>
+                <th>LLM Calls <MetricInfo text="各 Stage 实际发出的模型 API 请求总数，包含 retry 和 Stage4 context-decision 请求，不包含 Web Search tool calls。" /></th>
                 <th>Input Tokens</th>
                 <th>Output Tokens</th>
                 <th>Duration</th>
@@ -120,7 +123,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   <td>{formatNumber(day.processed.inspiration)}</td>
                   <td>{formatMetric(day.runtime.stages.stage2?.groupCount)}</td>
                   <td>{formatMetric(day.runtime.stages.stage3?.selectedEventCount)}</td>
-                  <td>{formatNumber(day.events)}</td>
+                  <td>{formatNumber(day.events.published)}</td>
+                  <td>{formatNumber(day.events.draft)}</td>
                   <td>{formatMetric(day.runtime.llmCalls)}</td>
                   <td>{formatMetric(day.runtime.inputTokens)}</td>
                   <td>{formatMetric(day.runtime.outputTokens)}</td>
@@ -278,11 +282,11 @@ function ContentCompletionCard({
         <StatusBadge status={metrics.status} />
       </div>
       <dl className={styles.metricList}>
-        <Metric label="Candidates" value={formatMetric(metrics.candidateCount)} />
+        <Metric label="Candidates" value={formatMetric(metrics.candidateCount)} info="本次 Content Completion run 开始时，在该 run 实际 candidate scope 内符合 completion eligibility 的全部文章数。正常 Daily workflow 当前通常使用约 72h catch-up window，不等于当天 24h Raw Articles。" />
         <Metric label="Selected" value={formatMetric(metrics.selectedCount)} />
         <Metric label="Succeeded" value={formatMetric(metrics.successCount)} />
         <Metric label="Failed" value={formatMetric(metrics.failedCount)} />
-        <Metric label="Remaining" value={formatMetric(metrics.remainingCount)} />
+        <Metric label="Remaining" value={formatMetric(metrics.remainingCount)} info="本次 Completion run 结束后，按相同 eligibility 与 scope 再次查询得到的剩余候选数；包括未被 limit 选中的文章以及仍未补全成功的文章。" />
         <Metric label="Duration" value={formatDuration(metrics.durationMs)} />
         <Metric label="Limit" value={formatMetric(metrics.limit)} />
       </dl>
@@ -297,7 +301,7 @@ function DuplicateFilterCard({ metrics }: { metrics: DashboardDuplicateFilterMet
     <dl className={styles.metricList}>
       <Metric label="Duplicates ignored" value={formatMetric(metrics.duplicateCount)} />
       <Metric label="Dedup rate" value={`${(metrics.duplicateRate * 100).toFixed(1)}%`} />
-      <Metric label="Remaining unique articles" value={formatMetric(metrics.outputCount)} />
+      <Metric label="Remaining unique articles" value={formatMetric(metrics.outputCount)} info="本次 Exact Duplicate Filter 的输出数量，即 inputCount - duplicateCount。不是当前 DB 中全部 unique articles，也不是 Completion Remaining。" />
     </dl>
     <summary>Duplicate categories</summary>
     <dl className={styles.metricList}>
@@ -363,7 +367,7 @@ function StageCard({
     <article className={styles.stageCard}>
       <div className={styles.stageHeader}>
         <h3>{label}</h3>
-        <StatusBadge status={metrics.status} />
+        <StatusBadge status={metrics.status} partialReady={metrics.readyCount ?? metrics.enrichmentSuccessCount} />
       </div>
       <dl className={styles.metricList}>
         {metrics.stage === "stage3" ? (
@@ -378,6 +382,7 @@ function StageCard({
         ) : (
           <Metric label="Prompt version" value={metrics.promptVersion ?? "N/A"} />
         )}
+        <Metric label="Model" value={metrics.model ?? "N/A"} />
         <Metric label="Duration" value={formatDuration(metrics.durationMs)} />
         <Metric label="LLM duration" value={formatDuration(metrics.llmDurationMs)} />
         <Metric label="LLM calls" value={formatMetric(metrics.llmCalls)} />
@@ -396,7 +401,12 @@ function StageCard({
 function stageSpecificMetrics(metrics: DashboardStageMetrics): Array<[string, number | null]> {
   switch (metrics.stage) {
     case "stage1":
-      return [];
+      return [
+        ["Batches", metrics.batchCount],
+        ["Fallback batches", metrics.fallbackBatchCount],
+        ["Splits", metrics.splitCount],
+        ["Singleton batches", metrics.singletonBatchCount],
+      ];
     case "stage2":
       return [
         ["Candidates", metrics.candidateCount],
@@ -413,8 +423,11 @@ function stageSpecificMetrics(metrics: DashboardStageMetrics): Array<[string, nu
     case "stage4":
       return [
         ["Selected input", metrics.selectedEventCount],
+        ["Ready", metrics.readyCount],
+        ["Drafts", metrics.draftCount],
+        ["Published", metrics.publishedCount],
         ["Enrichment success", metrics.enrichmentSuccessCount],
-        ["Enrichment failure", metrics.enrichmentFailureCount],
+        ["Failed", metrics.enrichmentFailureCount],
         ["Events created", metrics.eventsCreated],
         ["Web Search Events", metrics.webSearchEventCount],
         ["Web Search Calls", metrics.totalWebSearchCalls],
@@ -422,24 +435,24 @@ function stageSpecificMetrics(metrics: DashboardStageMetrics): Array<[string, nu
   }
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, info }: { label: string; value: string; info?: string }) {
   return (
     <div>
-      <dt>{label}</dt>
+      <dt>{label}{info ? <MetricInfo text={info} /> : null}</dt>
       <dd>{value}</dd>
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: string | null }) {
+function StatusBadge({ status, partialReady = null }: { status: string | null; partialReady?: number | null }) {
   const normalized = status?.toLowerCase() ?? "unknown";
   const className =
-    normalized === "success"
+    normalized === "success" || (normalized === "partial" && (partialReady ?? 0) > 0)
       ? styles.successBadge
       : normalized === "failed"
         ? styles.failedBadge
         : styles.naBadge;
-  return <span className={className}>{status ?? "N/A"}</span>;
+  return <span className={className}>{normalized === "partial" && (partialReady ?? 0) > 0 ? "partial success" : status ?? "N/A"}</span>;
 }
 
 function formatNumber(value: number): string {
