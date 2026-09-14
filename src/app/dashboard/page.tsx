@@ -17,6 +17,7 @@ import {
   isDailyWorkflowRunning,
 } from "@/lib/daily-workflow-retry.js";
 import { DailyRetryButton } from "./daily-retry-button.js";
+import { StepRetryButton } from "./step-retry-button.js";
 import { MetricInfo } from "./metric-info.js";
 import styles from "./dashboard.module.css";
 
@@ -177,13 +178,14 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             </div>
 
             <div className={styles.stageGrid}>
-              <ContentCompletionCard metrics={data.details.contentCompletion} />
-              <DuplicateFilterCard metrics={data.details.duplicateFilter} />
+              <ContentCompletionCard metrics={data.details.contentCompletion} dailyDate={data.detailDate} />
+              <DuplicateFilterCard metrics={data.details.duplicateFilter} dailyDate={data.detailDate} />
               {Object.entries(data.details.stages).map(([stage, metrics]) => (
                 <StageCard
                   key={stage}
                   label={STAGE_LABELS[stage as keyof typeof STAGE_LABELS]}
                   metrics={metrics}
+                  dailyDate={data.detailDate}
                 />
               ))}
             </div>
@@ -259,14 +261,17 @@ function ContentFunnel({ funnel }: { funnel: DashboardContentFunnel }) {
 
 function ContentCompletionCard({
   metrics,
+  dailyDate,
 }: {
   metrics: DashboardContentCompletionMetrics | null;
+  dailyDate: string;
 }) {
   if (!metrics) {
     return (
       <article className={styles.stageCard}>
         <div className={styles.stageHeader}>
           <h3>Content Completion</h3>
+          <StepRetryButton dailyDate={dailyDate} step="content_completion" label="Content Completion" initiallyRunning={false} />
           <span className={styles.naBadge}>N/A</span>
         </div>
         <p className={styles.empty}>No runtime artifact for this date.</p>
@@ -293,10 +298,10 @@ function ContentCompletionCard({
   );
 }
 
-function DuplicateFilterCard({ metrics }: { metrics: DashboardDuplicateFilterMetrics | null }) {
-  if (!metrics) return <article className={styles.stageCard}><div className={styles.stageHeader}><h3>Exact Duplicate Filter</h3><span className={styles.naBadge}>N/A</span></div><p className={styles.empty}>No runtime artifact for this date.</p></article>;
+function DuplicateFilterCard({ metrics, dailyDate }: { metrics: DashboardDuplicateFilterMetrics | null; dailyDate: string }) {
+  if (!metrics) return <article className={styles.stageCard}><div className={styles.stageHeader}><h3>Exact Duplicate Filter</h3><StepRetryButton dailyDate={dailyDate} step="exact_duplicate_filter" label="Exact Duplicate Filter" initiallyRunning={false} /><span className={styles.naBadge}>N/A</span></div><p className={styles.empty}>No runtime artifact for this date.</p></article>;
   return <article className={styles.stageCard}>
-    <div className={styles.stageHeader}><h3>Exact Duplicate Filter</h3></div>
+    <div className={styles.stageHeader}><h3>Exact Duplicate Filter</h3><StepRetryButton dailyDate={dailyDate} step="exact_duplicate_filter" label="Exact Duplicate Filter" initiallyRunning={false} /></div>
     <dl className={styles.metricList}>
       <Metric label="Duplicates ignored" value={formatMetric(metrics.duplicateCount)} />
       <Metric label="Dedup rate" value={`${(metrics.duplicateRate * 100).toFixed(1)}%`} />
@@ -345,15 +350,19 @@ function CategoryPanel({ title, counts }: { title: string; counts: Record<string
 function StageCard({
   label,
   metrics,
+  dailyDate,
 }: {
   label: string;
   metrics: DashboardStageMetrics | null;
+  dailyDate: string;
 }) {
+  const step = label.toLowerCase().replace(" ", "") as "stage1" | "stage2" | "stage3" | "stage4";
   if (!metrics) {
     return (
       <article className={styles.stageCard}>
         <div className={styles.stageHeader}>
           <h3>{label}</h3>
+          <StepRetryButton dailyDate={dailyDate} step={step} label={label} initiallyRunning={false} />
           <span className={styles.naBadge}>N/A</span>
         </div>
         <p className={styles.empty}>No runtime artifact for this date.</p>
@@ -366,6 +375,7 @@ function StageCard({
     <article className={styles.stageCard}>
       <div className={styles.stageHeader}>
         <h3>{label} <MetricInfo text="该状态来自目标 Daily 对应的最新 runtime artifact，表示此步骤最近一次执行。" /></h3>
+        <StepRetryButton dailyDate={dailyDate} step={step} label={label} initiallyRunning={metrics.status === "running"} />
         <StatusBadge status={metrics.status} partialReady={metrics.readyCount ?? metrics.enrichmentSuccessCount} />
       </div>
       <dl className={styles.metricList}>

@@ -122,6 +122,11 @@ Stage 2 Event 与 Stage 3 Digest / Long-form 都按该 Daily attribution 全量�
 PostgreSQL `pipeline_runs` 的轻量摘要（状态、模型、耗时及指标）。它是跨机器的 Dashboard observability
 source；`runtime/` 仍保留完整调试 artifact，二者不互相替代。
 
+Dashboard 可对 Content Completion、Exact Duplicate Filter 与 Stage 1–4 单独 Retry。Retry 在 server side
+以固定 allowlist 启动对应 CLI，并以 `DAILY_DATE` 及原有 scope 语义执行；新 execution 写入
+`pipeline_runs(trigger_source='dashboard')`，Dashboard 自然显示 Latest Attempt。Retry Step 不会自动重跑、
+失效或删除下游结果；如需更新下游，用户须依次 Retry 后续步骤。
+
 `GET /api/brief?date=YYYY-MM-DD` 的 Event 通过 `stage4_runs.daily_date` 归属，只读取
 `publication_status='published'` 的 Events。`events.event_date` 是成员文章时间推导的事件属性，
 不决定简报归属；其它内容仍通过 `processed_contents.daily_date` 归属。

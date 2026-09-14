@@ -38,6 +38,7 @@
     "test:daily-date-backfill": "tsx scripts/test-daily-date-backfill.ts",
     "test:dashboard-daily-scope": "tsx scripts/test-dashboard-daily-scope.ts",
     "test:daily-workflow-retry": "tsx scripts/test-daily-workflow-retry.ts",
+    "test:dashboard-step-retry": "tsx scripts/test-dashboard-step-retry.ts",
     "test:stage1-persistence": "tsx scripts/test-stage1-persistence.ts",
     "test:stage2-standalone": "tsx scripts/test-stage2-standalone.ts",
     "test:ranking-review": "tsx scripts/test-ranking-review.ts",

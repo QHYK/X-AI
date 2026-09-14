@@ -502,3 +502,8 @@ Stage 4 rebuild 使用 runtime artifacts 识别同一 `event_date` scope 的上�
 Dashboard 对目标 `daily_date + step` 按 `started_at DESC` 读取 Latest Attempt（包括最新 failed / partial），
 因此跨机器可见。业务真相仍来自业务表；完整 input、output、raw response 与 debug 诊断仍留在本地
 `runtime/`。没有对应 DB run 的迁移前历史数据才回退读取 runtime artifact。
+
+Dashboard Step Retry 只允许固定的 Content Completion、Exact Duplicate Filter 与 Stage 1–4 allowlist；HTTP
+只接收严格的 `daily_date` 与 step，不接收 shell command。服务端会拒绝同一 `(daily_date, step)` 已为
+`running` 的请求；成功启动后对应 CLI 继续使用既有 processing 逻辑并写入
+`pipeline_runs.trigger_source='dashboard'`。Retry Step 不等于 rerun downstream，不自动触发依赖失效或级联执行。
