@@ -39,6 +39,7 @@ export const dashboardMetricDefinitions: DashboardMetricSection[] = [
   ] },
   { title: "8. Content Funnel", metrics: [
     { metric: "Raw Content / Selected Content", source: "PostgreSQL · raw_articles", rule: "按 24h published_at intake scope 累加字符数。", notes: "NULL 计 0。" },
-    { metric: "Processed Summary / Daily Brief", source: "Mixed · DB + Brief composition", rule: "当前实现分别累加已处理摘要与 Brief 展示字段。", notes: "该卡仍含 input-scope 与 workflow Daily 的不同时间语义。" },
+    { metric: "Processed Summary", source: "PostgreSQL · processed_contents", rule: "按 workflow daily_date 累加已处理摘要字符数。", notes: "NULL 计 0。" },
+    { metric: "Daily Brief / Raw", source: "Mixed · raw_articles + Brief composition", rule: "Raw 使用 24h published-at scope；Daily Brief 使用 workflow daily_date。", notes: "存在 late-arrival 时，该比例仅为近似值。" },
   ] },
 ];

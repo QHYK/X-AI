@@ -11,6 +11,7 @@ import {
   runStage4EventEnrichmentLlm,
   type Stage4LlmOptions,
   type Stage4LlmSuccess,
+  type Stage4TokenUsage,
   type Stage4WebSearchToolUsage,
 } from "./stage4-llm.js";
 
@@ -52,7 +53,9 @@ export class Stage4EnrichmentError extends Error {
     message: string,
     readonly attempts: number,
     readonly llmCallCount: number,
+    readonly llmDurationMs: number,
     readonly elapsedMs: number,
+    readonly tokenUsage: Stage4TokenUsage | null,
     readonly rawOutputText: string | null,
   ) {
     super(message);
@@ -135,7 +138,9 @@ export async function enrichStage4Event(
       `Stage 4 enrichment failed for ${prepared.group.eventGroupId}: ${result.error}`,
       result.attempts,
       result.llmCallCount,
+      result.llmDurationMs,
       result.elapsedMs,
+      result.tokenUsage,
       result.rawOutputText,
     );
   }

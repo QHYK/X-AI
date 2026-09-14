@@ -131,7 +131,7 @@
 
 .panel {
   max-width: 1600px;
-  margin: 0 auto;
+  margin: 20px auto;
   overflow: hidden;
 }
 
@@ -221,7 +221,7 @@
 
 .table {
   width: 100%;
-  min-width: 2020px;
+  /* min-width: 2020px; */
   border-collapse: collapse;
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;

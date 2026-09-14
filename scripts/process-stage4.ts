@@ -5,6 +5,7 @@ import { assertStageLlmConfiguration, resolveStageLlmModel, resolveStageLlmProvi
 import { processStage4 } from "../src/processing/stage4-job.js";
 import { resolveDailyScope } from "../src/lib/daily-scope.js";
 import { pipelineTriggerSource, safelyFinishPipelineRun, safelyStartPipelineRun } from "../src/processing/pipeline-run-log.js";
+import { STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION } from "../src/prompts/stage4-event-enrichment.js";
 
 const inheritedStage3RunDir = process.env.STAGE4_STAGE3_RUN_DIR;
 const inheritedRunPointer = process.env.DAILY_STAGE_RUN_POINTER;
@@ -44,10 +45,17 @@ async function main() {
     await safelyFinishPipelineRun(pool, pipelineRunId, {
       status, provider: resolveStageLlmProvider("stage4"), model: resolveStageLlmModel("stage4"),
       metrics: { selected_count: result.selectedEventCount, ready_count: result.enrichmentSuccessCount,
-        failed_count: status === "partial" ? 1 : result.success ? 0 : result.selectedEventCount,
+        failed_count: result.enrichmentFailureCount ?? (status === "partial" ? 1 : result.success ? 0 : result.selectedEventCount),
         draft_count: status === "partial" ? result.enrichmentSuccessCount : 0,
         published_count: result.success ? result.eventsCreated : 0, llm_calls: result.llmCalls,
-        retry_count: result.retryCount, duration_ms: result.llmDurationMs }, errorSummary: result.error,
+        prompt_version: STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
+        retry_count: result.retryCount, duration_ms: Date.now() - startedAt.getTime(),
+        llm_duration_ms: result.llmDurationMs,
+        input_tokens: result.tokenUsage?.inputTokens ?? null,
+        output_tokens: result.tokenUsage?.outputTokens ?? null,
+        total_tokens: result.tokenUsage?.totalTokens ?? null,
+        web_search_event_count: result.webSearchEventCount,
+        total_web_search_calls: result.totalWebSearchCalls }, errorSummary: result.error,
     });
     console.log(JSON.stringify(result, null, 2));
     if (!result.success) {

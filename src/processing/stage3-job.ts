@@ -149,6 +149,7 @@ export type Stage3JobResult = {
   llmCallCount: number;
   retryCount: number;
   llmDurationMs: number;
+  tokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | null;
   persistence: Stage3PersistenceResult | null;
   eventReviewRunId: string | null;
 };
@@ -204,6 +205,8 @@ export async function processStage3(
   let llmCallCount = 0;
   let retryCount = 0;
   let llmDurationMs = 0;
+  let tokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  let hasMissingTokenUsage = false;
   let persistence: Stage3PersistenceResult | null = null;
   let eventReviewRunId: string | null = null;
   let persistenceStatus: "not_started" | "success" | "failed" = "not_started";
@@ -234,6 +237,7 @@ export async function processStage3(
     llmCallCount += eventRanking.calls;
     retryCount += eventRanking.retries;
     llmDurationMs += eventRanking.durationMs;
+    ({ tokenUsage, hasMissingTokenUsage } = addStage3TokenUsage(tokenUsage, hasMissingTokenUsage, eventRanking.tokenUsage));
     await writeJson(join(eventsDir, "ranking-output.json"), eventRanking.output);
     await writeJson(join(eventsDir, "ranking-diagnostics.json"), eventRanking.diagnostics);
 
@@ -319,6 +323,7 @@ export async function processStage3(
       llmCallCount += result.calls;
       retryCount += result.retries;
       llmDurationMs += result.durationMs;
+      ({ tokenUsage, hasMissingTokenUsage } = addStage3TokenUsage(tokenUsage, hasMissingTokenUsage, result.tokenUsage));
       digestRankings[category] = result.output;
       await writeJson(join(digestDir, `${toSlug(category)}-ranking-output.json`), result.output);
       await writeJson(
@@ -331,6 +336,7 @@ export async function processStage3(
     llmCallCount += longFormRanking.calls;
     retryCount += longFormRanking.retries;
     llmDurationMs += longFormRanking.durationMs;
+    ({ tokenUsage, hasMissingTokenUsage } = addStage3TokenUsage(tokenUsage, hasMissingTokenUsage, longFormRanking.tokenUsage));
     await writeJson(join(longFormDir, "ranking-output.json"), longFormRanking.output);
 
     const persistencePlan = buildPersistencePlan({
@@ -380,6 +386,7 @@ export async function processStage3(
       llmCallCount,
       retryCount,
       llmDurationMs,
+      tokenUsage: hasMissingTokenUsage ? null : tokenUsage,
       persistenceStatus,
       persistence,
       error: null,
@@ -399,6 +406,7 @@ export async function processStage3(
       llmCallCount,
       retryCount,
       llmDurationMs,
+      tokenUsage: hasMissingTokenUsage ? null : tokenUsage,
       persistence,
       eventReviewRunId,
     };
@@ -427,6 +435,7 @@ export async function processStage3(
       llmCallCount,
       retryCount,
       llmDurationMs,
+      tokenUsage: hasMissingTokenUsage ? null : tokenUsage,
       persistenceStatus,
       persistence,
       error,
@@ -446,6 +455,7 @@ export async function processStage3(
       llmCallCount,
       retryCount,
       llmDurationMs,
+      tokenUsage: hasMissingTokenUsage ? null : tokenUsage,
       persistence,
       eventReviewRunId,
     };
@@ -704,6 +714,7 @@ async function rankEvents(
   calls: number;
   retries: number;
   durationMs: number;
+  tokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | null;
   diagnostics: {
     input_event_count: number;
     returned_ranking_count: number;
@@ -717,6 +728,7 @@ async function rankEvents(
       calls: 0,
       retries: 0,
       durationMs: 0,
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       diagnostics: {
         input_event_count: 0,
         returned_ranking_count: 0,
@@ -730,9 +742,10 @@ async function rankEvents(
   assertRankingSuccess("Event Ranking", result);
   return {
     output: result.rankings,
-    calls: 1,
+    calls: result.attempts,
     retries: Math.max(0, result.attempts - 1),
     durationMs: result.elapsedMs,
+    tokenUsage: result.tokenUsage,
     diagnostics: {
       input_event_count: input.events.length,
       returned_ranking_count: result.rankings.rankings.length,
@@ -750,6 +763,7 @@ async function rankDigest(
   calls: number;
   retries: number;
   durationMs: number;
+  tokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | null;
   diagnostics: {
     category: string;
     input_count: number;
@@ -790,6 +804,10 @@ async function rankDigest(
     calls: result.attempts,
     retries: Math.max(0, result.attempts - 1),
     durationMs: result.elapsedMs,
+    tokenUsage: sumKnownStage3TokenUsages([
+      toStage3TokenUsage(initialDiag.input_tokens, initialDiag.output_tokens, initialDiag.total_tokens),
+      repairDiag ? toStage3TokenUsage(repairDiag.input_tokens, repairDiag.output_tokens, repairDiag.total_tokens) : { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    ]),
     diagnostics: {
       category: input.category,
       input_count: input.candidates.length,
@@ -825,9 +843,9 @@ async function rankDigest(
 async function rankLongForm(
   input: Stage3LongFormRankingInput,
   options: { model: string },
-): Promise<{ output: Stage3RankingOutput; calls: number; retries: number; durationMs: number }> {
+): Promise<{ output: Stage3RankingOutput; calls: number; retries: number; durationMs: number; tokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | null }> {
   if (input.candidates.length === 0) {
-    return { output: { rankings: [] }, calls: 0, retries: 0, durationMs: 0 };
+    return { output: { rankings: [] }, calls: 0, retries: 0, durationMs: 0, tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } };
   }
 
   const result = await runStage3LongFormRankingLlm(input, options);
@@ -849,13 +867,31 @@ function rankingMetrics(result: {
   output: Stage3RankingOutput;
   attempts: number;
   elapsedMs: number;
-}): { output: Stage3RankingOutput; calls: number; retries: number; durationMs: number } {
+  tokenUsage: Stage3TokenUsage | null;
+}): { output: Stage3RankingOutput; calls: number; retries: number; durationMs: number; tokenUsage: Stage3TokenUsage | null } {
   return {
     output: result.output,
-    calls: 1,
+    calls: result.attempts,
     retries: Math.max(0, result.attempts - 1),
     durationMs: result.elapsedMs,
+    tokenUsage: result.tokenUsage,
   };
+}
+
+type Stage3TokenUsage = { inputTokens: number; outputTokens: number; totalTokens: number };
+
+function addStage3TokenUsage(current: Stage3TokenUsage, missing: boolean, next: Stage3TokenUsage | null): { tokenUsage: Stage3TokenUsage; hasMissingTokenUsage: boolean } {
+  if (next === null) return { tokenUsage: current, hasMissingTokenUsage: true };
+  return { tokenUsage: { inputTokens: current.inputTokens + next.inputTokens, outputTokens: current.outputTokens + next.outputTokens, totalTokens: current.totalTokens + next.totalTokens }, hasMissingTokenUsage: missing };
+}
+
+function toStage3TokenUsage(inputTokens: number | null, outputTokens: number | null, totalTokens: number | null): Stage3TokenUsage | null {
+  return inputTokens === null || outputTokens === null || totalTokens === null ? null : { inputTokens, outputTokens, totalTokens };
+}
+
+function sumKnownStage3TokenUsages(values: Array<Stage3TokenUsage | null>): Stage3TokenUsage | null {
+  if (values.some((value) => value === null)) return null;
+  return values.reduce<Stage3TokenUsage>((sum, value) => ({ inputTokens: sum.inputTokens + value!.inputTokens, outputTokens: sum.outputTokens + value!.outputTokens, totalTokens: sum.totalTokens + value!.totalTokens }), { inputTokens: 0, outputTokens: 0, totalTokens: 0 });
 }
 
 function selectTopEvents(options: {
@@ -1306,6 +1342,7 @@ async function writeRunJson(
     llmCallCount: number;
     retryCount: number;
     llmDurationMs: number;
+    tokenUsage: Stage3TokenUsage | null;
     persistenceStatus: "not_started" | "success" | "failed";
     persistence: Stage3PersistenceResult | null;
     error: string | null;
@@ -1340,6 +1377,9 @@ async function writeRunJson(
     llm_call_count: value.llmCallCount,
     retry_count: value.retryCount,
     llm_duration_ms: value.llmDurationMs,
+    input_tokens: value.tokenUsage?.inputTokens ?? null,
+    output_tokens: value.tokenUsage?.outputTokens ?? null,
+    total_tokens: value.tokenUsage?.totalTokens ?? null,
     persistence_status: value.persistenceStatus,
     persistence: value.persistence,
     error: value.error,

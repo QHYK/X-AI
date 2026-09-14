@@ -66,7 +66,7 @@ async function main() {
 
     await safelyFinishPipelineRun(pool, pipelineRunId, {
       status: result.success ? "success" : "failed", provider: resolveStageLlmProvider("stage2"), model: result.model,
-      metrics: { candidate_count: summary.eventCandidateCount, group_count: summary.eventGroupCount,
+      metrics: { prompt_version: result.promptVersion, candidate_count: summary.eventCandidateCount, group_count: summary.eventGroupCount,
         llm_calls: summary.llmCallCount, retry_count: summary.retryCount, duration_ms: result.elapsedMs,
         llm_duration_ms: summary.llmDurationMs, input_tokens: result.tokenUsage?.inputTokens ?? null,
         output_tokens: result.tokenUsage?.outputTokens ?? null, total_tokens: result.tokenUsage?.totalTokens ?? null },

@@ -249,7 +249,7 @@ function ContentFunnel({ funnel }: { funnel: DashboardContentFunnel }) {
           <dd>{formatPercentage(funnel.processedSummaryChars, funnel.selectedChars)}</dd>
         </div>
         <div>
-          <dt>Daily Brief / Raw</dt>
+          <dt>Daily Brief / Raw <MetricInfo text="Raw 使用 24h published-at scope；Daily Brief 使用 workflow daily_date。存在 late-arrival 时，该比例仅为近似值。" /></dt>
           <dd>{formatPercentage(funnel.dailyBriefChars, funnel.rawChars)}</dd>
         </div>
       </dl>

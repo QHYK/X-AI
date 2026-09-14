@@ -7,6 +7,9 @@ import { processStage3 } from "../src/processing/stage3-job.js";
 import { resolveDailyScope } from "../src/lib/daily-scope.js";
 import { resolveStageLlmModel, resolveStageLlmProvider } from "../src/processing/llm-client.js";
 import { pipelineTriggerSource, safelyFinishPipelineRun, safelyStartPipelineRun } from "../src/processing/pipeline-run-log.js";
+import { STAGE3_EVENT_RANKING_PROMPT_VERSION } from "../src/prompts/stage3-event-ranking.js";
+import { STAGE3_DIGEST_RANKING_PROMPT_VERSION } from "../src/prompts/stage3-digest-ranking.js";
+import { STAGE3_LONG_FORM_RANKING_PROMPT_VERSION } from "../src/prompts/stage3-long-form-ranking.js";
 
 const inheritedDailyScope = readPublishedAtScopeFromEnv(process.env);
 const inheritedDailyDate = process.env.DAILY_DATE;
@@ -50,10 +53,15 @@ async function main() {
     await writeRunPointer(result.runDir);
     await safelyFinishPipelineRun(pool, pipelineRunId, {
       status: result.success ? "success" : "failed", provider: resolveStageLlmProvider("stage3"), model: resolveStageLlmModel("stage3"),
-      metrics: { event_group_count: result.eventGroupCount, selected_count: result.eventSelectedCount,
+      metrics: { prompt_versions: {
+          event: STAGE3_EVENT_RANKING_PROMPT_VERSION,
+          digest: STAGE3_DIGEST_RANKING_PROMPT_VERSION,
+          long_form: STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
+        }, event_group_count: result.eventGroupCount, selected_count: result.eventSelectedCount,
         digest_before_dedup: result.digestBeforeDedup, digest_after_dedup: result.digestAfterDedup,
         long_form_count: result.longFormCount, llm_calls: result.llmCallCount, retry_count: result.retryCount,
-        llm_duration_ms: result.llmDurationMs }, errorSummary: result.error,
+        llm_duration_ms: result.llmDurationMs, input_tokens: result.tokenUsage?.inputTokens ?? null,
+        output_tokens: result.tokenUsage?.outputTokens ?? null, total_tokens: result.tokenUsage?.totalTokens ?? null }, errorSummary: result.error,
     });
 
     console.log(JSON.stringify(result, null, 2));

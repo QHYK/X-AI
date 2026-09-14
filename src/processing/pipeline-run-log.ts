@@ -6,7 +6,8 @@ export const PIPELINE_STEPS = [
 export type PipelineStep = (typeof PIPELINE_STEPS)[number];
 export type PipelineRunStatus = "running" | "success" | "partial" | "failed";
 export type PipelineTriggerSource = "daily_orchestrator" | "standalone" | "dashboard";
-export type PipelineMetrics = Record<string, boolean | number | string | null>;
+export type PipelineMetricValue = boolean | number | string | null | { [key: string]: PipelineMetricValue };
+export type PipelineMetrics = Record<string, PipelineMetricValue>;
 
 export async function startPipelineRun(
   pool: Pool,

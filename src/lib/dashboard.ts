@@ -714,11 +714,17 @@ function isMissingTable(error: unknown, table: string): boolean {
 
 function stageMetricsFromPipelineRun(stage: DashboardStage, row: PipelineRunRow): DashboardStageMetrics {
   const metrics = asObject(row.metrics) ?? {};
+  const promptVersions = asObject(metrics.prompt_versions);
   const startedAt = toIsoString(row.started_at)!;
   const finishedAt = toIsoString(row.finished_at);
   const selectedEventCount = numberFrom(metrics, "selected_count", "event_selected_count");
   return {
     ...emptyStageMetrics(stage), stage, status: row.status, startedAt, model: row.model,
+    promptVersion: stringValue(metrics.prompt_version),
+    promptVersions: stage === "stage3" ? {
+      event: stringValue(promptVersions?.event), digest: stringValue(promptVersions?.digest),
+      longForm: stringValue(promptVersions?.long_form),
+    } : null,
     durationMs: numberFrom(metrics, "duration_ms") ?? durationBetween(startedAt, finishedAt),
     llmDurationMs: numberFrom(metrics, "llm_duration_ms"),
     llmCalls: numberFrom(metrics, "llm_calls"), retryCount: numberFrom(metrics, "retry_count"),

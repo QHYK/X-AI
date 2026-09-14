@@ -25,7 +25,7 @@ import {
   type Stage4PersistenceResult,
 } from "./stage4-persistence.js";
 import { DEFAULT_STAGE4_EVENT_LIMIT } from "./stage4-config.js";
-import { classifyStage4LlmError } from "./stage4-llm.js";
+import { classifyStage4LlmError, type Stage4TokenUsage } from "./stage4-llm.js";
 import { STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION } from "../prompts/stage4-event-enrichment.js";
 import { resolveDailyScope } from "../lib/daily-scope.js";
 
@@ -79,9 +79,11 @@ export type Stage4JobResult = {
   sourceStage3RunDir: string | null;
   selectedEventCount: number;
   enrichmentSuccessCount: number;
+  enrichmentFailureCount?: number;
   llmCalls: number;
   retryCount: number;
   llmDurationMs: number;
+  tokenUsage?: Stage4TokenUsage | null;
   webSearchEventCount: number;
   totalWebSearchCalls: number;
   eventsCreated: number;
@@ -372,6 +374,8 @@ async function processStage4FromDb(pool: Pool, options: Stage4JobOptions): Promi
   const model = resolveStageLlmModel("stage4", options.model);
   await mkdir(eventsDir, { recursive: true });
   let selectedEventCount = 0, enrichmentSuccessCount = 0, llmCalls = 0, retryCount = 0, llmDurationMs = 0, webSearchEventCount = 0, totalWebSearchCalls = 0;
+  let tokenUsage: Stage4TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  let hasMissingTokenUsage = false;
   const emptyCoverage = { expected: 0, updated: 0, duplicateProcessedContentIds: 0 };
   try {
     const selected = await loadLatestStage4Selection(pool, dailyDate, DEFAULT_STAGE4_EVENT_LIMIT);
@@ -381,9 +385,9 @@ async function processStage4FromDb(pool: Pool, options: Stage4JobOptions): Promi
         startedAt, finishedAt: new Date(), status: "success", dailyDate, stage4RunId: null,
         model, selectedEventCount: 0, enrichmentSuccessCount: 0, enrichmentFailureCount: 0,
         llmCalls: 0, retryCount: 0, llmDurationMs: 0, webSearchEventCount: 0,
-        totalWebSearchCalls: 0, eventsCreated: 0, error: null,
+        totalWebSearchCalls: 0, eventsCreated: 0, tokenUsage, error: null,
       }));
-      return { success: true, runDir, sourceStage3RunDir: null, selectedEventCount: 0, enrichmentSuccessCount: 0, llmCalls: 0, retryCount: 0, llmDurationMs: 0, webSearchEventCount: 0, totalWebSearchCalls: 0, eventsCreated: 0, processedContentEventIdUpdated: 0, associationCoverage: emptyCoverage, persistence: null, error: null };
+      return { success: true, runDir, sourceStage3RunDir: null, selectedEventCount: 0, enrichmentSuccessCount: 0, enrichmentFailureCount: 0, llmCalls: 0, retryCount: 0, llmDurationMs: 0, tokenUsage, webSearchEventCount: 0, totalWebSearchCalls: 0, eventsCreated: 0, processedContentEventIdUpdated: 0, associationCoverage: emptyCoverage, persistence: null, error: null };
     }
     const reviewRunId = selected[0]!.reviewRunId;
     const stage4Run = await loadOrCreateStage4Run(pool, dailyDate, reviewRunId, selected.length);
@@ -401,7 +405,8 @@ async function processStage4FromDb(pool: Pool, options: Stage4JobOptions): Promi
         const enriched = await enrichStage4Event(prepared, { model });
         llmCalls += enriched.llm.llmCallCount;
         retryCount += enriched.llm.attempts - 1;
-        llmDurationMs += enriched.llm.elapsedMs;
+        llmDurationMs += enriched.llm.llmDurationMs;
+        ({ tokenUsage, hasMissingTokenUsage } = addStage4TokenUsage(tokenUsage, hasMissingTokenUsage, enriched.llm.tokenUsage));
         if (enriched.toolUsage.webSearchPerformed) webSearchEventCount++;
         totalWebSearchCalls += enriched.toolUsage.webSearchCallCount;
         const inserted = await persistStage4Draft(pool, stage4Run.id, toEventToPersist(enriched));
@@ -412,7 +417,8 @@ async function processStage4FromDb(pool: Pool, options: Stage4JobOptions): Promi
         if (caught instanceof Stage4EnrichmentError) {
           llmCalls += caught.llmCallCount;
           retryCount += Math.max(0, caught.attempts - 1);
-          llmDurationMs += caught.elapsedMs;
+          llmDurationMs += caught.llmDurationMs;
+          ({ tokenUsage, hasMissingTokenUsage } = addStage4TokenUsage(tokenUsage, hasMissingTokenUsage, caught.tokenUsage));
         }
         failures.push(message);
         await writeJson(join(eventDir, "failure.json"), { error: message });
@@ -425,35 +431,51 @@ async function processStage4FromDb(pool: Pool, options: Stage4JobOptions): Promi
         startedAt, finishedAt: new Date(), status: "partial", dailyDate, stage4RunId: stage4Run.id,
         model, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: failures.length,
         llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls,
-        eventsCreated: 0, error: failures.join("; "),
+        eventsCreated: 0, tokenUsage: hasMissingTokenUsage ? null : tokenUsage, error: failures.join("; "),
       }));
-      return { success: false, runDir, sourceStage3RunDir: null, selectedEventCount, enrichmentSuccessCount, llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls, eventsCreated: 0, processedContentEventIdUpdated: 0, associationCoverage: { ...emptyCoverage, expected: candidateIds.length }, persistence: null, error: failures.join("; ") };
+      return { success: false, runDir, sourceStage3RunDir: null, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: failures.length, llmCalls, retryCount, llmDurationMs, tokenUsage: hasMissingTokenUsage ? null : tokenUsage, webSearchEventCount, totalWebSearchCalls, eventsCreated: 0, processedContentEventIdUpdated: 0, associationCoverage: { ...emptyCoverage, expected: candidateIds.length }, persistence: null, error: failures.join("; ") };
     }
     const published = await publishStage4Run(pool, stage4Run.id);
     await writeRunJson(join(runDir, "run.json"), stage4RuntimeArtifact({
       startedAt, finishedAt: new Date(), status: "success", dailyDate, stage4RunId: stage4Run.id,
       model, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: 0,
       llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls,
-      eventsCreated: published.publishedCount, error: null,
+      eventsCreated: published.publishedCount, tokenUsage: hasMissingTokenUsage ? null : tokenUsage, error: null,
     }));
-    return { success: true, runDir, sourceStage3RunDir: null, selectedEventCount, enrichmentSuccessCount, llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls, eventsCreated: published.publishedCount, processedContentEventIdUpdated: published.associationCount, associationCoverage: { ...emptyCoverage, expected: candidateIds.length, updated: published.associationCount }, persistence: null, error: null };
+    return { success: true, runDir, sourceStage3RunDir: null, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: 0, llmCalls, retryCount, llmDurationMs, tokenUsage: hasMissingTokenUsage ? null : tokenUsage, webSearchEventCount, totalWebSearchCalls, eventsCreated: published.publishedCount, processedContentEventIdUpdated: published.associationCount, associationCoverage: { ...emptyCoverage, expected: candidateIds.length, updated: published.associationCount }, persistence: null, error: null };
   } catch (caught) {
     const error = caught instanceof Error ? caught.message : String(caught);
     await writeRunJson(join(runDir, "run.json"), stage4RuntimeArtifact({
       startedAt, finishedAt: new Date(), status: "failed", dailyDate, stage4RunId: null,
       model, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: 0,
       llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls,
-      eventsCreated: 0, error,
+      eventsCreated: 0, tokenUsage: hasMissingTokenUsage ? null : tokenUsage, error,
     }));
-    return { success: false, runDir, sourceStage3RunDir: null, selectedEventCount, enrichmentSuccessCount, llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls, eventsCreated: 0, processedContentEventIdUpdated: 0, associationCoverage: emptyCoverage, persistence: null, error };
+    return { success: false, runDir, sourceStage3RunDir: null, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: 0, llmCalls, retryCount, llmDurationMs, tokenUsage: hasMissingTokenUsage ? null : tokenUsage, webSearchEventCount, totalWebSearchCalls, eventsCreated: 0, processedContentEventIdUpdated: 0, associationCoverage: emptyCoverage, persistence: null, error };
   }
+}
+
+function addStage4TokenUsage(
+  current: Stage4TokenUsage,
+  missing: boolean,
+  next: Stage4TokenUsage | null,
+): { tokenUsage: Stage4TokenUsage; hasMissingTokenUsage: boolean } {
+  if (next === null) return { tokenUsage: current, hasMissingTokenUsage: true };
+  return {
+    tokenUsage: {
+      inputTokens: current.inputTokens + next.inputTokens,
+      outputTokens: current.outputTokens + next.outputTokens,
+      totalTokens: current.totalTokens + next.totalTokens,
+    },
+    hasMissingTokenUsage: missing,
+  };
 }
 
 function stage4RuntimeArtifact(value: {
   startedAt: Date; finishedAt: Date; status: "success" | "partial" | "failed"; dailyDate: string;
   stage4RunId: string | null; model: string; selectedEventCount: number; enrichmentSuccessCount: number;
   enrichmentFailureCount: number; llmCalls: number; retryCount: number; llmDurationMs: number;
-  webSearchEventCount: number; totalWebSearchCalls: number; eventsCreated: number; error: string | null;
+  webSearchEventCount: number; totalWebSearchCalls: number; eventsCreated: number; tokenUsage?: Stage4TokenUsage | null; error: string | null;
 }): Record<string, unknown> {
   return {
     stage: "stage4", status: value.status, started_at: value.startedAt.toISOString(),
@@ -466,6 +488,9 @@ function stage4RuntimeArtifact(value: {
     llm_call_count: value.llmCalls, retry_count: value.retryCount,
     llm_duration_ms: value.llmDurationMs, web_search_event_count: value.webSearchEventCount,
     total_web_search_calls: value.totalWebSearchCalls, events_created: value.eventsCreated,
+    input_tokens: value.tokenUsage?.inputTokens ?? null,
+    output_tokens: value.tokenUsage?.outputTokens ?? null,
+    total_tokens: value.tokenUsage?.totalTokens ?? null,
     error: value.error,
   };
 }
