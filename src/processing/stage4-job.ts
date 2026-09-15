@@ -399,7 +399,7 @@ async function processStage4FromDb(pool: Pool, options: Stage4JobOptions): Promi
       const eventDir = join(eventsDir, item.eventGroupId);
       await mkdir(eventDir, { recursive: true });
       if (drafted.has(item.reviewItemId)) { enrichmentSuccessCount++; continue; }
-      const prepared = prepareStage4Event({ eventGroupId: item.eventGroupId, eventReviewItemId: item.reviewItemId, eventHint: item.eventHint, aiRank: item.aiRank, displayRank: item.displayRank, processedContentIds: item.processedContentIds }, sourceCandidates, startedAt);
+      const prepared = prepareStage4Event({ eventGroupId: item.eventGroupId, eventReviewItemId: item.reviewItemId, eventHint: item.eventHint, aiRank: item.aiRank, displayRank: item.displayRank, processedContentIds: item.processedContentIds }, sourceCandidates, startedAt, dailyDate);
       await writeJson(join(eventDir, "input.json"), prepared.input);
       try {
         const enriched = await enrichStage4Event(prepared, { model });

@@ -26,8 +26,14 @@ export type Stage2ValidationResult =
     };
 
 export type Stage2AssignmentValidation = {
+  /** Fatal only when the model names an ID that cannot be mapped to input. */
   passed: boolean;
   missingTempIds: string[];
+  /** A candidate used by more than one distinct Event Group (warning). */
+  crossGroupMemberships: Array<{ tempId: string; eventGroups: number[] }>;
+  /** Repeated occurrences within one Event Group (warning; normalized before persistence). */
+  sameGroupDuplicates: Array<{ tempId: string; eventGroup: number }>;
+  /** Legacy summary retained for existing diagnostic consumers. */
   duplicateTempIds: string[];
   inventedTempIds: string[];
   errors: string[];
@@ -115,39 +121,48 @@ export function validateStage2Output(value: unknown): Stage2ValidationResult {
   };
 }
 
-/** 验证每个 Event candidate 恰好被引用一次，识别遗漏、重复与虚构 ID。 */
+/**
+ * Classifies assignment quality without turning usable output into a failure.
+ * Stage 2 still asks the model for an exclusive, complete grouping, but the
+ * database snapshot can safely represent cross-group memberships. Only an
+ * unmappable ID is fatal because it cannot be persisted truthfully.
+ */
 export function validateStage2Assignments(
   output: Stage2Output,
   input: Stage2Input,
 ): Stage2AssignmentValidation {
   const expected = new Set(input.event_candidates.map((candidate) => candidate.temp_id));
-  const seen = new Map<string, number>();
+  const groupIndexesByTempId = new Map<string, number[]>();
+  const sameGroupDuplicates: Array<{ tempId: string; eventGroup: number }> = [];
   const inventedTempIds = new Set<string>();
 
-  output.events.forEach((event) => {
+  output.events.forEach((event, eventIndex) => {
+    const seenInGroup = new Set<string>();
     event.sources.forEach((tempId) => {
       if (!expected.has(tempId)) {
         inventedTempIds.add(tempId);
         return;
       }
-
-      seen.set(tempId, (seen.get(tempId) ?? 0) + 1);
+      if (seenInGroup.has(tempId)) {
+        sameGroupDuplicates.push({ tempId, eventGroup: eventIndex + 1 });
+        return;
+      }
+      seenInGroup.add(tempId);
+      const indexes = groupIndexesByTempId.get(tempId) ?? [];
+      indexes.push(eventIndex + 1);
+      groupIndexesByTempId.set(tempId, indexes);
     });
   });
 
-  const missingTempIds = [...expected].filter((tempId) => !seen.has(tempId));
-  const duplicateTempIds = [...seen.entries()]
-    .filter(([, count]) => count > 1)
-    .map(([tempId]) => tempId);
+  const missingTempIds = [...expected].filter((tempId) => !groupIndexesByTempId.has(tempId));
+  const crossGroupMemberships = [...groupIndexesByTempId.entries()]
+    .filter(([, groupIndexes]) => groupIndexes.length > 1)
+    .map(([tempId, eventGroups]) => ({ tempId, eventGroups }));
+  const duplicateTempIds = [...new Set([
+    ...crossGroupMemberships.map(({ tempId }) => tempId),
+    ...sameGroupDuplicates.map(({ tempId }) => tempId),
+  ])];
   const errors: string[] = [];
-
-  for (const tempId of missingTempIds) {
-    errors.push(`Missing temp_id ${tempId}.`);
-  }
-
-  for (const tempId of duplicateTempIds) {
-    errors.push(`Duplicate assignment for temp_id ${tempId}.`);
-  }
 
   for (const tempId of inventedTempIds) {
     errors.push(`Invented or modified temp_id ${tempId}.`);
@@ -156,6 +171,8 @@ export function validateStage2Assignments(
   return {
     passed: errors.length === 0,
     missingTempIds,
+    crossGroupMemberships,
+    sameGroupDuplicates,
     duplicateTempIds,
     inventedTempIds: [...inventedTempIds],
     errors,

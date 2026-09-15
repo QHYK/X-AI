@@ -30,7 +30,7 @@ export async function PATCH(request: Request): Promise<Response> {
     const enrichedEvents: EnrichedStage4Event[] = [];
     for (const item of enrichmentRequests) {
       enrichedEvents.push(
-        await enrichStage4Event(prepareStage4Event(item, sourceCandidates, new Date())),
+        await enrichStage4Event(prepareStage4Event(item, sourceCandidates, new Date(), input.dailyDate)),
       );
     }
     const result = await saveEventReviewRanking(pool, { ...input, enrichedEvents });

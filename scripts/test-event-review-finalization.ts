@@ -3,7 +3,10 @@ import {
   getEventReviewEnrichmentRequests,
   saveEventReviewRanking,
 } from "../src/lib/ranking-review.js";
-import type { EnrichedStage4Event } from "../src/processing/stage4-event-processing.js";
+import {
+  prepareStage4Event,
+  type EnrichedStage4Event,
+} from "../src/processing/stage4-event-processing.js";
 
 type Check = { name: string; passed: boolean; detail?: unknown };
 const checks: Check[] = [];
@@ -99,12 +102,20 @@ try {
 }
 
 const promotionLog: Array<{ text: string; values: unknown[] | undefined }> = [];
+const promotionEnrichment = fakeEnrichment(promotionRequests[0]!);
+checks.push({
+  name: "a promoted Event retains the target Daily attribution despite an older source date",
+  passed:
+    promotionEnrichment.eventDate.eventDate === "2026-08-25" &&
+    promotionEnrichment.eventDate.source === "daily_attribution",
+  detail: promotionEnrichment.eventDate,
+});
 const promotionResult = await saveEventReviewRanking(createSavePool(promotionLog, [25]), {
   dailyDate: "2026-08-25",
   reviewRunId: runId(),
   orderedIds: promoted,
   touchedIds: [idForRank(25)],
-  enrichedEvents: [fakeEnrichment(promotionRequests[0]!)],
+  enrichedEvents: [promotionEnrichment],
 });
 const insertedEvent = promotionLog.find((entry) => entry.text.startsWith("insert into events"));
 checks.push({
@@ -112,6 +123,7 @@ checks.push({
   passed:
     promotionResult.eventsCreated === 1 &&
     promotionResult.feedbackCount === 1 &&
+    insertedEvent?.values?.[0] === "2026-08-25" &&
     insertedEvent?.values?.at(-4) === idForRank(25) &&
     insertedEvent?.values?.at(-3) === stage4RunId() &&
     insertedEvent.values?.at(-2) === 25 &&
@@ -199,6 +211,7 @@ function respondToReviewQuery(text: string, _values: unknown[] | undefined, miss
     normalized.startsWith("update events set display_rank") ||
     normalized.startsWith("update events set publication_status") ||
     normalized.startsWith("update stage4_runs") ||
+    normalized.startsWith("with memberships as (") ||
     normalized.startsWith("update processed_contents pc set event_id") ||
     normalized.startsWith("update processed_contents set event_id") ||
     normalized.startsWith("insert into feedback")
@@ -209,11 +222,30 @@ function respondToReviewQuery(text: string, _values: unknown[] | undefined, miss
 }
 
 function fakeEnrichment(group: NonNullable<typeof promotionRequests[number]>): EnrichedStage4Event {
+  const prepared = prepareStage4Event(
+    group,
+    new Map([
+      [
+        group.processedContentIds[0]!,
+        {
+          processedContentId: group.processedContentIds[0]!,
+          title: "Late source",
+          summary: "Summary",
+          entities: [],
+          source: "Source",
+          url: "https://example.com/late",
+          publishedAt: new Date("2026-08-20T00:00:00.000Z"),
+        },
+      ],
+    ]),
+    new Date("2026-08-26T00:00:00.000Z"),
+    "2026-08-25",
+  );
   return {
     group,
-    input: { event_hint: group.eventHint, sources: [] },
-    eventDate: { eventDate: "2026-08-25", source: "earliest_published_at" },
-    publishedAtValues: [],
+    input: prepared.input,
+    eventDate: prepared.eventDate,
+    publishedAtValues: prepared.publishedAtValues,
     llm: {} as EnrichedStage4Event["llm"],
     output: {
       event_title: "Event",

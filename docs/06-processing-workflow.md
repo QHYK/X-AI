@@ -501,15 +501,17 @@ Event Group 是可重建的 Production 中间态。Stage 2 成功后，将当前
 不生成不存在的 ID
 ```
 
-当前 assignment validation 仍处于 diagnostic 模式：
+Stage 2 优先保留可安全解释的 Structured Output。assignment anomaly 分级如下：
 
 ```text
-missing / duplicate / invented IDs
-→ 记录
-→ 暂不因为 assignment 问题阻断 runtime output
-```
+同内容跨 Group 引用 / 同 Group 重复 / missing ID
+→ runtime warning
+→ 保留跨 Group membership；同 Group deterministic dedupe；继续 replace snapshot
 
-这是当前实现例外，不改变长期 contract。
+invented / modified ID
+→ fatal validation
+→ 写入 failed runtime diagnostic，且不 replace Event Group snapshot
+```
 
 ### 7.4 Persistence and Runtime
 
@@ -533,7 +535,7 @@ runtime/stage2/<run-id>/
     run.json
 ```
 
-`run.json` 记录 model / prompt version、token usage、retry / duration、assignment validation、success / failed 等运行信息。runtime artifacts 用于 observability / debug，不作为 Stage 3 的 Production Source of Truth。
+`run.json` 记录 model / prompt version、token usage、retry / duration、assignment validation、warnings、success / failed 等运行信息。warnings 保存 cross-group memberships、same-group duplicates 与 missing IDs；`pipeline_runs.metrics` 只保存相应的计数摘要。runtime artifacts 用于 observability / debug，不作为 Stage 3 的 Production Source of Truth。
 
 ---
 
@@ -738,15 +740,16 @@ Stage 4 创建 Event 时保存对应的：
 - `ai_rank` / `display_rank`；
 - 真实 external context provenance（仅真实发生 Web Search 时）。
 
-组成 Event 的 `processed_contents.event_id` 在正式 publication state 中关联到对应 Event。系统不创建额外 `event_articles` join table。
+`event_group_items` 是组成 Event 的 source membership truth，经 `event_review_items.event_group_id` 关联到最终 Event，允许 source content 被多个 Event 共享。`processed_contents.event_id` 仅为单值兼容 backlink；共享内容不写任意一个 Event ID。系统不创建额外 `event_articles` join table。
 
 ### 9.5 Daily Brief Visibility
 
 Daily Brief 对同一 `daily_date` 只读取一个一致的 Stage 4 generation state：
 
 - 当前 Run 已完整 publish：读取该 Run 的 published Event set；
-- 当前 Run 仍为 partial：只返回该 Run 已完成的 draft partial set，并明确保持 partial 状态；
-- 不把旧 published Event 与当前 Run drafts 混合成一个看似完整的新结果。
+- 已有旧 published set、当前 Run 仍为 running / partial：继续读取旧 published Event set；不返回 draft，也不混合两套结果；
+- 尚无 published set、当前 Run 仍为 running / partial：可以返回该 Run 已完成的 draft partial set，并明确保持 partial 状态；
+- complete-set publish 后原子归档并替换同一 Daily 的旧 published set。
 
 因此 Stage 4 的 durable draft、complete-set publish、previous-set archive 与 Daily Brief read behavior 共同构成同一个 Production consistency contract。
 
@@ -781,7 +784,7 @@ Daily Brief 对同一 `daily_date` 只读取一个一致的 Stage 4 generation s
 - Stage 2 rerun 可以 replace 当前 Daily 的 Event Group snapshot；
 - Stage 2 不直接写最终 `events`；
 - runtime failure 不应被 Stage 3 当作业务输入来源；
-- assignment validation 的当前 diagnostic exception 必须明确记录。
+- invented / modified ID 等 fatal validation 失败时保留 failed runtime diagnostic，且不替换现有 snapshot；跨 Group、同 Group 重复和 missing assignment 是 warning，不阻断可安全的 snapshot replacement。
 
 ### Stage 3
 

@@ -40,6 +40,7 @@
     "test:dashboard-step-retry": "tsx scripts/test-dashboard-step-retry.ts",
     "test:stage1-persistence": "tsx scripts/test-stage1-persistence.ts",
     "test:stage2-standalone": "tsx scripts/test-stage2-standalone.ts",
+    "test:stage2-persistence": "tsx scripts/test-stage2-persistence.ts",
     "test:ranking-review": "tsx scripts/test-ranking-review.ts",
     "test:event-review-finalization": "tsx scripts/test-event-review-finalization.ts",
     "test:model-evaluation": "tsx scripts/test-model-evaluation.ts",

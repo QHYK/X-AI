@@ -115,7 +115,7 @@ Event Candidates
 - Candidate-to-Event assignments
 
 **Definition of Done**
-- 每个 Event Candidate 被分配到一个明确的 Event Group；
+- 每个 Event Candidate 尽量被分配到一个最合适且明确的 Event Group；grouping 目标保持互斥，少量可安全解释的共享归属由执行层记录 warning；
 - 同一具体事件或 active event thread 中高度关联的发展被合理合并；
 - 不把 shared topic / entity 错误当成同一 Event；
 - 不确定的匹配保持独立；

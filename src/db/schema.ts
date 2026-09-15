@@ -116,7 +116,6 @@ export const eventGroupItems = pgTable("event_group_items", {
   processedContentId: uuid("processed_content_id").notNull().references(() => processedContents.id),
 }, (table) => [
   uniqueIndex("event_group_items_group_content_unique").on(table.eventGroupId, table.processedContentId),
-  uniqueIndex("event_group_items_content_unique").on(table.processedContentId),
 ]);
 
 export const stage4Runs = pgTable("stage4_runs", {
@@ -172,7 +171,7 @@ export const processedContents = pgTable(
     rawArticleId: uuid("raw_article_id")
       .notNull()
       .references(() => rawArticles.id),
-    dailyDate: date("daily_date"),
+    dailyDate: date("daily_date").notNull(),
     routing: text("routing").notNull(),
     category: text("category").notNull(),
     tags: text("tags").array(),

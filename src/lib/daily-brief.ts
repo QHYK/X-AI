@@ -275,15 +275,18 @@ async function loadEventSources(
   const result = await pool.query<EventSourceRow>(
     `
       select
-        pc.event_id,
+        events.id as event_id,
         s.name as source,
         ra.title,
         ra.url
-      from processed_contents pc
+      from events
+      join event_review_items eri on eri.id = events.event_review_item_id
+      join event_group_items egi on egi.event_group_id = eri.event_group_id
+      join processed_contents pc on pc.id = egi.processed_content_id
       join raw_articles ra on ra.id = pc.raw_article_id
       join sources s on s.id = ra.source_id
-      where pc.event_id = any($1::uuid[])
-      order by pc.event_id asc, ra.published_at asc nulls last, s.name asc, pc.id asc
+      where events.id = any($1::uuid[])
+      order by events.id asc, ra.published_at asc nulls last, s.name asc, pc.id asc
     `,
     [eventIds],
   );

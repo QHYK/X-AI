@@ -400,15 +400,15 @@ function StageCard({
         <Metric label="Input tokens" value={formatMetric(metrics.inputTokens)} />
         <Metric label="Output tokens" value={formatMetric(metrics.outputTokens)} />
         <Metric label="Total tokens" value={formatMetric(metrics.totalTokens)} />
-        {stageMetrics.map(([metricLabel, value]) => (
-          <Metric key={metricLabel} label={metricLabel} value={formatMetric(value)} />
+        {stageMetrics.map(([metricLabel, value, info]) => (
+          <Metric key={metricLabel} label={metricLabel} value={formatMetric(value)} info={info} />
         ))}
       </dl>
     </article>
   );
 }
 
-function stageSpecificMetrics(metrics: DashboardStageMetrics): Array<[string, number | null]> {
+function stageSpecificMetrics(metrics: DashboardStageMetrics): Array<[string, number | null, string?]> {
   switch (metrics.stage) {
     case "stage1":
       return [
@@ -421,6 +421,7 @@ function stageSpecificMetrics(metrics: DashboardStageMetrics): Array<[string, nu
       return [
         ["Candidates", metrics.candidateCount],
         ["Groups", metrics.groupCount],
+        ["Warnings", metrics.warningCount, "Stage2 输出可安全使用，但发现重复归属、同组重复或未分组内容等非致命异常；这些异常不会阻断后续 Pipeline。"],
       ];
     case "stage3":
       return [

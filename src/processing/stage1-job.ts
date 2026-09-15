@@ -15,7 +15,7 @@ import type {
   Stage1Routing,
 } from "./stage1-contract.js";
 import { resolveStageLlmModel } from "./llm-client.js";
-import type { PublishedAtScope } from "../lib/daily-scope.js";
+import { resolveDailyScope, type PublishedAtScope } from "../lib/daily-scope.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
 
@@ -107,6 +107,7 @@ export async function processStage1Batch(
   options: Stage1JobOptions = {},
 ): Promise<Stage1JobSummary> {
   const startedAt = new Date();
+  const dailyDate = options.dailyDate ?? resolveDailyScope(undefined, startedAt).dailyDate;
   const publishedWithinHours = options.publishedWithinHours ?? DEFAULT_STAGE1_LOOKBACK_HOURS;
   const concurrency = Math.max(1, options.concurrency ?? DEFAULT_STAGE1_CONCURRENCY);
   const batchConfig = resolveStage1BatchConfig(options);
@@ -119,7 +120,14 @@ export async function processStage1Batch(
   await options.onInitialBatches?.(batches);
 
   const batchResults = await runWithConcurrency(batches, concurrency, async (batch, index) =>
-    processStage1MicroBatch(pool, batch, options, 0, `batch-${String(index + 1).padStart(3, "0")}`, null),
+    processStage1MicroBatch(
+      pool,
+      batch,
+      { ...options, dailyDate },
+      0,
+      `batch-${String(index + 1).padStart(3, "0")}`,
+      null,
+    ),
   );
   const results = batchResults.flatMap((result) => result.results);
   const tokenUsage = sumTokenUsage(batchResults.map((result) => result.tokenUsage));
@@ -379,6 +387,7 @@ async function processStage1MicroBatch(
   batchId = "batch",
   parentBatchId: string | null = null,
 ): Promise<Stage1MicroBatchResult> {
+  const dailyDate = options.dailyDate ?? resolveDailyScope(undefined).dailyDate;
   const llmResult = await runStage1BatchLlm(articles, {
     ...options,
     onAttempt: async (event) => {
@@ -405,7 +414,7 @@ async function processStage1MicroBatch(
       singletonBatchCount: articles.length === 1 ? 1 : 0,
       results: await persistSuccessfulBatch(pool, articles, llmResult.output.results, {
         attempts: inheritedAttempts + llmResult.attempts,
-        dailyDate: options.dailyDate,
+        dailyDate,
       }),
     };
   }
@@ -453,7 +462,7 @@ async function persistSuccessfulBatch(
   pool: Pool,
   articles: Stage1ArticleRow[],
   outputResults: Stage1BatchOutputResult[],
-  options: { attempts: number; dailyDate?: string },
+  options: { attempts: number; dailyDate: string },
 ): Promise<Stage1JobArticleResult[]> {
   const outputByTempId = new Map(outputResults.map((result) => [result.temp_id, result]));
 
@@ -507,7 +516,7 @@ async function persistStage1Output(
   article: Stage1ArticleRow,
   output: Stage1Output,
   attempts: number,
-  dailyDate?: string,
+  dailyDate: string,
 ): Promise<Stage1JobArticleResult> {
   try {
     if (output.routing === "Ignore") {
@@ -630,7 +639,7 @@ export async function persistStage1Selected(
   queryable: Queryable,
   rawArticleId: string,
   output: Stage1Output,
-  dailyDate?: string,
+  dailyDate: string,
 ): Promise<boolean> {
   const result = await queryable.query<{ id: string }>(
     `
@@ -654,7 +663,7 @@ export async function persistStage1Selected(
     `,
     [
       rawArticleId,
-      dailyDate ?? null,
+      dailyDate,
       toDatabaseRouting(output.routing),
       output.category,
       output.tags,

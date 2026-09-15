@@ -2,7 +2,7 @@ import { config } from "dotenv";
 import { writeFile } from "node:fs/promises";
 import { Pool } from "pg";
 import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
-import { processStage2Merge, summarizeStage2Result } from "../src/processing/stage2-job.js";
+import { processStage2Merge, stage2WarningMetrics, summarizeStage2Result } from "../src/processing/stage2-job.js";
 import { writeStage2RuntimeArtifacts } from "../src/processing/stage2-runtime-artifacts.js";
 import { loadOptionalStage1Runtime } from "../src/processing/stage1-runtime.js";
 import { backfillDailyAttribution } from "../src/processing/daily-attribution.js";
@@ -52,9 +52,6 @@ async function main() {
       stage1FinishedAt: stage1?.run.finished_at,
     });
     const summary = summarizeStage2Result(result);
-    const eventGroupIds = result.success
-      ? await replaceEventGroups(pool, scope.dailyDate, result.eventGroups)
-      : [];
     const artifacts = await writeStage2RuntimeArtifacts(result, {
       startedAt,
       stage1RunDir: stage1?.runDir ?? null,
@@ -64,19 +61,44 @@ async function main() {
     });
     await writeRunPointer(artifacts.runDir);
 
+    if (!result.success) {
+      await safelyFinishPipelineRun(pool, pipelineRunId, {
+        status: "failed",
+        provider: resolveStageLlmProvider("stage2"),
+        model: result.model,
+        metrics: {
+          prompt_version: result.promptVersion,
+          candidate_count: summary.eventCandidateCount,
+          group_count: summary.eventGroupCount,
+          llm_calls: summary.llmCallCount,
+          retry_count: summary.retryCount,
+          duration_ms: result.elapsedMs,
+          llm_duration_ms: summary.llmDurationMs,
+          input_tokens: result.tokenUsage?.inputTokens ?? null,
+          output_tokens: result.tokenUsage?.outputTokens ?? null,
+          total_tokens: result.tokenUsage?.totalTokens ?? null,
+          ...stage2WarningMetrics(summary),
+        },
+        errorSummary: result.error,
+      });
+      console.log(JSON.stringify({ ...summary, runtimePath: artifacts.runDir }, null, 2));
+      process.exitCode = 1;
+      return;
+    }
+
+    const eventGroupIds = await replaceEventGroups(pool, scope.dailyDate, result.eventGroups);
+
     await safelyFinishPipelineRun(pool, pipelineRunId, {
-      status: result.success ? "success" : "failed", provider: resolveStageLlmProvider("stage2"), model: result.model,
+      status: "success", provider: resolveStageLlmProvider("stage2"), model: result.model,
       metrics: { prompt_version: result.promptVersion, candidate_count: summary.eventCandidateCount, group_count: summary.eventGroupCount,
         llm_calls: summary.llmCallCount, retry_count: summary.retryCount, duration_ms: result.elapsedMs,
         llm_duration_ms: summary.llmDurationMs, input_tokens: result.tokenUsage?.inputTokens ?? null,
-        output_tokens: result.tokenUsage?.outputTokens ?? null, total_tokens: result.tokenUsage?.totalTokens ?? null },
-      errorSummary: result.success ? null : result.error,
+        output_tokens: result.tokenUsage?.outputTokens ?? null, total_tokens: result.tokenUsage?.totalTokens ?? null,
+        ...stage2WarningMetrics(summary) },
+      errorSummary: null,
     });
 
     console.log(JSON.stringify({ ...summary, eventGroupIds, runtimePath: artifacts.runDir }, null, 2));
-    if (!result.success) {
-      process.exitCode = 1;
-    }
     } catch (error) {
       await safelyFinishPipelineRun(pool, pipelineRunId, { status: "failed", provider: resolveStageLlmProvider("stage2"), errorSummary: error instanceof Error ? error.message : String(error) });
       throw error;

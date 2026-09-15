@@ -153,11 +153,9 @@ Scope 的时间含义和 current/historical 行为在 [Workflow Overview](02-wor
 | `STAGE2_LLM_MAX_RETRIES` | `0` | Stage2 最大重试数 |
 | `STAGE2_LLM_RETRY_DELAY_MS` | `1000` ms | Stage2 retry delay |
 | `STAGE2_LLM_MAX_OUTPUT_TOKENS` | `64000` | Stage2 最大输出 token |
-| `STAGE3_PUBLISHED_WITHIN_HOURS` | `24` | Stage3 lookback；`STAGE3_COLLECTED_WITHIN_HOURS` 是兼容 alias |
 | `STAGE3_LLM_TIMEOUT_MS` | `240000` ms | Stage3 Event/Digest/Long-form 单 request timeout |
 | `STAGE3_LLM_MAX_RETRIES` | `2` | Stage3 Event/Digest/Long-form 最大重试数 |
 | `STAGE3_LLM_RETRY_DELAY_MS` | `1000` ms | Stage3 Event/Digest/Long-form retry delay |
-| `STAGE4_CONCURRENCY` | `3` | Stage4 enrichment 并发 |
 | `STAGE4_LLM_TIMEOUT_MS` | `240000` ms | Stage4 单 request timeout |
 | `STAGE4_LLM_MAX_RETRIES` | `2` | Stage4 transient-error 最大重试数 |
 | `STAGE4_LLM_RETRY_DELAY_MS` | `1000` ms | Stage4 retry delay |

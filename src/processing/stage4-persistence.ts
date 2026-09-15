@@ -196,16 +196,10 @@ export async function publishStage4ReviewSelection(
         and event_review_item_id = any($2::uuid[])`,
     [stage4RunId, selectedReviewItemIds],
   );
-  const associations = await client.query(
-    `update processed_contents pc set event_id = e.id, updated_at = now()
-       from events e
-       join event_review_items eri on eri.id = e.event_review_item_id
-       join event_group_items egi on egi.event_group_id = eri.event_group_id
-      where e.stage4_run_id = $1::uuid
-        and e.publication_status = 'published'
-        and e.event_review_item_id = any($2::uuid[])
-        and pc.id = egi.processed_content_id`,
-    [stage4RunId, selectedReviewItemIds],
+  const associationCount = await syncPublishedProcessedContentBacklinks(
+    client,
+    stage4RunId,
+    selectedReviewItemIds,
   );
   await client.query(
     `update stage4_runs
@@ -217,7 +211,7 @@ export async function publishStage4ReviewSelection(
   return {
     publishedCount: published.rowCount ?? 0,
     archivedCount: archived.rowCount ?? 0,
-    associationCount: associations.rowCount ?? 0,
+    associationCount,
   };
 }
 
@@ -241,20 +235,54 @@ export async function publishStage4Run(pool: Pool, stage4RunId: string): Promise
       await client.query(`update events set publication_status='archived', updated_at=now() where id=any($1::uuid[])`, [oldIds]);
     }
     const published = await client.query(`update events set publication_status='published', updated_at=now() where stage4_run_id=$1::uuid and publication_status='draft'`, [stage4RunId]);
-    const associations = await client.query(`
-      update processed_contents pc set event_id=e.id, updated_at=now()
-      from events e join event_review_items eri on eri.id=e.event_review_item_id
-      join event_group_items egi on egi.event_group_id=eri.event_group_id
-      where e.stage4_run_id=$1::uuid and e.publication_status='published' and pc.id=egi.processed_content_id`, [stage4RunId]);
+    const associationCount = await syncPublishedProcessedContentBacklinks(client, stage4RunId);
     await client.query(`update stage4_runs set status='success', success_count=$2, completed_at=now() where id=$1::uuid`, [stage4RunId, row.expected_count]);
     await client.query("commit");
-    return { publishedCount: published.rowCount ?? 0, associationCount: associations.rowCount ?? 0 };
+    return { publishedCount: published.rowCount ?? 0, associationCount };
   } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
 }
 
 export async function updateStage4RunProgress(pool: Pool, stage4RunId: string, status: "running" | "partial" | "failed") {
   const result = await pool.query<{ count: string }>(`select count(*) as count from events where stage4_run_id=$1::uuid and publication_status='draft'`, [stage4RunId]);
   await pool.query(`update stage4_runs set status=$2, success_count=$3, completed_at=case when $2 in ('partial','failed') then now() else completed_at end where id=$1::uuid`, [stage4RunId, status, Number(result.rows[0]?.count ?? 0)]);
+}
+
+/**
+ * `event_group_items` is the canonical source-membership relation. The older
+ * processed_contents.event_id column is a single-value convenience backlink:
+ * populate it only where this published Stage 4 run maps a content to exactly
+ * one Event, otherwise leave it null rather than choosing an arbitrary Event.
+ */
+async function syncPublishedProcessedContentBacklinks(
+  queryable: Queryable,
+  stage4RunId: string,
+  selectedReviewItemIds?: string[],
+): Promise<number> {
+  const selectionClause = selectedReviewItemIds
+    ? "and e.event_review_item_id = any($2::uuid[])"
+    : "";
+  const parameters = selectedReviewItemIds ? [stage4RunId, selectedReviewItemIds] : [stage4RunId];
+  const result = await queryable.query(
+    `with memberships as (
+       select egi.processed_content_id,
+              (array_agg(e.id))[1] as event_id,
+              count(distinct e.id) as event_count
+         from events e
+         join event_review_items eri on eri.id = e.event_review_item_id
+         join event_group_items egi on egi.event_group_id = eri.event_group_id
+        where e.stage4_run_id = $1::uuid
+          and e.publication_status = 'published'
+          ${selectionClause}
+        group by egi.processed_content_id
+     )
+     update processed_contents pc
+        set event_id = case when memberships.event_count = 1 then memberships.event_id else null end,
+            updated_at = now()
+       from memberships
+      where pc.id = memberships.processed_content_id`,
+    parameters,
+  );
+  return result.rowCount ?? 0;
 }
 
 /**

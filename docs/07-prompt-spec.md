@@ -118,15 +118,27 @@ Each article is evaluated independently, and every input `temp_id` must appear e
 4. Rank remaining Digest items separately by Category.
 5. Rank remaining Long-form items globally.
 
-### Output Schema
+### Structured Output
+
+Event Ranking 与 Digest Ranking 返回有序 ID：
 ```json
 {
   "ordered_ids": []
 }
 ```
-`ordered_ids[0]` is rank 1. Return at most the 50 most important Event Groups; if fewer than 50 are provided, return all.
 
-Concrete Structured Output representation may differ by ranking task; runtime schema is defined by the corresponding Application Contract.
+Long-form Ranking 返回带 rank 与 reason 的条目：
+```json
+{
+  "rankings": [
+    { "id": "", "rank": 1, "reason": "" }
+  ]
+}
+```
+
+`ordered_ids[0]` is rank 1. Event Ranking returns at most the 50 most important Event Groups; if fewer than 50 are provided, return all.
+
+The runtime schema is defined by the corresponding Application Contract.
 
 ### Event Ranking
 Return only the 50 most important Event Groups. If fewer than 50 are provided, return all.
@@ -161,8 +173,8 @@ Rank by:
 ### Common Rules
 - Event Ranking returns at most 50 IDs; Code handles final Top N selection.
 - Digest Ranking must rank all provided candidates exactly once; missing / duplicate / invalid IDs trigger one repair attempt, and the ranking fails if repair still cannot produce a complete valid ordering.
-- Long-form Ranking ranks all provided IDs exactly once.
-- Returned IDs must come from the corresponding input; ranks start at 1 and remain consecutive.
+- Long-form Ranking ranks all provided IDs exactly once through `rankings`; its `rank` values start at 1 and remain consecutive.
+- Returned IDs must come from the corresponding input.
 - Do not rank only by publish time, breaking-news tone, or source diversity.
 - Keep Digest / Long-form `reason` concise for review/debug.
 - Keep `reason` concise; it is currently used for review/debug.

@@ -115,7 +115,7 @@ created_at, updated_at
 | `title_zh`       | text        | nullable                       |
 | `summary`        | text        | nullable                       |
 | `summary_zh`     | text        | nullable                       |
-| `event_id`       | uuid        | nullable, FK → `events.id`     |
+| `event_id`       | uuid        | nullable, FK → `events.id`；仅兼容 convenience backlink |
 | `ai_rank`        | integer     | nullable                       |
 | `display_rank`   | integer     | nullable                       |
 | `created_at`     | timestamptz | NOT NULL                       |
@@ -168,7 +168,7 @@ created_at, updated_at
 | `created_at`              | timestamptz | NOT NULL           |
 | `updated_at`              | timestamptz | NOT NULL           |
 
-一个 Event 可关联多条 `processed_contents`；MVP 假设一篇 Event Candidate 只属于一个主要 Event，因此使用 `processed_contents.event_id`，不建立 `event_articles`。
+一个 Event 可关联多条 `processed_contents`。正式 source membership 由 `event_review_items.event_group_id → event_group_items` 表达，允许同一 `processed_content` 属于多个不同 Event Groups；Daily Brief 也由这条链读取来源。`processed_contents.event_id` 不能表达多对多，只保留为兼容 convenience backlink：仅当当前 published Stage 4 Run 中该内容恰好对应一个 Event 时写入；共享内容保持 `NULL`，不得用它判断正式 membership。
 
 `event_date` 表示 Event 在 Production 中所属的 Daily attribution date，与对应 `stage4_runs.daily_date` 一致。它不表示 source article 的原始发布时间，也不单独推导现实事件发生时间。具体 Daily attribution 与 late-arrival 处理语义见 `06-processing-workflow.md`。
 
@@ -196,7 +196,7 @@ created_at, updated_at
 
 ## 6 `event_groups` / `event_group_items` / `stage4_runs`
 
-`event_groups` 是 Stage 2 按 `daily_date` 写入的可替换业务 snapshot；`event_group_items` 保存 Group 到 Event Candidate 的关联，并保证同一 processed content 只属于一个 Group。
+`event_groups` 是 Stage 2 按 `daily_date` 写入的可替换业务 snapshot；`event_group_items` 保存 Group 到 Event Candidate 的正式 many-to-many membership。唯一约束是 `(event_group_id, processed_content_id)`：同一 Group 内不重复，同一内容可出现在多个 Group。
 
 `stage4_runs` 记录来源 Review snapshot、`daily_date`、`expected_count`、`success_count` 和 `running` / `partial` / `success` 状态。每个 enrichment 成功后立即写入对应 Run 的 draft Event；仅在 drafts 数量等于 `expected_count` 时才原子 publish。
 

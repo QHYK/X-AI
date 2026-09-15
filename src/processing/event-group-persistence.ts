@@ -9,12 +9,13 @@ export async function replaceEventGroups(
   dailyDate: string,
   groups: Stage2EventGroup[],
 ): Promise<string[]> {
+  const normalizedGroups = normalizeEventGroupMemberships(groups);
   const client = await pool.connect();
   try {
     await client.query("begin");
     await client.query(`delete from event_groups where daily_date = $1::date`, [dailyDate]);
     const ids: string[] = [];
-    for (const group of groups) {
+    for (const group of normalizedGroups) {
       const members = group.sources.map((source) => source.processed_content_id).filter((id): id is string => Boolean(id));
       if (!members.length) continue;
       const inserted = await client.query<{ id: string }>(`insert into event_groups (daily_date, event_hint) values ($1::date, $2) returning id`, [dailyDate, group.event_hint]);
@@ -26,6 +27,28 @@ export async function replaceEventGroups(
     await client.query("commit");
     return ids;
   } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
+}
+
+/**
+ * Defense in depth for callers outside Stage2Job. Event Group membership is
+ * many-to-many, but repeating a member within the same group is meaningless.
+ * Validate mappings and normalize those repeats before deleting the existing
+ * Daily snapshot so invalid input leaves it untouched.
+ */
+export function normalizeEventGroupMemberships(groups: Stage2EventGroup[]): Stage2EventGroup[] {
+  return groups.map((group, groupIndex) => {
+    const seenContentIds = new Set<string>();
+    const sources = group.sources.filter((source) => {
+      const contentId = source.processed_content_id;
+      if (!contentId) {
+        throw new Error(`Stage 2 Event Group ${groupIndex + 1} has no processed_content_id.`);
+      }
+      if (seenContentIds.has(contentId)) return false;
+      seenContentIds.add(contentId);
+      return true;
+    });
+    return { ...group, sources };
+  });
 }
 
 export async function loadEventGroupsForRanking(queryable: Queryable, dailyDate: string) {

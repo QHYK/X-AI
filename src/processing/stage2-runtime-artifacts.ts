@@ -57,6 +57,7 @@ export async function writeStage2RuntimeArtifacts(
     model: result.model,
     prompt_version: result.promptVersion,
     candidate_count: summary.eventCandidateCount,
+    assigned_unique_count: summary.assignedUniqueCount,
     final_group_count: summary.eventGroupCount,
     multi_source_group_count: summary.multiSourceGroupCount,
     single_source_group_count: summary.singleSourceGroupCount,
@@ -75,6 +76,21 @@ export async function writeStage2RuntimeArtifacts(
     assignment_missing_ids: summary.missingTempIds,
     assignment_duplicate_ids: summary.duplicateTempIds,
     assignment_invented_ids: summary.inventedTempIds,
+    warnings: {
+      cross_group_memberships: summary.crossGroupMemberships.map((membership) => ({
+        temp_id: membership.tempId,
+        event_groups: membership.eventGroups,
+      })),
+      same_group_duplicates: summary.sameGroupDuplicates.map((duplicate) => ({
+        temp_id: duplicate.tempId,
+        event_group: duplicate.eventGroup,
+      })),
+      missing_temp_ids: summary.missingTempIds,
+    },
+    warning_count: summary.warningCount,
+    cross_group_membership_count: summary.crossGroupMemberships.length,
+    same_group_duplicate_count: summary.sameGroupDuplicates.length,
+    missing_assignment_count: summary.missingTempIds.length,
     status: result.success ? "success" : "failed",
     error: result.success ? null : result.error,
   });

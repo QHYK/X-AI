@@ -60,7 +60,7 @@ async function main() {
             process.env.STAGE1_COLLECTED_WITHIN_HOURS,
         ),
         publishedAtScope,
-        dailyDate: process.env.DAILY_DATE,
+        dailyDate,
         batchSize: optionalPositiveInteger(process.env.STAGE1_BATCH_SIZE),
         batchMaxContentChars: optionalPositiveInteger(
           process.env.STAGE1_BATCH_MAX_CONTENT_CHARS,
@@ -91,7 +91,7 @@ async function main() {
         `${JSON.stringify({
           stage: "stage1",
           status: "success",
-          daily_date: process.env.DAILY_DATE ?? null,
+          daily_date: dailyDate,
           started_at: summary.startedAt,
           finished_at: summary.finishedAt,
           scope_start_at: summary.scopeStartAt,
@@ -131,7 +131,7 @@ async function main() {
         `${JSON.stringify({
           stage: "stage1",
           status: "failed",
-          daily_date: process.env.DAILY_DATE ?? null,
+          daily_date: dailyDate,
           started_at: startedAt.toISOString(),
           finished_at: new Date().toISOString(),
           scope_start_at: publishedAtScope?.startAt ?? null,

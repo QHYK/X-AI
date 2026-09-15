@@ -60,7 +60,8 @@ export type Stage2JobSuccess = Stage2JobBase & {
 
 export type Stage2JobFailure = Stage2JobBase & {
   success: false;
-  output: null;
+  /** Invalid LLM output is retained only for runtime diagnostics, never persisted. */
+  output: Stage2Output | null;
   eventGroups: [];
   error: string;
 };
@@ -131,20 +132,43 @@ export async function processStage2Merge(
 
   const output = llmResult.output;
   const assignment = validateStage2Assignments(output, input);
+  if (!assignment.passed) {
+    return {
+      success: false,
+      input,
+      idMap,
+      candidateRows,
+      output,
+      eventGroups: [],
+      assignment,
+      model: llmResult.model,
+      promptVersion: llmResult.promptVersion,
+      llmCallCount: llmResult.attempts,
+      retryCount: Math.max(0, llmResult.attempts - 1),
+      llmDurationMs: llmResult.elapsedMs,
+      elapsedMs: Date.now() - startedAt,
+      tokenUsage: llmResult.tokenUsage,
+      finishReason: llmResult.finishReason,
+      error: `Stage 2 assignment validation failed: ${assignment.errors.join(" ")}`,
+    };
+  }
+
   return {
     success: true,
     input,
     idMap,
     candidateRows,
     output,
+    // Keep the raw structured output in the artifact, but normalize only
+    // same-group repetition for persistence. Cross-group membership is a
+    // supported many-to-many relation and is deliberately retained.
     eventGroups: output.events.map((event) => ({
       event_hint: event.event_hint,
-      sources: event.sources.map((tempId) => ({
+      sources: [...new Set(event.sources)].map((tempId) => ({
         temp_id: tempId,
         processed_content_id: idMap[tempId] ?? null,
       })),
     })),
-    // Temporary diagnostic mode: record assignment issues without rejecting output.
     assignment,
     model: llmResult.model,
     promptVersion: llmResult.promptVersion,
@@ -170,12 +194,20 @@ export function summarizeStage2Result(result: Stage2JobResult) {
   return {
     success: result.success,
     eventCandidateCount: result.input.event_candidates.length,
+    assignedUniqueCount:
+      result.input.event_candidates.length - (result.assignment?.missingTempIds.length ?? result.input.event_candidates.length),
     eventGroupCount,
     multiSourceGroupCount,
     singleSourceGroupCount,
     missingTempIds: result.assignment?.missingTempIds ?? [],
     duplicateTempIds: result.assignment?.duplicateTempIds ?? [],
+    crossGroupMemberships: result.assignment?.crossGroupMemberships ?? [],
+    sameGroupDuplicates: result.assignment?.sameGroupDuplicates ?? [],
     inventedTempIds: result.assignment?.inventedTempIds ?? [],
+    warningCount:
+      (result.assignment?.crossGroupMemberships.length ?? 0) +
+      (result.assignment?.sameGroupDuplicates.length ?? 0) +
+      (result.assignment?.missingTempIds.length ?? 0),
     assignmentValidationPassed: result.assignment?.passed ?? false,
     model: result.model,
     promptVersion: result.promptVersion,
@@ -186,5 +218,14 @@ export function summarizeStage2Result(result: Stage2JobResult) {
     tokenUsage: result.tokenUsage,
     finishReason: result.finishReason,
     error: result.success ? null : result.error,
+  };
+}
+
+export function stage2WarningMetrics(summary: ReturnType<typeof summarizeStage2Result>) {
+  return {
+    warning_count: summary.warningCount,
+    cross_group_membership_count: summary.crossGroupMemberships.length,
+    same_group_duplicate_count: summary.sameGroupDuplicates.length,
+    missing_assignment_count: summary.missingTempIds.length,
   };
 }

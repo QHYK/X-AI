@@ -86,6 +86,8 @@ LLM 完成，将属于 Event Channel 的候选内容（`processed_contents.routi
 
 Event Groups 是当前 Workflow 的中间结果，不直接写入 events 表；Stage 2 不生成最终 Event 内容，也不执行 Ranking。
 
+Event Group membership 由 `event_group_items` 保存为 many-to-many relation：同一 candidate 可安全出现在多个不同 Groups；同一 Group 内的重复 membership 由数据库唯一约束防止。下游以 Event Group / Review Item relation 读取 source membership，不以 `processed_contents.event_id` 作为正式关系。
+
 #### Stage 3 — Channel Ranking
 
 LLM 完成，对不同 Channel 独立执行 Ranking：Event、Digest、Long-form。

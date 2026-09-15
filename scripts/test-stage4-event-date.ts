@@ -1,4 +1,5 @@
 import { deriveEventDate } from "../src/processing/event-date.js";
+import { prepareStage4Event } from "../src/processing/stage4-event-processing.js";
 import { validateStage4EventEnrichmentOutput } from "../src/processing/stage4-contract.js";
 
 type Check = {
@@ -66,6 +67,40 @@ checks.push({
   name: "E. Stage 4 output without event_date passes contract",
   passed: contract.success,
   detail: contract,
+});
+
+const attributedToDaily = prepareStage4Event(
+  {
+    eventGroupId: "event-group-1",
+    eventReviewItemId: "review-item-1",
+    eventHint: "Late-arrival event",
+    aiRank: 1,
+    displayRank: 1,
+    processedContentIds: ["content-1"],
+  },
+  new Map([
+    [
+      "content-1",
+      {
+        processedContentId: "content-1",
+        title: "Late source",
+        summary: "Summary",
+        entities: [],
+        source: "Source",
+        url: "https://example.com/late",
+        publishedAt: new Date("2026-08-20T00:00:00.000Z"),
+      },
+    ],
+  ]),
+  new Date("2026-08-26T00:00:00.000Z"),
+  "2026-08-25",
+);
+checks.push({
+  name: "F. Stage 4 target dailyDate overrides a late source published_at date",
+  passed:
+    attributedToDaily.eventDate.eventDate === "2026-08-25" &&
+    attributedToDaily.eventDate.source === "daily_attribution",
+  detail: attributedToDaily.eventDate,
 });
 
 const failures = checks.filter((check) => !check.passed);

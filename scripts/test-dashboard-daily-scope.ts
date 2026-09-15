@@ -204,6 +204,10 @@ try {
     finished_at: "2026-08-24T16:30:01.000Z",
     candidate_count: 7,
     final_group_count: 3,
+    warning_count: 2,
+    cross_group_membership_count: 1,
+    same_group_duplicate_count: 1,
+    missing_assignment_count: 0,
     prompt_version: "stage2-fixture-v1",
     status: "success",
   });
@@ -313,6 +317,7 @@ try {
     name: "runtime artifacts use their recorded daily_date instead of their calendar start date",
     passed:
       stageRuntime.get("2026-08-20")?.get("stage2")?.candidateCount === 7 &&
+      stageRuntime.get("2026-08-20")?.get("stage2")?.warningCount === 2 &&
       completionRuntime.get("2026-08-20")?.candidateCount === 11 &&
       completionRuntime.get("2026-08-20")?.remainingCount === 7,
   });

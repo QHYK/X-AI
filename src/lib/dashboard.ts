@@ -118,6 +118,10 @@ export type DashboardStageMetrics = {
   readyCount: number | null;
   draftCount: number | null;
   publishedCount: number | null;
+  warningCount: number | null;
+  crossGroupMembershipCount: number | null;
+  sameGroupDuplicateCount: number | null;
+  missingAssignmentCount: number | null;
 };
 
 export type DashboardContentCompletionMetrics = {
@@ -739,6 +743,10 @@ function stageMetricsFromPipelineRun(stage: DashboardStage, row: PipelineRunRow)
     batchCount: numberFrom(metrics, "batch_count"), fallbackBatchCount: numberFrom(metrics, "fallback_batch_count"),
     splitCount: numberFrom(metrics, "split_count"), singletonBatchCount: numberFrom(metrics, "singleton_batch_count"),
     readyCount: numberFrom(metrics, "ready_count"), draftCount: numberFrom(metrics, "draft_count"), publishedCount: numberFrom(metrics, "published_count"),
+    warningCount: numberFrom(metrics, "warning_count"),
+    crossGroupMembershipCount: numberFrom(metrics, "cross_group_membership_count"),
+    sameGroupDuplicateCount: numberFrom(metrics, "same_group_duplicate_count"),
+    missingAssignmentCount: numberFrom(metrics, "missing_assignment_count"),
   };
 }
 
@@ -1047,6 +1055,10 @@ function stage1MetricsFromDailyStep(
     readyCount: null,
     draftCount: null,
     publishedCount: null,
+    warningCount: null,
+    crossGroupMembershipCount: null,
+    sameGroupDuplicateCount: null,
+    missingAssignmentCount: null,
   };
 }
 
@@ -1060,6 +1072,8 @@ function emptyStageMetrics(stage: DashboardStage): DashboardStageMetrics {
     enrichmentFailureCount: null, eventsCreated: null, webSearchEventCount: null,
     totalWebSearchCalls: null, batchCount: null, fallbackBatchCount: null, splitCount: null,
     singletonBatchCount: null, readyCount: null, draftCount: null, publishedCount: null,
+    warningCount: null, crossGroupMembershipCount: null, sameGroupDuplicateCount: null,
+    missingAssignmentCount: null,
   };
 }
 
@@ -1125,6 +1139,10 @@ async function parseStageMetrics(
     readyCount: enrichmentSuccessCount,
     draftCount: null,
     publishedCount: null,
+    warningCount: numberFrom(artifact, "warning_count"),
+    crossGroupMembershipCount: numberFrom(artifact, "cross_group_membership_count"),
+    sameGroupDuplicateCount: numberFrom(artifact, "same_group_duplicate_count"),
+    missingAssignmentCount: numberFrom(artifact, "missing_assignment_count"),
   };
 }
 

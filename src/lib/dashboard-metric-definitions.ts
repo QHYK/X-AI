@@ -27,6 +27,7 @@ export const dashboardMetricDefinitions: DashboardMetricSection[] = [
   ] },
   { title: "5. Stage 2", metrics: [
     { metric: "Model / Candidates / Groups / LLM / Retries / Tokens / Duration", source: "Stage2 runtime", rule: "该 Daily 的最新 Stage2 attempt artifact。", notes: "Groups 是该次 Merge 输出，不保证等于后续 DB snapshot。" },
+    { metric: "Warnings", source: "Stage2 runtime / PostgreSQL · pipeline_runs", rule: "本次 attempt 的 cross-group membership、同 Group 重复和 missing assignment 三类 warning 数；新 pipeline run 明确写入 0。", notes: "warning 不会阻断可安全的 Stage2 snapshot；invented ID 仍是 failed。" },
   ] },
   { title: "6. Stage 3", metrics: [
     { metric: "Model / Event inputs / Selected events", source: "Stage3 runtime", rule: "该 Daily 最新 attempt；Event inputs 来自 DB Event Groups。", notes: "Selected events 是完整 Ranking snapshot，不是 Top 15。" },
