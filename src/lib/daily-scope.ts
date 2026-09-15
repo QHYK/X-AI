@@ -104,6 +104,14 @@ export function resolveRecentCompletedDailyScopes(
   );
 }
 
+/** 当前正常 workflow Daily 才允许使用 late-arrival catch-up window。 */
+export function isCurrentWorkflowDailyDate(
+  dailyDate: string,
+  now: Date = new Date(),
+): boolean {
+  return resolveDailyScope(dailyDate, now).dailyDate === resolveDailyScope(undefined, now).dailyDate;
+}
+
 export function isDailyScopeCompleted(
   scope: DailyScope,
   now: Date = new Date(),

@@ -4,14 +4,15 @@
  * 只为用户主动触碰且最终 rank 改变的 item 写 feedback；被动位移只更新 display_rank。
  */
 import type { Pool, PoolClient } from "pg";
-import { resolveDailyScope } from "./daily-scope.js";
 import {
   EVENT_DISPLAY_CUTOFF,
   LONG_FORM_DISPLAY_CUTOFF,
 } from "./ranking-config.js";
 import type { EnrichedStage4Event, Stage4EventGroup } from "../processing/stage4-event-processing.js";
 import {
-  persistStage4Events,
+  loadOrCreateStage4Run,
+  persistStage4Draft,
+  publishStage4ReviewSelection,
   type Stage4EventToPersist,
 } from "../processing/stage4-persistence.js";
 
@@ -190,6 +191,9 @@ export async function saveEventReviewRanking(
       .filter((change) => change.nextDisplayRank <= EVENT_DISPLAY_CUTOFF)
       .filter((change) => !links.eventIdByReviewItemId.has(change.id))
       .map((change) => change.id);
+    const selectedTopIds = changeSet.changes
+      .filter((change) => change.nextDisplayRank <= EVENT_DISPLAY_CUTOFF)
+      .map((change) => change.id);
     const enrichedByReviewItemId = new Map(
       (input.enrichedEvents ?? []).flatMap((event) =>
         event.group.eventReviewItemId ? [[event.group.eventReviewItemId, event]] : [],
@@ -202,22 +206,23 @@ export async function saveEventReviewRanking(
     }
 
     let eventsCreated = 0;
+    const stage4Run = await loadOrCreateStage4Run(
+      client,
+      input.dailyDate,
+      input.reviewRunId,
+      selectedTopIds.length,
+    );
     if (missingTopIds.length > 0) {
-      const persisted = await persistStage4Events(client, {
-        previousCreatedEventIds: [],
-        events: missingTopIds.map((reviewItemId) =>
-          toReviewStage4EventToPersist(enrichedByReviewItemId.get(reviewItemId)!),
-        ),
-      });
-      eventsCreated = persisted.createdEventIds.length;
       for (const reviewItemId of missingTopIds) {
-        const eventId = persisted.eventGroupToEventId[reviewItemId];
-        if (!eventId) {
-          throw new Error(`Stage 4 persistence did not create Event for Review item ${reviewItemId}.`);
-        }
-        links.eventIdByReviewItemId.set(reviewItemId, eventId);
+        const inserted = await persistStage4Draft(
+          client,
+          stage4Run.id,
+          toReviewStage4EventToPersist(enrichedByReviewItemId.get(reviewItemId)!),
+        );
+        if (inserted) eventsCreated += 1;
       }
     }
+    await publishStage4ReviewSelection(client, stage4Run.id, selectedTopIds);
 
     // 唯一索引下先移到负数空间，再写连续正 rank，避免交换时的中间 collision。
     await client.query(
@@ -304,6 +309,8 @@ async function loadEventReviewLinks(
       select e.id, e.event_review_item_id
       from events e
       where e.event_review_item_id = any($1::uuid[])
+        and e.stage4_run_id is not null
+        and e.publication_status in ('draft', 'published')
       ${lockClause}
     `,
     [reviewItemIds],
@@ -407,7 +414,7 @@ function sameIdSet(left: string[], right: string[]): boolean {
   return [...left].sort().every((id, index) => id === sortedRight[index]);
 }
 
-/** 保存一个 Daily scope 内所有已参与排名的 Long-form 新顺序。 */
+/** 保存一个 Daily attribution 内所有已参与排名的 Long-form 新顺序。 */
 export async function saveLongFormReviewRanking(
   pool: Pool,
   input: {
@@ -416,7 +423,6 @@ export async function saveLongFormReviewRanking(
     touchedIds: string[];
   },
 ): Promise<{ updatedCount: number; feedbackCount: number }> {
-  const scope = resolveDailyScope(input.dailyDate);
   return withTransaction(pool, async (client) => {
     const result = await client.query<{
       id: string;
@@ -426,16 +432,14 @@ export async function saveLongFormReviewRanking(
       `
         select pc.id, pc.ai_rank, pc.display_rank
         from processed_contents pc
-        join raw_articles ra on ra.id = pc.raw_article_id
         where pc.routing = 'long_form'
           and pc.ai_rank is not null
           and pc.display_rank is not null
-          and ra.published_at >= $1::timestamptz
-          and ra.published_at < $2::timestamptz
+          and pc.daily_date = $1::date
         order by pc.display_rank, pc.id
         for update of pc
       `,
-      [scope.startAt, scope.endAt],
+      [input.dailyDate],
     );
     const changeSet = buildRankingChangeSet({
       currentRows: result.rows.map((row) => ({

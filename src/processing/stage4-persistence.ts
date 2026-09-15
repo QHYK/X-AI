@@ -75,19 +75,19 @@ export async function loadLatestStage4Selection(
 }
 
 export async function loadOrCreateStage4Run(
-  pool: Pool,
+  queryable: Queryable,
   dailyDate: string,
   reviewRunId: string,
   expectedCount: number,
 ): Promise<{ id: string; successCount: number; status: string }> {
-  const existing = await pool.query<{ id: string; success_count: number; status: string }>(`
+  const existing = await queryable.query<{ id: string; success_count: number; status: string }>(`
     select id, success_count, status from stage4_runs where review_run_id = $1::uuid`, [reviewRunId]);
   if (existing.rows[0]) return {
     id: existing.rows[0].id,
     successCount: existing.rows[0].success_count,
     status: existing.rows[0].status,
   };
-  const created = await pool.query<{ id: string; success_count: number; status: string }>(`
+  const created = await queryable.query<{ id: string; success_count: number; status: string }>(`
     insert into stage4_runs (daily_date, review_run_id, status, expected_count)
     values ($1::date, $2::uuid, 'running', $3)
     returning id, success_count, status`, [dailyDate, reviewRunId, expectedCount]);
@@ -105,11 +105,11 @@ export async function loadDraftReviewItemIds(queryable: Queryable, stage4RunId: 
 
 /** A successful enrichment is durable immediately; draft rows never change live source associations. */
 export async function persistStage4Draft(
-  pool: Pool,
+  queryable: Queryable,
   stage4RunId: string,
   event: Stage4EventToPersist,
 ): Promise<boolean> {
-  const result = await pool.query(`
+  const result = await queryable.query(`
     insert into events (event_date, title, title_zh, tags, tags_zh, entities, entities_zh,
       summary, summary_zh, source_perspectives, external_context, event_review_item_id,
       stage4_run_id, publication_status, ai_rank, display_rank)
@@ -123,6 +123,102 @@ export async function persistStage4Draft(
     event.eventReviewItemId, stage4RunId, event.aiRank, event.displayRank,
   ]);
   return (result.rowCount ?? 0) === 1;
+}
+
+/**
+ * Atomically makes one reviewed Top-N selection the live set for its existing Stage 4 run.
+ * Review promotion reuses the same durable run and draft/publication model as Production;
+ * it never relies on runtime artifacts or the legacy event rebuild path.
+ */
+export async function publishStage4ReviewSelection(
+  client: Queryable,
+  stage4RunId: string,
+  selectedReviewItemIds: string[],
+): Promise<{ publishedCount: number; archivedCount: number; associationCount: number }> {
+  if (selectedReviewItemIds.length === 0 || new Set(selectedReviewItemIds).size !== selectedReviewItemIds.length) {
+    throw new Error("Stage 4 Review selection must contain unique selected Event Review items.");
+  }
+
+  const run = await client.query<{ expected_count: number }>(
+    `select expected_count from stage4_runs where id = $1::uuid for update`,
+    [stage4RunId],
+  );
+  const expectedCount = run.rows[0]?.expected_count;
+  if (expectedCount === undefined) {
+    throw new Error("Stage 4 run not found for Review publication.");
+  }
+  if (expectedCount !== selectedReviewItemIds.length) {
+    throw new Error("Stage 4 Review selection does not match the run's expected Event count.");
+  }
+
+  const selected = await client.query<{ event_review_item_id: string }>(
+    `select event_review_item_id
+       from events
+      where stage4_run_id = $1::uuid
+        and publication_status in ('draft', 'published')
+        and event_review_item_id = any($2::uuid[])
+      for update`,
+    [stage4RunId, selectedReviewItemIds],
+  );
+  if (selected.rows.length !== selectedReviewItemIds.length) {
+    throw new Error("Every reviewed Top Event must have a durable Stage 4 Event before publication.");
+  }
+
+  const outgoing = await client.query<{ id: string }>(
+    `select id
+       from events
+      where stage4_run_id = $1::uuid
+        and publication_status = 'published'
+        and not (event_review_item_id = any($2::uuid[]))
+      for update`,
+    [stage4RunId, selectedReviewItemIds],
+  );
+  const outgoingIds = outgoing.rows.map((row) => row.id);
+  if (outgoingIds.length > 0) {
+    await client.query(
+      `update processed_contents set event_id = null, updated_at = now() where event_id = any($1::uuid[])`,
+      [outgoingIds],
+    );
+  }
+  const archived = await client.query(
+    `update events
+        set publication_status = 'archived', updated_at = now()
+      where stage4_run_id = $1::uuid
+        and publication_status in ('draft', 'published')
+        and not (event_review_item_id = any($2::uuid[]))`,
+    [stage4RunId, selectedReviewItemIds],
+  );
+  const published = await client.query(
+    `update events
+        set publication_status = 'published', updated_at = now()
+      where stage4_run_id = $1::uuid
+        and publication_status = 'draft'
+        and event_review_item_id = any($2::uuid[])`,
+    [stage4RunId, selectedReviewItemIds],
+  );
+  const associations = await client.query(
+    `update processed_contents pc set event_id = e.id, updated_at = now()
+       from events e
+       join event_review_items eri on eri.id = e.event_review_item_id
+       join event_group_items egi on egi.event_group_id = eri.event_group_id
+      where e.stage4_run_id = $1::uuid
+        and e.publication_status = 'published'
+        and e.event_review_item_id = any($2::uuid[])
+        and pc.id = egi.processed_content_id`,
+    [stage4RunId, selectedReviewItemIds],
+  );
+  await client.query(
+    `update stage4_runs
+        set status = 'success', success_count = $2, completed_at = now()
+      where id = $1::uuid`,
+    [stage4RunId, expectedCount],
+  );
+
+  return {
+    publishedCount: published.rowCount ?? 0,
+    archivedCount: archived.rowCount ?? 0,
+    associationCount: associations.rowCount ?? 0,
+  };
 }
 
 /** Publish is the only operation that changes live Events and processed_contents.event_id. */

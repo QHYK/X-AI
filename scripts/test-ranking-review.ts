@@ -7,7 +7,7 @@ import {
   buildRankingChangeSet,
   saveLongFormReviewRanking,
 } from "../src/lib/ranking-review.js";
-import { getEventReviewData } from "../src/lib/review.js";
+import { getEventReviewData, getLongFormReviewData } from "../src/lib/review.js";
 
 type Check = { name: string; passed: boolean; detail?: unknown };
 const checks: Check[] = [];
@@ -130,6 +130,29 @@ checks.push({
     passiveChangeSet.changes.every(
       (change) => change.aiRank === originalRows.find((row) => row.id === change.id)?.aiRank,
     ),
+});
+
+const lateArrivalQueries: Array<{ text: string; values: unknown[] | undefined }> = [];
+const lateArrivalLongFormPool = createLateArrivalLongFormPool(lateArrivalQueries);
+const lateArrivalReview = await getLongFormReviewData(lateArrivalLongFormPool, "2026-08-25");
+const lateArrivalSave = await saveLongFormReviewRanking(lateArrivalLongFormPool, {
+  dailyDate: "2026-08-25",
+  orderedIds: [idForRank(2), idForRank(1)],
+  touchedIds: [idForRank(2)],
+});
+const lateArrivalMembershipQueries = lateArrivalQueries.filter((query) =>
+  query.text.includes("from processed_contents pc") && query.text.includes("pc.daily_date = $1::date"),
+);
+checks.push({
+  name: "late-arrival Long-form uses processed_contents.daily_date for Review read and save",
+  passed:
+    lateArrivalReview.items.length === 2 &&
+    lateArrivalReview.items[0]?.id === idForRank(1) &&
+    lateArrivalSave.updatedCount === 2 &&
+    lateArrivalSave.feedbackCount === 1 &&
+    lateArrivalMembershipQueries.length === 2 &&
+    lateArrivalMembershipQueries.every((query) => query.values?.[0] === "2026-08-25") &&
+    !lateArrivalQueries.some((query) => query.text.includes("ra.published_at")),
 });
 
 const transactionLog: string[] = [];
@@ -302,5 +325,35 @@ function createEventReviewPool(includeStaleExtraMember: boolean): Pool {
       }
       throw new Error(`Unexpected Event Review query: ${text}`);
     },
+  } as unknown as Pool;
+}
+
+function createLateArrivalLongFormPool(
+  queries: Array<{ text: string; values: unknown[] | undefined }>,
+): Pool {
+  const query = async (text: string, values?: unknown[]) => {
+    queries.push({ text, values });
+    const normalized = text.trim().toLowerCase();
+    if (normalized.startsWith("select") && text.includes("s.name as source")) {
+      return {
+        rows: [
+          { id: idForRank(1), ai_rank: 1, display_rank: 1, title_zh: "Late one", source: "Source", summary_zh: "Summary", url: null },
+          { id: idForRank(2), ai_rank: 2, display_rank: 2, title_zh: "Late two", source: "Source", summary_zh: "Summary", url: null },
+        ],
+      };
+    }
+    if (normalized.startsWith("select pc.id")) {
+      return {
+        rows: [
+          { id: idForRank(1), ai_rank: 1, display_rank: 1 },
+          { id: idForRank(2), ai_rank: 2, display_rank: 2 },
+        ],
+      };
+    }
+    return { rows: [], rowCount: 1 };
+  };
+  return {
+    query,
+    connect: async () => ({ query, release: () => undefined } as unknown as PoolClient),
   } as unknown as Pool;
 }

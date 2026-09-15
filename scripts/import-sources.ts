@@ -46,7 +46,7 @@ type ImportSummary = {
   collectionMethodCounts: Record<string, number>;
 };
 
-const SOURCE_LIST_PATH = "docs/05-source-list.md";
+const SOURCE_LIST_PATH = "docs/08-source-list.md";
 const REQUIRED_HEADERS = [
   "Source",
   "Category",

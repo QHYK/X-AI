@@ -1,7 +1,7 @@
 # X-AI-field Product Spec
 
 ## Product Summary
-X-AI-field 是一个 AI Editor（AI 编辑）系统，它持续监控可信信息源，理解每天发生的重要事件，并生成一份帮助用户了解每天最重要的商业、科技和财经事件的中文 Daily Brief。
+X-AI-field 是一个 AI Editor（AI 编辑）系统，它持续监控可信信息源，理解每天发生的重要事件，并生成一份帮助用户了解每天最重要的商业 & 财经事件、科技 & 科学新闻的中文 Daily Brief。
 
 ## Problem Statement
 - 财经和科技领域每天产生大量信息，同一重要事件常被不同媒体重复报道，并夹杂不同事实、观点和解释。
@@ -16,7 +16,6 @@ X-AI-field 是一个 AI Editor（AI 编辑）系统，它持续监控可信信�
 - 希望降低每日阅读成本。
 
 ## Product Goal
-Generate a concise daily business & tech briefing that helps users quickly understand what happened today.
 每天自动生成一份 Daily Brief，帮助用户快速了解：
 > 重要财经事件、科技进展和值得阅读的内容。
 重点：
@@ -35,7 +34,7 @@ Generate a concise daily business & tech briefing that helps users quickly under
 
 系统不应该替用户创造更多阅读内容，而应该：
   - 去除重复和低价值内容；
-  - 允许用户通过人工调整排序、筛选和归档，逐步优化内容选择规则。
+  - 允许用户通过人工调整结果并记录 Feedback，持续优化 AI 的内容选择与排序。
 
 
 ## Daily Brief Structure
@@ -103,15 +102,7 @@ Original Links
 回答：
 > 哪些内容值得投入时间认真阅读？
 规则：
-- 可以不是当天发布；
-- 深度分析、评论、研究综述；
-- 最大数量约 10 篇。
-
-如果可以获取全文：
-保存：
-- 原文；
-- 中文总结；
-- 元数据。
+- 深度分析、评论、研究综述；最多约 10 篇。
 
 ---
 
@@ -129,19 +120,6 @@ Original Links
   - 代表新的行业趋势或技术变化
   - 是重要事件的关键后续发展
 
-### 其他规则说明
-+ 来源为Tier-1 media，所有Tag为Press Release的都进入候选
-+ 来源为Tier-1 media，所有title包含"Exclusive","独家报道"的都进入 Event 候选
-+ Long-form Category sources 直接进入 Long-form 候选
-+ 来源为Opinion类型，只进入 Long-form 候选
-
-
-## Event Merge Principles
-合并同一现实事件的 Event Candidate，并保留来源差异
-
-
-## Ranking Objectives
-不同模块考虑不同 Ranking Signals。
 
 ### Event Ranking
 + Systemic Risk
@@ -163,23 +141,13 @@ Original Links
 
 ## Human Review v1
 
-```
-AI Pipeline
-↓
-AI 初始 Daily Brief
-↓
-Human Review
-↓
-Final Daily Brief
-```
-Human Review v1 已实现 Event 与 Long-form Ranking Review：
-+ 调整 `display_rank`，永久保留 AI 原始 `ai_rank`；
-+ Event 使用最新 Stage 3 Top 50 ranking snapshot；Stage 3 只完成完整排序，Stage 4 按其配置的前 N（当前 15）生成并发布最终 Event；
-+ Long-form 使用指定 Daily 已参与排名的全部内容，正式展示 cutoff 为 Top 10；
-+ 用户主动移动且跨越 cutoff 时分别记录 False Positive / False Negative；未跨越 cutoff 的主动调整记录 Ranking Error；
-+ 被其他 Item 挤动的被动 rank 变化不代表人工判断，不写 Feedback。
+Human Review 用于检查 AI Ranking 结果、调整最终展示顺序并记录 Feedback，为后续优化 AI 判断提供数据。
 
-Event Review 保存后更新 snapshot 的 `display_rank`。下一次 Stage 4 从最新 snapshot 按该顺序生成完整 draft 并原子发布；不会在 Review API 内直接拼接或发布 Event。
+当前支持：
+- Event Ranking Review；
+- Long-form Ranking Review；
+- 调整最终展示顺序；
+- 记录 False Positive、False Negative 与 Ranking Error。
 
 
 ## Success Metrics

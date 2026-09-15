@@ -1,6 +1,6 @@
 # Data Model
 
-### 3.1 `sources`
+## 1 `sources`
 保存 Source List 配置。核心字段：
 
 ```text
@@ -30,7 +30,7 @@ language, availability, notes, created_at, updated_at
 **Category normalization**
 Source List 导入时将旧的 Economics / Business / Financial / Market 归一为 `Finance & Economy`，AI 归入 `Technology`。
 
-### 3.2 `raw_articles`
+## 2 `raw_articles`
 保存标准化原始内容：
 
 ```text
@@ -59,15 +59,6 @@ stage1_status, stage1_processed_at, processing_error
 | `stage1_processed_at`   | timestamptz | nullable                    |
 | `processing_error`      | text        | nullable                    |
 
-正文不足的处理逻辑属于 `Processing Workflow`：
-```text
-RSS item
-→ normalize
-→ content insufficient?
-→ fetch article page if possible
-→ Stage 1
-```
-
 #### source_item_origin_id
 保存来源提供的 item identifier，例如：
 ```text
@@ -75,9 +66,7 @@ RSS GUID
 Atom ID
 Gmail Message ID
 ```
-系统内部关联始终使用 `raw_articles.id`。
-
-基础去重优先使用来源 item ID；无稳定 ID 时使用 URL。
+系统内部关联始终使用 `raw_articles.id`。具体 Collection / Dedup 行为见 `06-processing-workflow.md`。
 
 #### metadata
 用于保存来源特有但暂时不值得升格为正式字段的信息，例如：
@@ -101,12 +90,12 @@ failed
 
 ---
 
-### 3.3 `processed_contents`
+## 3 `processed_contents`
 
 保存 Stage 1 保留内容：(Ignore 内容不入此表)
 
 ```text
-id, raw_article_id, routing, category,
+id, raw_article_id, daily_date, routing, category,
 tags, entities, entities_zh,
 title_zh, summary, summary_zh,
 event_id, ai_rank, display_rank,
@@ -117,6 +106,7 @@ created_at, updated_at
 | ---------------- | ----------- | ------------------------------ |
 | `id`             | uuid        | Primary Key                    |
 | `raw_article_id` | uuid        | UNIQUE, FK → `raw_articles.id` |
+| `daily_date`     | date        | NOT NULL；Production Daily attribution |
 | `routing`        | text        | NOT NULL + CHECK               |
 | `category`       | text        | NOT NULL                       |
 | `tags`           | text[]      | nullable                       |
@@ -137,9 +127,11 @@ created_at, updated_at
 event | digest | long_form | inspiration
 ```
 
+`daily_date` 表示该内容首次进入 Production Workflow 时所属的 Daily attribution date；具体归属与 late-arrival 规则见 `06-processing-workflow.md`。
+
 `ai_rank` 保存 AI 排序；`display_rank` 是页面最终顺序。人工调整只改 `display_rank`。
 
-### 3.4 `events`
+## 4 `events`
 保存 Stage 4 最终 Event：
 
 ```text
@@ -178,13 +170,11 @@ created_at, updated_at
 
 一个 Event 可关联多条 `processed_contents`；MVP 假设一篇 Event Candidate 只属于一个主要 Event，因此使用 `processed_contents.event_id`，不建立 `event_articles`。
 
-`event_date` 由 Code 从组成 Event 的 source articles 中最早有效 `published_at` 推导（Asia/Shanghai）；全部缺失时 fallback 到 workflow run 日期。
-
-`event_date` 是事件自身的时间属性；Daily Brief 归属使用 `stage4_runs.daily_date`。late-arrival 即使具有较早的 `event_date`，只要由当前 workflow 归属到 `processed_contents.daily_date = D`，就应沿链路 `event_groups → event_review_items → stage4_runs` 展示在 D。
+`event_date` 表示 Event 在 Production 中所属的 Daily attribution date，与对应 `stage4_runs.daily_date` 一致。它不表示 source article 的原始发布时间，也不单独推导现实事件发生时间。具体 Daily attribution 与 late-arrival 处理语义见 `06-processing-workflow.md`。
 
 `external_context`：未发生真实 Web Search 时为 `NULL`；发生搜索时保存真实 provenance URLs 和简短 summary。
 
-### 3.5 `event_review_items`
+## 5 `event_review_items`
 
 保存 Stage 3 每次成功 Event Ranking 返回的完整 Top 50（不足 50 时保存全部）。
 每次运行创建新的 UUID `review_run_id` snapshot，历史 snapshot 保留；Review 默认读取指定
@@ -204,13 +194,13 @@ created_at, updated_at
 | `created_at`         | timestamptz | NOT NULL                               |
 | `updated_at`         | timestamptz | NOT NULL                               |
 
-### 3.6 `event_groups` / `event_group_items` / `stage4_runs`
+## 6 `event_groups` / `event_group_items` / `stage4_runs`
 
 `event_groups` 是 Stage 2 按 `daily_date` 写入的可替换业务 snapshot；`event_group_items` 保存 Group 到 Event Candidate 的关联，并保证同一 processed content 只属于一个 Group。
 
 `stage4_runs` 记录来源 Review snapshot、`daily_date`、`expected_count`、`success_count` 和 `running` / `partial` / `success` 状态。每个 enrichment 成功后立即写入对应 Run 的 draft Event；仅在 drafts 数量等于 `expected_count` 时才原子 publish。
 
-### 3.7 `pipeline_runs`
+## 7 `pipeline_runs`
 
 跨机器持久化的 Pipeline 执行摘要，供 Dashboard 的运行观测与后续手动 Retry 使用；不保存完整
 runtime artifact 或原始模型输出。
@@ -228,7 +218,7 @@ started_at, finished_at, metrics, error_summary, created_at, updated_at
 - Dashboard 对指定 `daily_date + step` 选择 `started_at` 最新的一条，即 Latest Attempt。
 - 索引：`(daily_date, step, started_at DESC)`。
 
-### 3.8 `feedback`
+## 8 `feedback`
 当前保留简单结构，结构未来根据实际 Feedback / Eval 需求再调整。
 
 | Field           | Type        | Constraint / Notes        |
@@ -256,7 +246,7 @@ display_rank 更新
 feedback 写入修改记录
 ```
 
-### 3.9 `evaluation_inputs` / `evaluation_runs` / `evaluation_outputs`
+## 9 `evaluation_inputs` / `evaluation_runs` / `evaluation_outputs`
 
 Model Evaluation 使用三张独立表保存人工实验：
 
@@ -282,19 +272,14 @@ evaluation_outputs
 - `evaluation_outputs.output_json` 只保存已通过当前 Stage contract 校验的 Structured Output。
   删除一个 Run 会 cascade 删除其 outputs；删除 Run 不会删除 shared input，也不会 cascade 到任何 Production Table。
 
-Evaluation 只允许 CLI 等人工入口触发，不加入 `npm run daily`、Cron、Scheduler 或正式
-Orchestrator。它绝不写 `processed_contents`、`events`、`event_review_items`、`feedback`、
-`ai_rank` 或 `display_rank`；Stage 4 不参加多模型 Evaluation。
-Dashboard API 会先创建持久化的 `running` runs，再用固定 detached CLI 执行；读取页面 polling
-`evaluation_runs` 的状态。当前运行时是长期运行的 Node server，独立子进程不依赖原 HTTP 请求；
-同一 Daily + Stage 已有 running run 时拒绝重复触发。
+Evaluation 数据与 Production 数据隔离，不自动写回 `processed_contents`、`events`、
+`event_review_items`、`feedback`、`ai_rank` 或 `display_rank`。
 
-每个 Model Run 使用独立 detached process group，`process_pid` 只在服务端用于取消对应 Run 及其
-子进程；客户端只能提交 `evaluation_run.id`，不能传入系统 PID。取消会将仍为 `running` 的 Run
-原子更新为 `cancelled`，不影响同一 Frozen Input 的其他模型；已 `success`、`failed` 或
-`cancelled` 的 Run 不可再次取消。
+`process_pid` 是 Evaluation Run 的服务端运行时关联信息，用于支持对对应 Run 的进程管理；它不是客户端可提交的业务标识。
 
-### 3.10 Initial Indexes
+Evaluation 的触发、并发控制、Polling、进程生命周期与取消流程属于运行 / Workflow 行为，见 `06-processing-workflow.md` 与 `09-operations.md`。
+
+## 10 Initial Indexes
 
 MVP 只建立明确需要的索引：
 ```text
@@ -304,13 +289,14 @@ raw_articles(collected_at)
 raw_articles(stage1_status)
 
 processed_contents(raw_article_id) UNIQUE
+processed_contents(daily_date)
 processed_contents(routing)
 processed_contents(event_id)
 processed_contents(display_rank)
 
 events(event_date)
 events(display_rank)
-events(event_review_item_id) UNIQUE
+events(stage4_run_id, event_review_item_id) UNIQUE
 
 event_review_items(daily_date)
 event_review_items(review_run_id, event_temp_id) UNIQUE

@@ -281,9 +281,10 @@ function ContentCompletionCard({
 
   return (
     <article className={styles.stageCard}>
-      <div className={styles.stageHeader}>
-        <h3>Content Completion</h3>
-        <StatusBadge status={metrics.status} />
+        <div className={styles.stageHeader}>
+          <h3>Content Completion</h3>
+          {metrics.status !== "success" ? <StepRetryButton dailyDate={dailyDate} step="content_completion" label="Content Completion" initiallyRunning={metrics.status === "running"} /> : null}
+          <StatusBadge status={metrics.status} />
       </div>
       <dl className={styles.metricList}>
         <Metric label="Candidates" value={formatMetric(metrics.candidateCount)} info="本次 Content Completion run 开始时，在该 run 实际 candidate scope 内符合 completion eligibility 的全部文章数。正常 Daily workflow 当前通常使用约 72h catch-up window，不等于当天 24h Raw Articles。" />
@@ -301,7 +302,7 @@ function ContentCompletionCard({
 function DuplicateFilterCard({ metrics, dailyDate }: { metrics: DashboardDuplicateFilterMetrics | null; dailyDate: string }) {
   if (!metrics) return <article className={styles.stageCard}><div className={styles.stageHeader}><h3>Exact Duplicate Filter</h3><StepRetryButton dailyDate={dailyDate} step="exact_duplicate_filter" label="Exact Duplicate Filter" initiallyRunning={false} /><span className={styles.naBadge}>N/A</span></div><p className={styles.empty}>No runtime artifact for this date.</p></article>;
   return <article className={styles.stageCard}>
-    <div className={styles.stageHeader}><h3>Exact Duplicate Filter</h3><StepRetryButton dailyDate={dailyDate} step="exact_duplicate_filter" label="Exact Duplicate Filter" initiallyRunning={false} /></div>
+    <div className={styles.stageHeader}><h3>Exact Duplicate Filter</h3>{metrics.status !== "success" ? <StepRetryButton dailyDate={dailyDate} step="exact_duplicate_filter" label="Exact Duplicate Filter" initiallyRunning={metrics.status === "running"} /> : null}</div>
     <dl className={styles.metricList}>
       <Metric label="Duplicates ignored" value={formatMetric(metrics.duplicateCount)} />
       <Metric label="Dedup rate" value={`${(metrics.duplicateRate * 100).toFixed(1)}%`} />
@@ -375,7 +376,7 @@ function StageCard({
     <article className={styles.stageCard}>
       <div className={styles.stageHeader}>
         <h3>{label} <MetricInfo text="该状态来自目标 Daily 对应的最新 runtime artifact，表示此步骤最近一次执行。" /></h3>
-        <StepRetryButton dailyDate={dailyDate} step={step} label={label} initiallyRunning={metrics.status === "running"} />
+        {metrics.status !== "success" ? <StepRetryButton dailyDate={dailyDate} step={step} label={label} initiallyRunning={metrics.status === "running"} /> : null}
         <StatusBadge status={metrics.status} partialReady={metrics.readyCount ?? metrics.enrichmentSuccessCount} />
       </div>
       <dl className={styles.metricList}>

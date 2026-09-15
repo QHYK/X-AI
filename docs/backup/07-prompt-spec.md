@@ -262,8 +262,6 @@ Do not manufacture significance. Straightforward Events whose significance is al
 
 ## Read More — On-demand Detailed Summary
 
-**Prompt Version:** `v1`
-
 **Goal:** For a Digest or Long-form item whose associated Raw Article has saved
 `full_content_text`, provide a Chinese reading guide that helps the user decide whether to
 read the original long article.

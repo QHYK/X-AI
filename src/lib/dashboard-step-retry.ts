@@ -1,7 +1,7 @@
 /** Restricted, detached Dashboard retry launcher for one fixed Pipeline step. */
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import type { Pool } from "pg";
-import { resolveCatchupPublishedAtScope, resolveDailyScope, toDailyScopeEnv } from "./daily-scope.js";
+import { isCurrentWorkflowDailyDate, resolveCatchupPublishedAtScope, resolveDailyScope, toDailyScopeEnv } from "./daily-scope.js";
 
 export const DASHBOARD_RETRY_STEPS = [
   "content_completion",
@@ -44,7 +44,11 @@ export async function startDashboardStepRetry(
   try {
     const rootDir = options.rootDir ?? process.cwd();
     const env: NodeJS.ProcessEnv = { ...process.env, ...toDailyScopeEnv(scope), PIPELINE_TRIGGER_SOURCE: "dashboard" };
-    if (step === "content_completion" || step === "stage1") {
+    // A Dashboard retry always owns its scope. Do not let an environment left
+    // over from a parent Daily process turn a historical retry into catch-up.
+    delete env.DAILY_CATCHUP_SCOPE_START_AT;
+    delete env.DAILY_CATCHUP_SCOPE_END_AT;
+    if ((step === "content_completion" || step === "stage1") && isCurrentWorkflowDailyDate(scope.dailyDate)) {
       const catchup = resolveCatchupPublishedAtScope(scope);
       env.DAILY_CATCHUP_SCOPE_START_AT = catchup.startAt;
       env.DAILY_CATCHUP_SCOPE_END_AT = catchup.endAt;

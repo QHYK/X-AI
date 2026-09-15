@@ -44,6 +44,7 @@ import { resolveStageLlmModel } from "./llm-client.js";
 import { normalizeArticleUrl } from "./url-normalization.js";
 import type { PublishedAtScope } from "../lib/daily-scope.js";
 import { resolveDailyScope } from "../lib/daily-scope.js";
+import { DEFAULT_STAGE4_EVENT_LIMIT } from "./stage4-config.js";
 import { loadEventGroupsForRanking } from "./event-group-persistence.js";
 import {
   buildEventReviewSnapshotItems,
@@ -257,7 +258,7 @@ export async function processStage3(
       rankingOutput: eventRanking.output,
       eventInput: eventBundle.input,
       eventIdMap: eventBundle.idMap,
-      topN: eventBundle.input.events.length,
+      topN: DEFAULT_STAGE4_EVENT_LIMIT,
     });
     eventSelectedCount = selectedEvents.events.length;
     await writeJson(join(eventsDir, "selected.json"), selectedEvents);
@@ -894,7 +895,7 @@ function sumKnownStage3TokenUsages(values: Array<Stage3TokenUsage | null>): Stag
   return values.reduce<Stage3TokenUsage>((sum, value) => ({ inputTokens: sum.inputTokens + value!.inputTokens, outputTokens: sum.outputTokens + value!.outputTokens, totalTokens: sum.totalTokens + value!.totalTokens }), { inputTokens: 0, outputTokens: 0, totalTokens: 0 });
 }
 
-function selectTopEvents(options: {
+export function selectTopEvents(options: {
   rankingOutput: Stage3EventRankedOutput;
   eventInput: Stage3EventRankingInput;
   eventIdMap: Record<string, string[]>;
@@ -1016,7 +1017,7 @@ async function loadArticleUrls(
  * 移除与已选 Top Event 指向同一规范化 URL 的 Digest/Long-form。
  * 这样最终 Brief 不会在多个频道重复呈现同一篇原始报道。
  */
-function applyCrossChannelDedup(options: {
+export function applyCrossChannelDedup(options: {
   digestRecords: DigestRecord[];
   longFormRecords: LongFormRecord[];
   selectedKeyToEventId: Map<string, string>;

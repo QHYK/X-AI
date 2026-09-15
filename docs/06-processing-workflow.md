@@ -5,7 +5,7 @@
 本文档不重复定义 AI 的判断标准或 Prompt Contract：
 
 - AI 各 Stage 的职责与语义：见 `03-ai-workflow-spec.md`
-- 系统架构与稳定技术决策：见 `04-technical-architecture.md`
+- 系统架构与稳定技术决策：见 `04-technical-spec.md`
 - 数据表、字段、约束与索引：见 `05-data-model.md`
 - Structured Output / Prompt Contract：见 `07-prompt-spec.md`
 - 完整系统总览：见 `02-workflow-overview.md`
@@ -216,12 +216,13 @@ loser  → raw_articles.stage1_status = ignored
           processing_error = "duplicate"
 ```
 
-winner 的稳定优先级依次考虑：
+winner 使用确定性的 Application Code comparator，依次考虑：
 
-1. `content_text` 更完整；
-2. Source 名称稳定排序；
-3. 更早创建的记录；
-4. ID 作为最后稳定 tie-breaker。
+1. `content_text` 长度更长；
+2. Source 名称长度更短；
+3. ID 作为最后稳定 tie-breaker。
+
+当前 comparator 不使用 `created_at`。该规则只用于 exact duplicate 中选择保留记录，不表达 Source 质量或内容重要性。
 
 跨媒体报道同一现实事件不属于这里的重复：
 
@@ -453,11 +454,7 @@ runtime 用于诊断、统计和 lineage，不代替 Production DB。
 
 ## 7. Stage 2 — Event Merge
 
-### 7.1 Trigger
-
-Stage 1 完成后执行 Stage 2。
-
-### 7.2 Candidate Loading
+### 7.1 Candidate Loading
 
 Stage 2 从 Production DB 读取当前：
 
@@ -469,7 +466,7 @@ raw_articles.stage1_status = selected
 
 Stage 1 runtime 只作为本次 Workflow lineage / debug 信息保存，不作为 Stage 2 业务候选筛选条件。
 
-### 7.3 Execution
+### 7.2 Execution
 
 ```text
 Event Candidates
@@ -491,9 +488,9 @@ Stage 2 当前不做：
 - 最终 Event enrichment；
 - `events` persistence。
 
-Event Group 仍是本次 Workflow 的中间结果。
+Event Group 是可重建的 Production 中间态。Stage 2 成功后，将当前 `daily_date` 的 Event Groups 作为可替换 snapshot 写入 `event_groups` / `event_group_items`。Stage 3 从该 DB snapshot 读取 Event Groups；runtime artifacts 只用于 observability / debug，不作为 Stage 3 的业务输入。
 
-### 7.4 Validation
+### 7.3 Validation
 
 模型输出应满足：
 
@@ -514,9 +511,19 @@ missing / duplicate / invented IDs
 
 这是当前实现例外，不改变长期 contract。
 
-### 7.5 Runtime and Lineage
+### 7.4 Persistence and Runtime
 
-Stage 2 写入：
+Stage 2 成功后，以当前 `daily_date` 为 scope replace 对应的 Event Group snapshot：
+
+```text
+event_groups
+    ↓
+event_group_items
+```
+
+该 DB snapshot 是 Stage 3 的正式业务输入。重复执行 Stage 2 可以重建并替换当前 Daily 的 snapshot，不直接创建最终 `events`。
+
+Stage 2 同时写入 runtime artifacts：
 
 ```text
 runtime/stage2/<run-id>/
@@ -526,16 +533,7 @@ runtime/stage2/<run-id>/
     run.json
 ```
 
-`run.json` 同时记录：
-
-- Stage 1 upstream run；
-- model / prompt version；
-- token usage；
-- retry / duration；
-- assignment validation；
-- success / failed。
-
-Stage 3 必须使用 Orchestrator 明确传入的本次 Stage 2 run，不使用全局 “latest run” 推断 lineage。
+`run.json` 记录 model / prompt version、token usage、retry / duration、assignment validation、success / failed 等运行信息。runtime artifacts 用于 observability / debug，不作为 Stage 3 的 Production Source of Truth。
 
 ---
 
@@ -548,8 +546,11 @@ Stage 3 不是一次单一 Ranking，而是多个有顺序依赖的步骤。
 **Event**
 
 ```text
-读取本次 Stage 2 runtime Event Groups
+读取 event_groups / event_group_items
+where daily_date = target dailyDate
 ```
+
+Stage 3 读取 Stage 2 已持久化的当前 Daily Event Group snapshot，不从 Stage 2 runtime artifact 重建业务输入。
 
 **Digest / Long-form**
 
@@ -663,13 +664,7 @@ event_review_item_id
 
 Stage 3 完成后，只处理最终 Selected Event Groups。
 
-每个 Event 独立 enrichment，并允许有限并发。
-
-常用 override：
-
-```bash
-STAGE4_CONCURRENCY=3 npm run process:stage4
-```
+每个 Event 独立 enrichment。当前 Production DB path 按 Selected Events 顺序串行执行 enrichment；不把并发参数作为当前 Production Workflow contract。具体可执行参数见 `09-operations.md`。
 
 ### 9.2 Execution
 
@@ -698,62 +693,62 @@ Persistence Plan
 
 是否真的执行过 Web Search，Application Code 必须根据真实 tool usage / provenance 判断，不能只相信模型在输出 JSON 中自行声明。
 
-### 9.3 `event_date`
+### 9.3 `event_date` and Daily Attribution
 
 `event_date` 不由 LLM 输出。
 
-Application Code：
-
-1. 读取组成 Event 的 source article `published_at`；
-2. 忽略无效 / NULL timestamp；
-3. 转换到 `Asia/Shanghai`；
-4. 使用最早有效日期；
-5. 全部缺失时 fallback 到当前 Workflow run timestamp 对应日期。
-
-### 9.4 Atomic Persistence
-
-常规 Stage 4：
+当前 Production 语义中，Stage 4 Event 属于一个明确的 Workflow Daily：
 
 ```text
-all selected Event enrichments succeed
-    ↓
-single transaction
-    ↓
-persist current workflow-derived Events
+events.event_date = stage4_runs.daily_date = target dailyDate
 ```
 
-这样避免数据库出现“半套新 Event + 半套旧 Event”。
+因此 `event_date` 表示该 Event 在 Production 中所属的 Daily attribution date，不再根据组成 Event 的 source article 最早 `published_at` 单独推导。
 
-Stage 4 完成后：
+Source article 的原始发布时间继续保存在 `raw_articles.published_at`；late-arrival 内容进入哪一期 Daily，由 Stage 1 写入的 `processed_contents.daily_date` 以及后续当前 Daily snapshot 决定。不要混用 source publication time、现实事件发生时间与 Production Daily attribution。
 
-1. 创建 / rebuild `events`；
-2. 将组成 Event 的 `processed_contents.event_id` 回写到对应 Event；
-3. 保存 `ai_rank` / `display_rank` / Review 关联；
-4. 保存真实 external context provenance（仅真实发生 Web Search 时）。
+### 9.4 Draft Persistence and Atomic Publish
 
-系统不创建额外 `event_articles` join table。
-
-### 9.5 Rebuild Scope
-
-不同 `event_date` 使用 append 语义。
-
-同一 Daily 重跑时，只允许 cleanup / rebuild 当前输出实际涉及的 `event_date` scope：
+Stage 4 的持久化 scope 以当前 `daily_date` / `stage4_run` 为边界，而不是从 Event source timestamps 推导多个 `event_date` scope。
 
 ```text
-identify previous derived Events
+target dailyDate
     ↓
-validate cleanup event_date scope
+create Stage 4 Run
     ↓
-unlink
+enrich each Selected Event
     ↓
-delete previous derived Events
+persist durable draft Event immediately
     ↓
-create new Events
-    ↓
-relink
+draft count == expected_count ?
+    ├─ no  → run remains partial; do not replace previous published run
+    └─ yes → atomic publish current complete set
+             + archive previous published set for the same Daily
 ```
 
-如果 cleanup candidate 中包含不属于当前 rebuild scope 的历史 Event，必须失败，不能静默删除。
+每个 enrichment 成功后立即把对应 Event 作为当前 `stage4_run` 的 draft 持久化，避免前面已经完成的 Event 因后续单项失败而丢失。只有当前 Run 的完整 draft 数量达到 `expected_count` 时，才允许把整套结果原子发布。
+
+同一 Daily 的 publish / archive 只作用于该 `daily_date` 的 publication state，不影响其他 Daily 的历史 Event。发布时不得形成“部分新 Event + 部分旧 published Event”的混合正式集合。
+
+Stage 4 创建 Event 时保存对应的：
+
+- `stage4_run_id`；
+- `publication_status`；
+- `event_review_item_id`；
+- `ai_rank` / `display_rank`；
+- 真实 external context provenance（仅真实发生 Web Search 时）。
+
+组成 Event 的 `processed_contents.event_id` 在正式 publication state 中关联到对应 Event。系统不创建额外 `event_articles` join table。
+
+### 9.5 Daily Brief Visibility
+
+Daily Brief 对同一 `daily_date` 只读取一个一致的 Stage 4 generation state：
+
+- 当前 Run 已完整 publish：读取该 Run 的 published Event set；
+- 当前 Run 仍为 partial：只返回该 Run 已完成的 draft partial set，并明确保持 partial 状态；
+- 不把旧 published Event 与当前 Run drafts 混合成一个看似完整的新结果。
+
+因此 Stage 4 的 durable draft、complete-set publish、previous-set archive 与 Daily Brief read behavior 共同构成同一个 Production consistency contract。
 
 ---
 
@@ -782,8 +777,10 @@ relink
 
 ### Stage 2
 
-- Event Groups 是可重建中间结果；
+- Event Groups 是按 `daily_date` 保存的可重建 DB snapshot；
+- Stage 2 rerun 可以 replace 当前 Daily 的 Event Group snapshot；
 - Stage 2 不直接写最终 `events`；
+- runtime failure 不应被 Stage 3 当作业务输入来源；
 - assignment validation 的当前 diagnostic exception 必须明确记录。
 
 ### Stage 3
@@ -794,8 +791,12 @@ relink
 
 ### Stage 4
 
-- enrichment 未全部成功时，不提交半套最终 Events；
-- rebuild cleanup 必须严格限定 event_date scope；
+- 每个成功 enrichment 先保存 durable draft；
+- draft 未达到 `expected_count` 时 Run 保持 partial，不提交半套正式 Events；
+- 只有 complete draft set 才能 atomic publish，并归档同一 Daily 的上一套 published Events；
+- Daily Brief 不混合旧 published Events 与当前 Run drafts；
+- Stage 4 publication / replacement 必须限定在当前 `daily_date` / `stage4_run` scope；
+- 不修改其他 Daily 的历史 Event；
 - 失败 run 保留 runtime artifacts 用于诊断。
 
 ---
@@ -818,7 +819,8 @@ Stage 1
 → processed_contents.raw_article_id unique
 
 Stage 2
-→ runtime Event Groups 可重算
+→ 当前 `daily_date` 的 Event Group DB snapshot 可重建 / replace
+→ Stage 3 从 DB snapshot 读取
 → 不直接创建最终 events
 
 Stage 3
@@ -827,8 +829,8 @@ Stage 3
 → Event Review 使用新 snapshot 保留历史
 
 Stage 4
-→ 按 event_date scope cleanup / rebuild
-→ 不删除其他日期历史 Event
+→ 以 `daily_date` / `stage4_run` 为 publication scope
+→ 同一 Daily 重跑不影响其他 Daily 的历史 Event
 ```
 
 显式 `DAILY_DATE` retry / backfill 必须继续使用同一 Daily scope。
@@ -843,8 +845,7 @@ Stage 4
 - 可观测性；
 - LLM input / output review；
 - step metrics；
-- upstream/downstream lineage；
-- Stage 4 rebuild 辅助识别；
+- upstream/downstream execution references；
 - 必要时的数据恢复分析。
 
 它不是：
@@ -873,7 +874,7 @@ runtime/daily/<run-id>/run.json
 
 核心原则：
 
-> Orchestrator 明确把本次 upstream run 传给 downstream stage，不依赖扫描 runtime 目录寻找全局 latest run。
+> runtime artifacts 记录运行关系与诊断信息，但 Production stage 之间的业务输入以对应 DB state / snapshot 为准；不得通过扫描 runtime 目录寻找 “latest state” 来建立业务依赖。
 
 ---
 
@@ -932,6 +933,8 @@ display_rank / feedback
 ```
 
 它可以修改最终展示排序，并在 Event 被人工移入 Top cutoff 且尚无最终 Event 时按需调用单 Event Stage 4 enrichment。
+
+Long-form Review 的 Daily membership 必须与 Production 一致，按 `processed_contents.daily_date = target dailyDate` 读取和保存，不重新根据 `raw_articles.published_at` 计算 24 小时范围。这样 72 小时 catch-up 后归入当前 Daily 的 Long-form 仍属于同一期 Review。
 
 Human Review 不重跑完整 Daily Pipeline。
 

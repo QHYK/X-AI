@@ -108,13 +108,16 @@ const promotionResult = await saveEventReviewRanking(createSavePool(promotionLog
 });
 const insertedEvent = promotionLog.find((entry) => entry.text.startsWith("insert into events"));
 checks.push({
-  name: "new Top 15 Event persists once with explicit Review link and final display rank",
+  name: "new Top 15 Event enters the current Stage 4 run as a draft and is published with the reviewed selection",
   passed:
     promotionResult.eventsCreated === 1 &&
     promotionResult.feedbackCount === 1 &&
-    insertedEvent?.values?.at(-3) === idForRank(25) &&
+    insertedEvent?.values?.at(-4) === idForRank(25) &&
+    insertedEvent?.values?.at(-3) === stage4RunId() &&
     insertedEvent.values?.at(-2) === 25 &&
-    insertedEvent.values?.at(-1) === 6,
+    insertedEvent.values?.at(-1) === 6 &&
+    promotionLog.some((entry) => entry.text.startsWith("update events set publication_status = 'published'")) &&
+    promotionLog.some((entry) => entry.text.startsWith("update events set publication_status = 'archived'")),
 });
 
 for (const check of checks) {
@@ -139,6 +142,18 @@ function createSavePool(
         log.push({ text: normalized, values });
         if (normalized === "begin" || normalized === "commit" || normalized === "rollback") {
           return { rows: [], rowCount: 1 };
+        }
+        if (normalized.startsWith("select id, success_count, status from stage4_runs")) {
+          return { rows: [{ id: stage4RunId(), success_count: 15, status: "success" }], rowCount: 1 };
+        }
+        if (normalized.startsWith("select expected_count from stage4_runs")) {
+          return { rows: [{ expected_count: 15 }], rowCount: 1 };
+        }
+        if (normalized.startsWith("select event_review_item_id from events")) {
+          return { rows: (values?.[1] as string[]).map((event_review_item_id) => ({ event_review_item_id })), rowCount: 15 };
+        }
+        if (normalized.startsWith("select id from events")) {
+          return { rows: [{ id: eventIdForRank(15) }], rowCount: 1 };
         }
         if (normalized.startsWith("insert into events")) {
           return { rows: [{ id: eventIdForRank(25) }], rowCount: 1 };
@@ -173,10 +188,21 @@ function respondToReviewQuery(text: string, _values: unknown[] | undefined, miss
         .map((row) => ({ id: eventIdForRank(row.rank), event_review_item_id: row.id })),
     };
   }
+  if (normalized.startsWith("select id, success_count, status from stage4_runs")) {
+    return { rows: [{ id: stage4RunId(), success_count: 15, status: "success" }], rowCount: 1 };
+  }
   if (normalized.startsWith("select e.id from events e join processed_contents")) {
     return { rows: [] };
   }
-  if (normalized.startsWith("update event_review_items") || normalized.startsWith("update events set display_rank") || normalized.startsWith("insert into feedback")) {
+  if (
+    normalized.startsWith("update event_review_items") ||
+    normalized.startsWith("update events set display_rank") ||
+    normalized.startsWith("update events set publication_status") ||
+    normalized.startsWith("update stage4_runs") ||
+    normalized.startsWith("update processed_contents pc set event_id") ||
+    normalized.startsWith("update processed_contents set event_id") ||
+    normalized.startsWith("insert into feedback")
+  ) {
     return { rows: [], rowCount: 1 };
   }
   throw new Error(`Unexpected test query: ${normalized}`);
@@ -231,6 +257,10 @@ function eventIdForRank(rank: number): string {
 
 function runId(): string {
   return "40000000-0000-4000-8000-000000000001";
+}
+
+function stage4RunId(): string {
+  return "50000000-0000-4000-8000-000000000001";
 }
 
 function normalize(text: string): string {

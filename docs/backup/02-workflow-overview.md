@@ -18,34 +18,36 @@
                [AI] Stage 1 Understanding & Selection
                                    ↓
                               Routing
-             ┌────────────┬────────┼───────────┬────────────┐
-             ↓            ↓        ↓           ↓            ↓
-           Event        Digest   Long-form  Inspiration   Ignore
-             ↓            ↓        ↓           ↓
+            ┌─────────────┬────────┼───────────┬────────────┐
+            ↓             ↓        ↓           ↓            ↓
+          Event        Digest   Long-form  Inspiration    Ignore
+            ↓            ↓        ↓           ↓
       Event Candidates    │        │           │
-             ↓            │        │           │
+            ↓             │        │           │
       [AI] Stage 2        │        │           │
        Event Merge        │        │           │
-             ↓            │        │           │
+            ↓             │        │           │
        Event Groups       │        │           │
-             ↓            │        │           │
-      [AI] Event Rank     │        │           │
-             ↓            │        │           │
-       [DB] Review Snapshot│       │           │
-             ↓            │        │           │
-      [AI] Stage 4 Top N  │        │           │
-       Enrichment         │        │           │
+            ↓             │        │           │
+      [AI] Stage 3        │        │           │
+      Event Ranking       │        │           │
+            ↓             │        │           │
+    [DB] Review Snapshot  │        │           │
+            ↓             │        │           │
+      [AI] Stage 4        │        │           │
+    Event Enrichment      │        │           │
           ↙   ↘           │        │           │
-   sources     optional   │        │           │
-              Web Search  │        │           │
-             ↓            ↓        ↓           │
-        [DB] Events    Dedup     Dedup         │
+    sources   [Tool]      │        │           │
+            Web Search    ↓        ↓           │
+               ↓       [Code]    [Code]        │
+          [DB] Events   Dedup     Dedup        │
                           ↓        ↓           │
-                     Science       │           │
+                      Science      │           │
                      Enrichment    │           │
                           ↓        ↓           │
-                   [AI] Digest  [AI] Long-form │
-                      Ranking      Ranking     │
+                   [AI] Stage 3  [AI] Stage 3  │
+                       Digest    Long-form     │
+                       Ranking    Ranking      │
                           ↓        ↓           ↓
                     [DB] processed_contents
                               │
@@ -60,7 +62,7 @@
 ```
 
 ```mermaid
-flowchart LR
+flowchart TD
     S["[配置] Source List"] --> C["[代码] RSS Collection"]
     C --> R["[数据] raw_articles"]
     R --> RD["[代码] Exact Raw Duplicate Filter"]
@@ -126,6 +128,8 @@ Dashboard 可对 Content Completion、Exact Duplicate Filter 与 Stage 1–4 单
 以固定 allowlist 启动对应 CLI，并以 `DAILY_DATE` 及原有 scope 语义执行；新 execution 写入
 `pipeline_runs(trigger_source='dashboard')`，Dashboard 自然显示 Latest Attempt。Retry Step 不会自动重跑、
 失效或删除下游结果；如需更新下游，用户须依次 Retry 后续步骤。
+其中 Content Completion 与 Stage 1 仅在目标为当前正常 workflow Daily 时使用 72 小时 catch-up window；
+显式历史 Daily Retry 使用该 `daily_date` 固定的严格 24 小时 scope，不能吸收其他日期的 late-arrival 内容。
 
 `GET /api/brief?date=YYYY-MM-DD` 的 Event 通过 `stage4_runs.daily_date` 归属，只读取
 `publication_status='published'` 的 Events。`events.event_date` 是成员文章时间推导的事件属性，
@@ -137,7 +141,7 @@ Dashboard 可对 Content Completion、Exact Duplicate Filter 与 Stage 1–4 单
 Stage 1  单篇内容：理解、筛选、Routing
 Stage 2  Event Candidates：判断哪些报道属于同一现实事件
 Stage 3  各 Channel：决定相对重要性 / 阅读价值
-Stage 4  Top Events：生成最终事件内容，必要时补充 Web Search
+Stage 4  Selected Events：生成最终事件内容，必要时补充 Web Search 完善上下文
 ```
 
 Stage 3 Event Ranking 每次成功后将完整 Top 50（不足时保存全部）写成新的 UUID Review snapshot。Stage 4 按 `display_rank` 选择前 N（默认 15）生成 draft，全部成功后原子发布；Long-form 正式 cutoff 为 Top 10。

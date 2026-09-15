@@ -135,6 +135,7 @@ export type DashboardContentCompletionMetrics = {
 };
 
 export type DashboardDuplicateFilterMetrics = {
+  status: string | null;
   inputCount: number;
   duplicateCount: number;
   outputCount: number;
@@ -757,6 +758,7 @@ function completionMetricsFromPipelineRun(row: PipelineRunRow): DashboardContent
 function duplicateMetricsFromPipelineRun(row: PipelineRunRow): DashboardDuplicateFilterMetrics {
   const metrics = asObject(row.metrics) ?? {};
   return {
+    status: row.status,
     inputCount: numberFrom(metrics, "input_count") ?? 0, duplicateCount: numberFrom(metrics, "duplicate_count") ?? 0,
     outputCount: numberFrom(metrics, "output_count") ?? 0, duplicateRate: numberFrom(metrics, "duplicate_rate") ?? 0,
     sameUrlCount: numberFrom(metrics, "same_url_count") ?? 0, sameTitleCount: numberFrom(metrics, "same_title_count") ?? 0,
@@ -785,6 +787,7 @@ export async function loadDuplicateFilterRuntimeByDate(
       const artifact = asObject(JSON.parse(await readFile(join(artifactPath, "run.json"), "utf8")));
       if (!artifact) continue;
       metrics.set(date, {
+        status: stringValue(artifact.status),
         inputCount: numberFrom(artifact, "inputCount") ?? 0,
         duplicateCount: numberFrom(artifact, "duplicateCount") ?? 0,
         outputCount: numberFrom(artifact, "outputCount") ?? 0,

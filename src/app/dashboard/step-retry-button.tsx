@@ -21,7 +21,7 @@ export function StepRetryButton({ dailyDate, step, label, initiallyRunning }: St
     if (!running) return;
     const timer = window.setInterval(async () => {
       try {
-        const response = await fetch(`/api/dashboard/step/retry?dailyDate=${encodeURIComponent(dailyDate)}&step=${step}`);
+        const response = await fetch(`./api/dashboard/step/retry?dailyDate=${encodeURIComponent(dailyDate)}&step=${step}`);
         const result: { status?: string | null } = await response.json();
         if (result.status && result.status !== "running") { setRunning(false); router.refresh(); }
       } catch { /* The current button remains disabled; next poll may recover. */ }
@@ -35,7 +35,7 @@ export function StepRetryButton({ dailyDate, step, label, initiallyRunning }: St
     if (!window.confirm(`重新执行 ${label} for ${dailyDate}？\n\n只会执行当前步骤，不会自动运行后续步骤。${stage4}${downstream}`)) return;
     setError(null);
     try {
-      const response = await fetch("/api/dashboard/step/retry", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ dailyDate, step }) });
+      const response = await fetch("./api/dashboard/step/retry", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ dailyDate, step }) });
       const result: { status?: string; message?: string } = await response.json();
       if (!response.ok || result.status === "failed") throw new Error(result.message ?? "Failed to start step.");
       if (result.status === "already_running") { setError("This step is already running."); setRunning(true); return; }

@@ -1,10 +1,9 @@
 /**
  * Human Review 页面与 API 的服务端组合查询。
  *
- * Event snapshot、Candidates 和已有 Stage 4 Event 通过批量查询组合；Long-form 按同一 Daily scope 读取。
+ * Event snapshot、Candidates 和已有 Stage 4 Event 通过批量查询组合；Long-form 按 Daily attribution 读取。
  */
 import type { Pool } from "pg";
-import { resolveDailyScope } from "./daily-scope.js";
 import {
   EVENT_DISPLAY_CUTOFF,
   LONG_FORM_DISPLAY_CUTOFF,
@@ -283,12 +282,11 @@ function sameIds(left: string[], right: string[]): boolean {
   return sortedLeft.every((id, index) => id === sortedRight[index]);
 }
 
-/** 读取同一 Daily scope 内所有实际参与过 Stage 3 排名的 Long-form。 */
+/** 读取同一 Daily attribution 内所有实际参与过 Stage 3 排名的 Long-form。 */
 export async function getLongFormReviewData(
   pool: Pool,
   dailyDate: string,
 ): Promise<LongFormReviewData> {
-  const scope = resolveDailyScope(dailyDate);
   const result = await pool.query<{
     id: string;
     ai_rank: number;
@@ -313,11 +311,10 @@ export async function getLongFormReviewData(
       where pc.routing = 'long_form'
         and pc.ai_rank is not null
         and pc.display_rank is not null
-        and ra.published_at >= $1::timestamptz
-        and ra.published_at < $2::timestamptz
+        and pc.daily_date = $1::date
       order by pc.display_rank, pc.id
     `,
-    [scope.startAt, scope.endAt],
+    [dailyDate],
   );
 
   return {

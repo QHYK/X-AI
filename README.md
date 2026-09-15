@@ -1,240 +1,124 @@
-# X-AI-field
+# What is X-AI-field
 
-X-AI-field 是一个 AI 驱动的信息筛选系统：持续收集可信信息源，通过 AI 完成理解、筛选、事件合并、排序、摘要和事件补全，并生成一份帮助用户了解每天最重要的财经、商业、科技和科学事件的中文 Daily Brief。
+X-AI-field 是一个 AI 驱动的信息筛选系统：持续收集可信信息源，通过 AI
+完成内容理解、筛选、事件合并、排序与事件补全，生成帮助用户了解每天最重要的财经、商业、科技和科学事件的中文 Daily Brief。
 
 ## Current Status
 
-已完成：
-- Product / AI Workflow / Prompt / Technical Spec
-- Project Bootstrap / Source List / RSS Collector / Content Completion
-- Stage 1 - Content Understanding & Selection
-- Stage 2 - Event Merge
-- Stage 3 - Channel Ranking + Exact Dedup
-- Stage 4 — Selected Event Enrichment + Optional Web Search
-- Daily Workflow Orchestrator / 08:30 Asia/Shanghai Cron / Internal Dashboard
-- Daily Brief API & Page
-- Human Review + Feedback
-- Manual Model Evaluation MVP（Stage 1–3，冻结输入，多模型离线比较）
+当前已形成完整可运行链路：
+
+-   Source Collection / Content Completion
+-   Stage 1--4 AI Processing
+-   Daily Workflow Orchestrator
+-   PostgreSQL Production Data
+-   Daily Brief API & Page
+-   Internal Dashboard
+-   Human Review & Feedback
+-   Manual Model Evaluation
 
 ## Daily Brief
 
 Daily Brief 包含四个部分：
 
-- **Today's Events** — 重大事件，多来源合并并保留来源差异
-- **Source Digests** — 按 Category 排序值得关注的科技、商业和科学内容
-- **Long-form Reads** — 值得投入时间完整阅读的深度内容
-- **Daily Inspiration** — xkcd、NASA Image of the Day 等轻量内容
+-   **Today's Events** --- 重大事件，多来源合并并保留来源差异
+-   **Source Digests** --- 值得关注的分析、研究、科技、商业和科学内容
+-   **Long-form Reads** --- 值得投入时间完整阅读的深度内容
+-   **Daily Inspiration** --- xkcd、NASA Image of the Day 等轻量内容
 
-## AI Processing Pipeline
+具体产品定义与内容标准见
+[`docs/01-product-spec.md`](docs/01-product-spec.md)。
 
-```text
-RSS Sources
-    ↓
-Collection → Exact Raw Duplicate Filter → Content Completion
-    ↓
-Stage 1 - Understand / Select / Route
-    ↓
+## System Overview
+
+``` text
+Sources
+  ↓
+Collection → Exact Dedup → Content Completion
+  ↓
+Stage 1 — Understand / Select / Route
+  ↓
 Event / Digest / Long-form / Inspiration
-    ↓
-Stage 2 - Merge Event Candidates
-    ↓
-Stage 3 - Channel Ranking + Exact Dedup
-    ↓
-Top Events → Stage 4 - Event Enrichment (+ optional Web Search)
-    ↓
+  ↓
+Stage 2 — Event Merge
+  ↓
+Stage 3 — Channel Ranking + Exact Dedup
+  ↓
+Stage 4 — Selected Event Enrichment
+  ↓
 PostgreSQL
-    ↓
-Daily Brief API
+  ↓
+Daily Brief API / Dashboard
 ```
 
-完整工作流见 `docs/06-workflow-overview.md`。
+系统同时包含 Human Review 和独立的 Model Evaluation Workflow。
 
-当前正式 provider routing：
-
-| Stage | Provider |
-| --- | --- |
-| Stage 1 | OpenAI |
-| Stage 2 | DeepSeek |
-| Stage 3 | OpenAI |
-| Stage 4 | OpenAI |
-
-## Human Review / Feedback
-
-支持人工：
-* Event Ranking Review
-* Long-form Ranking Review
-人工反馈用于后续 Eval 和 Prompt 优化。
+完整高层工作流见
+[`docs/02-workflow-overview.md`](docs/02-workflow-overview.md)。
 
 ## Tech Stack
-* App: Next.js + TypeScript
-* DB: PostgreSQL / Supabase
-* ORM: Drizzle ORM
-* AI: OpenAI Responses API、DeepSeek OpenAI-compatible API、Structured Output、optional Web Search
-* Scheduling: Cron / Scheduled Job
 
-MVP 使用单一 Next.js Application，不引入 Microservices、Message Queue、Workflow Engine 或复杂 Agent Framework。
+-   **Application:** Next.js + TypeScript
+-   **DB:** PostgreSQL
+-   **ORM:** Drizzle ORM
+-   **AI:** OpenAI-compatible LLM providers, Structured Output, optional
+    Web Search
+-   **Content Retrieval:** RSS + Firecrawl
+-   **Scheduling:** External Cron / Scheduled Job
 
-## Local Development
+MVP 保持单一 Next.js Application，不引入 Microservices、Message
+Queue、Workflow Engine 或复杂 Agent Framework。
 
-```bash
+## Quick Start
+
+``` bash
 npm install
 cp .env.example .env.local
 npm run dev
 ```
 
-核心环境变量：
+数据库、LLM Provider、Firecrawl 等完整环境变量说明见
+[`docs/09-operations.md`](docs/09-operations.md)。
 
-```bash
-DATABASE_URL="postgresql://..."
-DATABASE_SSL="true"
-STAGE1_LLM_PROVIDER="openai"
-STAGE2_LLM_PROVIDER="deepseek"
-STAGE3_LLM_PROVIDER="openai"
-STAGE4_LLM_PROVIDER="openai"
-OPENAI_API_KEY="..."
-OPENAI_BASE_URL="..."
-OPENAI_MODEL="gpt-5.4"
-# DEEPSEEK_API_KEY="..."
-# DEEPSEEK_MODEL="deepseek-v4-pro"
-# KIMI_API_KEY="..."
-# KIMI_MODEL="kimi-k3"
-```
+## Core Commands
 
-### Main Commands
-
-```bash
-npm run dev                              # Next.js dev server
-npm run lint
-npm run typecheck
-npm run build                            # Build the Next.js app
-
-npm run db:generate                      # Generate Drizzle migrations from src/db/schema.ts
-npm run db:migrate                       # Apply Drizzle
-npm run db:check                         # 检查 Drizzle migration 一致性
-npm run db:seed                          # Sync docs/05-source-list.md → sources
-
-npm run daily                            # Run the complete daily pipeline.
-npm run collect:rss                      # RSS sources → `raw_articles`
-npm run complete:content                 # rss.content_text 内容不足的补充正文
-npm run process:stage1                   # Stage 1: Process the last 24 hours Raw Articles
-npm run dedupe:stage1                    # Exact duplicate filter (Daily supplies its published_at scope)
-npm run process:stage2                   # Stage 2: Merge Event and write runtime intermediate data
-npm run process:stage3                   # Stage 3: Channel rank, exact dedup and persist
-npm run process:stage4                   # Stage 4: enrich Events and persist events
-
-# Human-triggered, isolated Model Evaluation (never runs as part of `daily`)
-npm run eval:stage1 -- --date=2026-08-28
-npm run eval:stage2 -- --date=2026-08-28
-npm run eval:stage3:event -- --date=2026-08-28
-npm run eval:stage3:digest -- --date=2026-08-28
-npm run eval:stage3:long-form -- --date=2026-08-28
-
-#### Tests and Diagnostics
-# npm run test:stage3-persistence          # Validate Stage 3 display_rank protection rules
-# npm run test:stage4-event-date           # Validate deterministic event_date 推导
-# npm run test:stage4-persistence          # 验证 Stage 4 跨日 append、同日 rebuild 和 rollback
-npm run test:content-completion-runtime  # 验证 Completion 统计与 Dashboard runtime 读取
-npm run test:model-evaluation            # 验证冻结输入、独立 model run 与 Production 隔离
-npm run test:openai                      # Structured-output provider smoke testsmoke test
-npm run test:deepseek
-npm run test:kimi
-
-npm run recover:stage4-events:dry-run      # 只读分析 Stage 4 runtime 与数据库，输出可恢复候选，不写库
-```
-
-常用运行参数：
-
-```bash
-DAILY_DATE=2026-mm-dd npm run daily
-STAGE1_LIMIT=20 npm run process:stage1
-STAGE1_CONCURRENCY=2 npm run process:stage1
-STAGE1_PUBLISHED_WITHIN_HOURS=24 npm run process:stage1
-STAGE4_CONCURRENCY=3 npm run process:stage4
-```
-Daily 内部使用 `DAILY_PUBLISHED_SCOPE_START_AT` / `DAILY_PUBLISHED_SCOPE_END_AT` 传递固定 scope；
-旧 `DAILY_SCOPE_START_AT` / `DAILY_SCOPE_END_AT` 仅作为部署兼容 alias。
-`runtime/` 保存运行时 input/output/debug artifacts，并被 Git 忽略。
-每次 `npm run complete:content` 会写入 `runtime/content-completion/<timestamp>/run.json`，记录候选总量、实际选中量、成功/失败/skip、结束后的 remaining backlog、LIMIT 和 duration。
-Stage 4 persistence 会使用最近一次成功 runtime artifacts 识别同一 `event_date` scope 的上一轮输出，因此不要随意删除仍参与 rebuild/recovery 的 Stage 4 runtime 目录。
-
-### Model Evaluation
-
-Model Evaluation 是人工触发的离线实验工具，不属于 `npm run daily`、Cron 或 Production
-Workflow。它只评测 Stage 1、Stage 2、Stage 3 Event / Digest / Long-form。
-
-默认运行当前 Evaluation 配置中的 DeepSeek 与 Kimi；
-可用 `--provider=deepseek` 限定一个 Provider，`--model=...` 需要同时提供单一 `--provider`。
-配置读取现有 `DEEPSEEK_*` / `KIMI_*` 环境变量；可选 `EVALUATION_PROVIDERS=deepseek,kimi`
-控制默认 Provider 列表。Evaluation 不写 `processed_contents`、`events`、Review 或 Feedback，
-也不修改任何正式 Rank。`sql/evaluation/` 提供 Routing、Merge、Event Top 15 / Rank
-Difference 与运行性能的人工比较 SQL。
-
-内部观察页面位于 `review/models`：不会自动运行、不会参与 Daily，也不会修改任何 Production 结果。
-读取接口为 `api/evaluation?date=...&stage=...`，手动触发接口为 `api/evaluation/run`。
-
-### Production
-
-```bash
+``` bash
+npm run dev
 npm run build
 npm run start
+
+npm run typecheck
+npm run lint
+
+npm run db:migrate
+npm run db:seed
+
+npm run daily
+npm run daily -- --date=YYYY-MM-DD
 ```
 
-当前不内置 Cron。部署环境可由外部 scheduler 在 `08:30 Asia/Shanghai` 触发 `npm run daily`。
-
-### Updating Sources
-
-1. 更新 `docs/05-source-list.md`。
-2. 执行 `npm run db:seed` sync `sources`.
-3. 需要立即采集RSS时执行 `npm run collect:rss`.
-4. 顺序执行 `collect:rss` → `complete:content` → `process:stage1` → `process:stage2` → `process:stage3` → `process:stage4`.
-
-Use `Source + Collection Method` as the source identity, so URL changes update existing records.
-
-## Daily Brief API
-
-```text
-GET /api/brief?date=YYYY-MM-DD
-```
-
-返回：
-- `events` — Top 10
-- `digests` — 按 Category 分组，返回全部已排序内容
-- `long_form` — Top 10
-- `inspiration`
-- `meta`
-
-所有可阅读内容都返回原文链接。Brief 的 Daily Date 由新闻发布时间 scope 决定：
-`Daily YYYY-MM-DD = 前一天 08:30 <= raw_articles.published_at < 当天 08:30`
-（Asia/Shanghai）。`collected_at` 只表示系统采集时间，不决定 Daily 归属。Digest / Long-form /
-Inspiration 通过关联 Raw Article 归属；Event 只要有一条 scope 内的 Event Candidate 即归入该
-Daily，且只返回一次。retry / backfill 不改变 Daily membership，`published_at IS NULL` 的文章
-不属于任何 Daily；`created_at` 也不用于 Brief 日期归属。
-
-## Internal Dashboard / Human Review
-
-启动 `npm run dev` 后访问：
-
-```text
-http://localhost:3000/dashboard
-http://localhost:3000/review/events
-http://localhost:3000/review/long-form
-```
-
-- 页面需要可用的 `DATABASE_URL`，默认展示最近 7 天的数据量与 Daily Workflow 运行情况。
-- 数据库是业务数据 Source of Truth；所有每日统计按 `raw_articles.published_at` 的 `Asia/Shanghai` 08:30 Daily boundary 计算。
-- `runtime/content-completion/` 补充每天最新一次 Completion success/selected、remaining backlog、duration 和 Date Details 计数。
-- `runtime/stage1~4/` 只补充运行指标，例如 LLM calls、retry、实际记录的 token、duration、Stage 2/3/4 的中间与结果数量。
-- 某个字段没有时显示 `N/A`，不会估算或写入新的 metrics 数据。
-- Dashboard 顶部提供 Event / Long-form Review 入口。Review 页面默认使用最近已结束的 08:30 Daily date，也可通过日期控件查看其他日期。
+独立 Stage、Evaluation、Regression Tests、Diagnostics、Backfill /
+Recovery 等操作入口统一见
+[`docs/09-operations.md`](docs/09-operations.md)。
 
 ## Documentation
 
-- `docs/01-product-spec.md` — 产品目标与内容标准
-- `docs/02-ai-workflow-spec.md` — 四个 AI Stage 的职责
-- `docs/03-prompt-spec.md` — LLM Input / Output / Prompt Guidelines
-- `docs/04-technical-spec.md` — 架构、数据、Workflow 与工程约束
-- `docs/05-source-list.md` — Source 配置
-- `docs/06-workflow-overview.md` — 完整项目工作流
+项目采用 **One Fact, One Source of Truth**
+具体规则只在其所属文档维护，其他文档只引用。
+
+| Document | Responsibility |
+|---|---|
+| [`01-product-spec.md`](docs/01-product-spec.md)               | 产品目标、产品规则、Daily Brief 结构、内容与 Review |
+| [`02-workflow-overview.md`](docs/02-workflow-overview.md)     | 系统高层工作流与主要模块关系 |
+| [`03-ai-workflow-spec.md`](docs/03-ai-workflow-spec.md)       | Stage 1--4 AI Capability Semantic Contract |
+| [`04-technical-spec.md`](docs/04-technical-spec.md)           | 技术架构、模块边界与稳定技术决策 |
+| [`05-data-model.md`](docs/05-data-model.md)                   | Production / Review / Evaluation 数据模型 |
+| [`06-processing-workflow.md`](docs/06-processing-workflow.md) | Production execution、Daily Scope、persistence、retry、lineage |
+| [`07-prompt-spec.md`](docs/07-prompt-spec.md)                 | Application ↔ LLM Prompt / Structured Output Contract |
+| [`08-source-list.md`](docs/08-source-list.md)                 | Source 配置 |
+| [`09-operations.md`](docs/09-operations.md)                   | Commands、CLI、环境变量、测试、诊断与人工操作 |
+
+Coding Agent 的工作方式与 Context Loading 规则见 [`AGENTS.md`](AGENTS.md)。
 
 ## Engineering Principles
-* KISS · YAGNI · LLM-first · Rules only when necessary
+
+KISS · YAGNI · LLM-first · Rules only when necessary · One Fact, One Source of Truth

@@ -5,17 +5,8 @@ Event Merge 的人工检查正确率；
 Top 10 中你人工认为“不该出现”的比例；
 你手动调整 display_rank 的比例；
 Stage 1 Ignore 的误杀情况；
-Stage 4 Web Search 实际触发比例；
-每日 LLM token / API cost；
-一次 Daily Pipeline 总耗时；
-各 Stage 的失败 / Retry 情况。
-
-现在你可以说：
-
-> “我设计了一套四阶段 AI information-processing pipeline。”
 
 有数据以后你就能说：
-
 > “系统每日处理约 X 篇内容，经 Stage 1 筛选压缩至 Y%，Event Merge 将 Z 条候选合并为 N 个现实事件；人工抽检 Merge 准确率 XX%，Top 10 人工调整率 XX%，单日 AI 成本约 $X。”
 
 # Collection Backlog
@@ -38,39 +29,17 @@ Stage 4 Web Search 实际触发比例；
 - BLS
   → snapshot-style dedup 潜在问题，目前忽略
 
-Collection dedup 目前是 source 内 dedup；未来可以考虑 canonical URL 跨同 publisher feeds dedup。
-
-### srv/procession
-event-date 逻辑，是否有复杂时间转换？
+？？Collection dedup 目前是 source 内 dedup；未来可以考虑 canonical URL 跨同 publisher feeds dedup。
 
 分析来源数据获取情况，是否遗漏，结构是否可用？
 部分 Feed 特殊情况：
 * BLS 需要浏览器式 User-Agent；
 是否还有其他 
 
----
-
-## `04-technical-spec`
-### 4.1 Daily Workflow
-还需改
-
-RSS Collector
-Source → RSS fetch → normalize → deduplicate → raw_articles
-现在是collector的时候就有deduplicate吗？
-### 4.4 Deduplication
-
----
-
-## Restore strict Stage 2 validation
-
-Stage 2 当前只记录 schema / assignment 问题而不阻断 runtime output。后续单独评估并恢复
-blocking validation，重新要求每个 `temp_id` exactly once。
-
-
-+ Digest Read more
-这个价值也高，因为现在 full_content_text 已经正式存在了，正好可以开始发挥作用。逻辑可以保持简单：有全文就生成/展示更详细中文总结；没有全文就跳原文。
 + Email Collector
 这是新的输入通道，会碰 parsing、newsletter 拆分、source mapping，复杂度明显更高。
 + Editorial Memory / 人工知识加权
 这个最值得最后做，因为它会真正改变 Stage1/Stage3 决策行为，应该建立在我们已经有足够真实 review 数据之后，不然很容易把“临时偏好”写成长期规则。
 + content text > 2000 就展示read more；API对应的用content调llm也可以。
+
+#### 调整 stage 4 prompt 和 「金融研究日报」scheduled prompt 产出格式类似
