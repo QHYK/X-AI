@@ -78,6 +78,53 @@ export type Stage3RankingIntegrity = {
   errors: string[];
 };
 
+export type Stage3RankingWarnings = {
+  duplicateIds: string[];
+  missingIds: string[];
+  rankNormalizationCount: number;
+};
+
+/**
+ * Converts a structurally valid, known-ID ranking into a complete permutation.
+ * The first item in model rank order wins; omitted input IDs append in stable
+ * input order. Unknown IDs remain fatal and are never silently discarded.
+ */
+export function normalizeStage3RankingOutput(
+  output: Stage3RankingOutput,
+  expectedIds: string[],
+): { success: true; output: Stage3RankingOutput; warnings: Stage3RankingWarnings } | { success: false; integrity: Stage3RankingIntegrity } {
+  const integrity = validateStage3RankingIntegrity(output, expectedIds);
+  if (integrity.inventedIds.length > 0) return { success: false, integrity };
+
+  const expected = new Set(expectedIds);
+  const seen = new Set<string>();
+  const kept = [...output.rankings]
+    .map((ranking, index) => ({ ranking, index }))
+    .sort((left, right) => left.ranking.rank - right.ranking.rank || left.index - right.index)
+    .flatMap(({ ranking }) => {
+      if (!expected.has(ranking.id) || seen.has(ranking.id)) return [];
+      seen.add(ranking.id);
+      return [ranking];
+    });
+  const missing = expectedIds.filter((id) => !seen.has(id));
+  const normalized = [...kept, ...missing.map((id) => ({
+    id,
+    rank: 0,
+    reason: "Deterministic fallback: omitted from model ranking.",
+  }))].map((ranking, index) => ({ ...ranking, rank: index + 1 }));
+
+  return {
+    success: true,
+    output: { rankings: normalized },
+    warnings: {
+      duplicateIds: integrity.duplicateIds,
+      missingIds: integrity.missingIds,
+      rankNormalizationCount:
+        integrity.duplicateRanks.length + integrity.missingRanks.length > 0 ? 1 : 0,
+    },
+  };
+}
+
 export const stage3RankingOutputJsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -427,6 +474,29 @@ export function deduplicateStage3EventRankingOutput(
     ordered_ids: output.ordered_ids.filter(
       (id, index, orderedIds) => orderedIds.indexOf(id) === index,
     ),
+  };
+}
+
+/** Event Ranking is Top-50, so missing IDs are only anomalous when all inputs fit. */
+export function normalizeStage3EventRankingOutput(
+  output: Stage3EventRankingOutput,
+  expectedIds: string[],
+): { success: true; output: Stage3EventRankingOutput; warnings: Stage3RankingWarnings } | { success: false; integrity: Stage3EventRankingIntegrity } {
+  const integrity = validateStage3EventRankingIntegrity(output, expectedIds);
+  if (integrity.inventedIds.length > 0) return { success: false, integrity };
+  const deduplicated = deduplicateStage3EventRankingOutput(output);
+  if (deduplicated.ordered_ids.length === 0 && expectedIds.length > 0) {
+    return { success: false, integrity };
+  }
+  const missingIds = expectedIds.length <= MAX_STAGE3_EVENT_RANKINGS
+    ? integrity.missingIds
+    : [];
+  return {
+    success: true,
+    output: {
+      ordered_ids: [...deduplicated.ordered_ids, ...missingIds],
+    },
+    warnings: { duplicateIds: integrity.duplicateIds, missingIds, rankNormalizationCount: 0 },
   };
 }
 

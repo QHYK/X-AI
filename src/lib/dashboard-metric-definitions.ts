@@ -10,7 +10,7 @@ export const dashboardMetricDefinitions: DashboardMetricSection[] = [
     { metric: "LLM Calls", source: "PostgreSQL · pipeline_runs", rule: "同 Daily 各 Stage Latest Attempt 的实际 provider request 总和；无 DB run 才回退 runtime。", notes: "含 retry 与 Stage4 context-decision；不含 Web Search tool call。" },
   ] },
   { title: "2. Content Completion", metrics: [
-    { metric: "Candidates", source: "PostgreSQL · pipeline_runs", rule: "目标 Daily 最新 Completion attempt 的 candidate_count；无 DB run 才回退 artifact。", notes: "正常 Daily 通常是约 72 小时 catch-up，不等于 24h Raw。" },
+    { metric: "Candidates", source: "Content Completion runtime", rule: "目标 Daily 最新 Completion runtime 的 candidate_count。", notes: "当前卡片尚未使用 pipeline_runs；正常 Daily 通常是约 72 小时 catch-up，不等于 24h Raw。" },
     { metric: "Selected / Succeeded / Failed", source: "Content Completion runtime", rule: "limit 后本次实际处理，以及处理成功/失败数。", notes: "Failed 只是这次尝试失败。" },
     { metric: "Remaining", source: "Content Completion runtime", rule: "run 结束后，按同一 eligibility 与 scope 重查的候选数。", notes: "包括未被 limit 选中与仍未补全成功的文章；Remaining != Failed。" },
     { metric: "Limit / Duration", source: "Content Completion runtime", rule: "artifact 的 global limit 与 wall-clock duration。", notes: "per-source limit 已记录但卡片未展示。" },
@@ -21,22 +21,23 @@ export const dashboardMetricDefinitions: DashboardMetricSection[] = [
     { metric: "URL only / Title only / URL + Title", source: "Duplicate filter runtime", rule: "按每个 loser 与其他 candidate/reference 的 exact match 分类。", notes: "统计 loser 数，而非 duplicate group 数。" },
   ] },
   { title: "4. Stage 1", metrics: [
-    { metric: "Status / Model / Prompt / Duration", source: "PostgreSQL · pipeline_runs", rule: "按 daily_date + step 选择 started_at 最新 Stage1 attempt；无 DB run 才回退 artifact。", notes: "最新 failed attempt 也会展示。" },
-    { metric: "LLM Calls / Retries / Tokens", source: "Stage1 runtime", rule: "llm_call_count 是实际模型 requests；retry_count 是额外请求。", notes: "不重复展示 Daily Volume 的输入结果。" },
-    { metric: "Batches / Fallback batches / Splits / Singleton batches", source: "Stage1 runtime", rule: "Stage1JobSummary 的 micro-batch 实际执行统计。", notes: "用于解释 batch fallback 行为。" },
+    { metric: "Status / Model / Prompt / Duration", source: "PostgreSQL · pipeline_runs → legacy runtime fallback", rule: "按 daily_date + step 选择 started_at 最新 Stage1 attempt。", notes: "最新 failed attempt 也会展示；runtime 保留详细 diagnostics。" },
+    { metric: "LLM Calls / Retries / Tokens", source: "PostgreSQL · pipeline_runs → legacy runtime fallback", rule: "最新 attempt 已持久化的 execution summary；llm_call_count 是实际模型 requests，retry_count 是额外请求。", notes: "不重复展示 Daily Volume 的输入结果。" },
+    { metric: "Batches / Fallback batches / Splits / Singleton batches", source: "PostgreSQL · pipeline_runs → legacy runtime fallback", rule: "最新 attempt 的 Stage1 micro-batch 执行统计。", notes: "用于解释 batch fallback 行为。" },
   ] },
   { title: "5. Stage 2", metrics: [
-    { metric: "Model / Candidates / Groups / LLM / Retries / Tokens / Duration", source: "Stage2 runtime", rule: "该 Daily 的最新 Stage2 attempt artifact。", notes: "Groups 是该次 Merge 输出，不保证等于后续 DB snapshot。" },
-    { metric: "Warnings", source: "Stage2 runtime / PostgreSQL · pipeline_runs", rule: "本次 attempt 的 cross-group membership、同 Group 重复和 missing assignment 三类 warning 数；新 pipeline run 明确写入 0。", notes: "warning 不会阻断可安全的 Stage2 snapshot；invented ID 仍是 failed。" },
+    { metric: "Model / Candidates / Groups / LLM / Retries / Tokens / Duration", source: "PostgreSQL · pipeline_runs → legacy runtime fallback", rule: "该 Daily 最新 Stage2 attempt 的 execution summary。", notes: "Groups 是该次执行输出，不等于后续 DB snapshot。" },
+    { metric: "Warnings", source: "PostgreSQL · pipeline_runs → legacy runtime fallback", rule: "本次 attempt 的 cross-group membership、同 Group 重复和 missing assignment 三类 warning 数；新 pipeline run 明确写入 0。", notes: "warning 不会阻断可安全的 Stage2 snapshot；invented ID 仍是 failed。" },
   ] },
   { title: "6. Stage 3", metrics: [
-    { metric: "Model / Event inputs / Selected events", source: "Stage3 runtime", rule: "该 Daily 最新 attempt；Event inputs 来自 DB Event Groups。", notes: "Selected events 是完整 Ranking snapshot，不是 Top 15。" },
-    { metric: "Digest / Long-form / LLM / Tokens", source: "Stage3 runtime", rule: "本次 attempt 内去重、ranking 与调用统计。", notes: "属于运行观测，不是当前 DB 最终内容数。" },
+    { metric: "Model / Event inputs / Selected events", source: "PostgreSQL · pipeline_runs → legacy runtime fallback", rule: "该 Daily 最新 Stage3 attempt 的 execution summary；业务输入来自 DB Event Groups。", notes: "Selected events 是完整 Ranking snapshot，不是 Top 15。" },
+    { metric: "Digest / Long-form / LLM / Tokens", source: "PostgreSQL · pipeline_runs → legacy runtime fallback", rule: "本次 attempt 内去重、ranking 与调用统计。", notes: "属于运行观测，不是当前 DB 最终内容数。" },
+    { metric: "Warnings", source: "PostgreSQL · pipeline_runs → legacy runtime fallback", rule: "duplicate / missing ranking 等可确定性修复的非致命异常计数。", notes: "系统规范化为完整、连续、唯一的 ranking 后继续 Pipeline。" },
   ] },
   { title: "7. Stage 4", metrics: [
-    { metric: "Status / Model / Selected input / LLM / Retries", source: "Stage4 runtime", rule: "目标 snapshot 前 N 的最新 Stage4 attempt；llm_call_count 包含 context decision 与 enrichment attempts。", notes: "quota/auth fail-fast 未启动项不算 Failed。" },
+    { metric: "Status / Model / Selected input / LLM / Retries", source: "PostgreSQL · pipeline_runs → legacy runtime fallback", rule: "目标 snapshot 前 N 的最新 Stage4 attempt；llm_call_count 包含 context decision 与 enrichment attempts。", notes: "quota/auth fail-fast 未启动项不算 Failed。" },
     { metric: "Ready / Drafts / Published", source: "Mixed · stage4_runs + events", rule: "Ready 为最新 run 持久化成功数；Drafts 为该 run draft；Published 为该 Daily 的正式 published Events。", notes: "Published 是 DB business state，不用 runtime eventsCreated 代替。" },
-    { metric: "Failed", source: "Stage4 runtime", rule: "实际启动 enrichment 且最终失败的 selected Event 数。", notes: "不从 selected-ready 推导。" },
+    { metric: "Failed", source: "PostgreSQL · pipeline_runs → legacy runtime fallback", rule: "实际启动 enrichment 且最终失败的 selected Event 数。", notes: "不从 selected-ready 推导。" },
   ] },
   { title: "8. Content Funnel", metrics: [
     { metric: "Raw Content / Selected Content", source: "PostgreSQL · raw_articles", rule: "按 24h published_at intake scope 累加字符数。", notes: "NULL 计 0。" },

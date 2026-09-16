@@ -1,8 +1,8 @@
 /**
  * Stage 3 Workflow job：消费 Stage 2 runtime，完成 Event、Digest 与 Long-form 排名及去重。
- * 该阶段把可复现的输入/诊断写入 runtime，并在单个事务内持久化排名。
+ * 该阶段把可复现的输入/诊断写入 runtime；每个独立 Ranking 在自身事务中持久化。
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Pool, PoolClient } from "pg";
@@ -38,6 +38,13 @@ import type {
   Stage3EventRankedOutput,
   Stage3EventRankingInput,
   Stage3RankingOutput,
+} from "./stage3-contract.js";
+import {
+  deriveStage3EventRankings,
+  normalizeStage3EventRankingOutput,
+  normalizeStage3RankingOutput,
+  parseAndValidateStage3DigestOrderedIdsOutput,
+  rebuildStage3DigestRankingFromOrderedIds,
 } from "./stage3-contract.js";
 import { inferSciencePublication } from "./science-publication.js";
 import { resolveStageLlmModel } from "./llm-client.js";
@@ -126,6 +133,22 @@ type Stage3IdMap = {
   long_form: Record<string, string>;
 };
 
+type Stage3RankingStatus = "pending" | "success" | "failed" | "skipped";
+
+type Stage3RankingStatuses = {
+  event: Stage3RankingStatus;
+  digest: Stage3RankingStatus;
+  long_form: Stage3RankingStatus;
+};
+
+type Stage3ResumeArtifact = {
+  runDir: string;
+  runId: string;
+  eventReviewRunId: string;
+  hashes: { event: string; digest?: string; longForm?: string };
+  statuses: Stage3RankingStatuses;
+};
+
 export type Stage3JobOptions = {
   stage2RunDir?: string;
   stage1RunDir?: string;
@@ -138,6 +161,7 @@ export type Stage3JobOptions = {
 
 export type Stage3JobResult = {
   success: boolean;
+  status: "success" | "partial" | "failed";
   runDir: string;
   error: string | null;
   eventGroupCount: number;
@@ -153,7 +177,20 @@ export type Stage3JobResult = {
   tokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | null;
   persistence: Stage3PersistenceResult | null;
   eventReviewRunId: string | null;
+  warningCount: number;
+  duplicateRankingCount: number;
+  missingRankingCount: number;
+  inputSnapshotHashes: { event: string; digest: string; longForm: string } | null;
+  rankingStatuses: Stage3RankingStatuses;
 };
+
+export function stage3WarningMetrics(result: Pick<Stage3JobResult, "warningCount" | "duplicateRankingCount" | "missingRankingCount">) {
+  return {
+    warning_count: result.warningCount,
+    duplicate_ranking_count: result.duplicateRankingCount,
+    missing_ranking_count: result.missingRankingCount,
+  };
+}
 
 const DEFAULT_LOOKBACK_HOURS = 24;
 const CATEGORY_ORDER = [
@@ -211,7 +248,14 @@ export async function processStage3(
   let persistence: Stage3PersistenceResult | null = null;
   let eventReviewRunId: string | null = null;
   let persistenceStatus: "not_started" | "success" | "failed" = "not_started";
+  let rankingStatuses: Stage3RankingStatuses = {
+    event: "pending", digest: "pending", long_form: "pending",
+  };
+  let inputSnapshotHashes: Stage3JobResult["inputSnapshotHashes"] = null;
   let error: string | null = null;
+  let warningCount = 0;
+  let duplicateRankingCount = 0;
+  let missingRankingCount = 0;
 
   try {
     // Runtime is retained as optional lineage only. DB event_groups is the business input.
@@ -234,25 +278,41 @@ export async function processStage3(
     const longFormRecords = buildLongFormRecords(longFormRows);
     digestBeforeDedup = digestRecords.length;
 
-    const eventRanking = await rankEvents(eventBundle.input, { model });
-    llmCallCount += eventRanking.calls;
-    retryCount += eventRanking.retries;
-    llmDurationMs += eventRanking.durationMs;
-    ({ tokenUsage, hasMissingTokenUsage } = addStage3TokenUsage(tokenUsage, hasMissingTokenUsage, eventRanking.tokenUsage));
+    const eventHash = snapshotHash(eventBundle.input);
+    const resume = await findStage3ResumeArtifact(rootDir, dailyDate, eventHash);
+    const reusableEvent = resume && canReuseStage3Ranking(eventHash, resume.hashes.event, resume.statuses.event)
+      ? await loadReusableEventRanking(pool, resume, eventBundle.input)
+      : null;
+    const eventRanking = reusableEvent ?? await rankEvents(eventBundle.input, { model });
+    if (reusableEvent) {
+      rankingStatuses.event = "skipped";
+      eventReviewRunId = resume!.eventReviewRunId;
+    } else {
+      ({ warningCount, duplicateRankingCount, missingRankingCount } = addRankingWarnings(
+        { warningCount, duplicateRankingCount, missingRankingCount }, eventRanking.warnings,
+      ));
+      llmCallCount += eventRanking.calls;
+      retryCount += eventRanking.retries;
+      llmDurationMs += eventRanking.durationMs;
+      ({ tokenUsage, hasMissingTokenUsage } = addStage3TokenUsage(tokenUsage, hasMissingTokenUsage, eventRanking.tokenUsage));
+    }
     await writeJson(join(eventsDir, "ranking-output.json"), eventRanking.output);
     await writeJson(join(eventsDir, "ranking-diagnostics.json"), eventRanking.diagnostics);
 
-    eventReviewRunId = randomUUID();
-    await persistEventReviewSnapshot(
-      pool,
-      buildEventReviewSnapshotItems({
-        reviewRunId: eventReviewRunId,
-        dailyDate,
-        rankingOutput: eventRanking.output,
-        eventInput: eventBundle.input,
-        eventIdMap: eventBundle.idMap,
-      }),
-    );
+    if (!reusableEvent) {
+      eventReviewRunId = randomUUID();
+      await persistEventReviewSnapshot(
+        pool,
+        buildEventReviewSnapshotItems({
+          reviewRunId: eventReviewRunId,
+          dailyDate,
+          rankingOutput: eventRanking.output,
+          eventInput: eventBundle.input,
+          eventIdMap: eventBundle.idMap,
+        }),
+      );
+      rankingStatuses.event = "success";
+    }
 
     const selectedEvents = selectTopEvents({
       rankingOutput: eventRanking.output,
@@ -297,6 +357,11 @@ export async function processStage3(
 
     const digestInputs = buildDigestInputs(digestDeduped.keptRecords);
     const longFormInput = buildLongFormInput(crossDeduped.longFormRecords);
+    inputSnapshotHashes = {
+      event: eventHash,
+      digest: snapshotHash(digestInputs),
+      longForm: snapshotHash(longFormInput),
+    };
     const idMap: Stage3IdMap = {
       events: selectedEvents.idMap,
       digest: buildDigestIdMap(digestDeduped.keptRecords),
@@ -313,14 +378,21 @@ export async function processStage3(
     }
     await writeJson(join(longFormDir, "input.json"), longFormInput);
 
-    const digestRankings: Record<string, Stage3RankingOutput> = {};
-    for (const category of Object.keys(digestInputs).sort(compareCategoryNames)) {
+    const reusableDigest = resume && canReuseStage3Ranking(inputSnapshotHashes.digest, resume.hashes.digest, resume.statuses.digest)
+      ? await loadReusableDigestRankings(resume, digestInputs)
+      : null;
+    const digestRankings: Record<string, Stage3RankingOutput> = reusableDigest ?? {};
+    if (reusableDigest) rankingStatuses.digest = "skipped";
+    for (const category of reusableDigest ? [] : Object.keys(digestInputs).sort(compareCategoryNames)) {
       const input = digestInputs[category];
       if (!input || input.candidates.length === 0) {
         continue;
       }
 
       const result = await rankDigest(input, { model });
+      ({ warningCount, duplicateRankingCount, missingRankingCount } = addRankingWarnings(
+        { warningCount, duplicateRankingCount, missingRankingCount }, result.warnings,
+      ));
       llmCallCount += result.calls;
       retryCount += result.retries;
       llmDurationMs += result.durationMs;
@@ -333,15 +405,47 @@ export async function processStage3(
       );
     }
 
-    const longFormRanking = await rankLongForm(longFormInput, { model });
-    llmCallCount += longFormRanking.calls;
-    retryCount += longFormRanking.retries;
-    llmDurationMs += longFormRanking.durationMs;
-    ({ tokenUsage, hasMissingTokenUsage } = addStage3TokenUsage(tokenUsage, hasMissingTokenUsage, longFormRanking.tokenUsage));
+    // Digest and Long-form are independent durable products. Commit the
+    // complete, validated Digest set before beginning Long-form work.
+    if (!reusableDigest) {
+      persistenceStatus = "failed";
+      persistence = await persistStage3Plan(pool, buildPersistencePlan({
+        allDigestRecords: digestRecords,
+        allLongFormRecords: [],
+        finalDigestIdMap: idMap.digest,
+        finalLongFormIdMap: {},
+        digestRankings,
+        longFormRanking: { rankings: [] },
+      }));
+      persistenceStatus = "success";
+      rankingStatuses.digest = "success";
+    }
+
+    const reusableLongForm = resume && canReuseStage3Ranking(inputSnapshotHashes.longForm, resume.hashes.longForm, resume.statuses.long_form)
+      ? await loadReusableLongFormRanking(resume, longFormInput)
+      : null;
+    const longFormRanking = reusableLongForm ?? await rankLongForm(longFormInput, { model });
+    if (reusableLongForm) {
+      rankingStatuses.long_form = "skipped";
+    } else {
+      ({ warningCount, duplicateRankingCount, missingRankingCount } = addRankingWarnings(
+        { warningCount, duplicateRankingCount, missingRankingCount }, longFormRanking.warnings,
+      ));
+      llmCallCount += longFormRanking.calls;
+      retryCount += longFormRanking.retries;
+      llmDurationMs += longFormRanking.durationMs;
+      ({ tokenUsage, hasMissingTokenUsage } = addStage3TokenUsage(tokenUsage, hasMissingTokenUsage, longFormRanking.tokenUsage));
+    }
     await writeJson(join(longFormDir, "ranking-output.json"), longFormRanking.output);
+    await writeJson(join(longFormDir, "ranking-diagnostics.json"), {
+      input_count: longFormInput.candidates.length,
+      duplicate_ids: longFormRanking.warnings.duplicateIds,
+      missing_ids: longFormRanking.warnings.missingIds,
+      rank_normalization_count: longFormRanking.warnings.rankNormalizationCount,
+    });
 
     const persistencePlan = buildPersistencePlan({
-      allDigestRecords: digestRecords,
+      allDigestRecords: [],
       allLongFormRecords: longFormRecords,
       finalDigestIdMap: idMap.digest,
       finalLongFormIdMap: idMap.long_form,
@@ -350,18 +454,12 @@ export async function processStage3(
     });
     await writeJson(join(runDir, "persistence-plan.json"), persistencePlan);
 
-    persistenceStatus = "failed";
-    const client = await pool.connect();
-    try {
-      await client.query("begin");
-      persistence = await persistStage3Ranks(client, persistencePlan);
-      await client.query("commit");
+    if (!reusableLongForm) {
+      persistenceStatus = "failed";
+      const longFormPersistence = await persistStage3Plan(pool, persistencePlan);
       persistenceStatus = "success";
-    } catch (transactionError) {
-      await client.query("rollback");
-      throw transactionError;
-    } finally {
-      client.release();
+      persistence = combineStage3Persistence(persistence, longFormPersistence);
+      rankingStatuses.long_form = "success";
     }
 
     await writeRunJson(join(runDir, "run.json"), {
@@ -391,10 +489,16 @@ export async function processStage3(
       persistenceStatus,
       persistence,
       error: null,
+      warningCount,
+      duplicateRankingCount,
+      missingRankingCount,
+      inputSnapshotHashes,
+      rankingStatuses,
     });
 
     return {
       success: true,
+      status: "success",
       runDir,
       error: null,
       eventGroupCount,
@@ -410,9 +514,23 @@ export async function processStage3(
       tokenUsage: hasMissingTokenUsage ? null : tokenUsage,
       persistence,
       eventReviewRunId,
+      warningCount,
+      duplicateRankingCount,
+      missingRankingCount,
+      inputSnapshotHashes,
+      rankingStatuses,
     };
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
+    const failedRanking = Object.entries(rankingStatuses).find(([, status]) => status === "pending")?.[0] as keyof Stage3RankingStatuses | undefined;
+    if (failedRanking) rankingStatuses = { ...rankingStatuses, [failedRanking]: "failed" };
+    // A persistence error is never represented as partial: it is not safe to
+    // treat an incomplete database write as a usable product.
+    const status = persistenceStatus === "failed"
+      ? "failed"
+      : Object.values(rankingStatuses).some(isUsableRankingStatus)
+        ? "partial"
+        : "failed";
     await writeRunJson(join(runDir, "run.json"), {
       runId,
       sourceStage2RunDir,
@@ -424,7 +542,7 @@ export async function processStage3(
       model,
       dailyDate,
       eventReviewRunId,
-      status: "failed",
+      status,
       publishedWithinHours,
       eventGroupCount,
       eventSelectedCount,
@@ -440,10 +558,16 @@ export async function processStage3(
       persistenceStatus,
       persistence,
       error,
+      warningCount,
+      duplicateRankingCount,
+      missingRankingCount,
+      inputSnapshotHashes,
+      rankingStatuses,
     });
 
     return {
       success: false,
+      status,
       runDir,
       error,
       eventGroupCount,
@@ -459,6 +583,11 @@ export async function processStage3(
       tokenUsage: hasMissingTokenUsage ? null : tokenUsage,
       persistence,
       eventReviewRunId,
+      warningCount,
+      duplicateRankingCount,
+      missingRankingCount,
+      inputSnapshotHashes,
+      rankingStatuses,
     };
   }
 }
@@ -722,6 +851,7 @@ async function rankEvents(
     duplicate_ids: string[];
     invalid_ids: string[];
   };
+  warnings: { duplicateIds: string[]; missingIds: string[]; rankNormalizationCount: number };
 }> {
   if (input.events.length === 0) {
     return {
@@ -736,6 +866,7 @@ async function rankEvents(
         duplicate_ids: [],
         invalid_ids: [],
       },
+      warnings: { duplicateIds: [], missingIds: [], rankNormalizationCount: 0 },
     };
   }
 
@@ -753,6 +884,7 @@ async function rankEvents(
       duplicate_ids: result.assignment.duplicateIds,
       invalid_ids: result.assignment.inventedIds,
     },
+    warnings: result.warnings,
   };
 }
 
@@ -794,8 +926,52 @@ async function rankDigest(
     repair_returned_count: number | null;
     repair_duration_ms: number | null;
   };
+  warnings: { duplicateIds: string[]; missingIds: string[]; rankNormalizationCount: number };
 }> {
   const result = await runStage3DigestRankingLlm(input, options);
+  if (!result.success) {
+    const parsed = result.rawOutputText
+      ? parseAndValidateStage3DigestOrderedIdsOutput(result.rawOutputText)
+      : null;
+    const recovered = parsed?.success
+      ? normalizeStage3RankingOutput(
+        rebuildStage3DigestRankingFromOrderedIds(parsed.output.ordered_ids),
+        input.candidates.map((candidate) => candidate.id),
+      )
+      : null;
+    if (!recovered?.success) {
+      assertRankingSuccess(`Digest Ranking (${input.category})`, result);
+      throw new Error(`Digest Ranking (${input.category}) failed without a recoverable ranking output.`);
+    }
+    const initialDiag = result.diagnostics.initial;
+    const repairDiag = result.diagnostics.repair;
+    return {
+      output: recovered.output,
+      calls: result.attempts,
+      retries: Math.max(0, result.attempts - 1),
+      durationMs: result.elapsedMs,
+      tokenUsage: sumKnownStage3TokenUsages([
+        toStage3TokenUsage(initialDiag.input_tokens, initialDiag.output_tokens, initialDiag.total_tokens),
+        repairDiag ? toStage3TokenUsage(repairDiag.input_tokens, repairDiag.output_tokens, repairDiag.total_tokens) : { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      ]),
+      diagnostics: {
+        category: input.category, input_count: input.candidates.length,
+        returned_count: initialDiag.returned_count ?? 0, missing_count: initialDiag.missing_count ?? 0,
+        duplicate_ids: result.assignment?.duplicateIds ?? [], invalid_ids: result.assignment?.inventedIds ?? [],
+        repair_attempted: result.repair?.attempted ?? false, repair_success: result.repair?.success ?? null,
+        repaired_count: recovered.output.rankings.length, repair_missing_ids: [], repair_duplicate_ids: [], repair_invalid_ids: [],
+        initial_finish_reason: initialDiag.finish_reason, initial_input_tokens: initialDiag.input_tokens,
+        initial_output_tokens: initialDiag.output_tokens, initial_total_tokens: initialDiag.total_tokens,
+        initial_returned_count: initialDiag.returned_count, initial_unique_valid_ids: initialDiag.unique_valid_ids,
+        initial_duration_ms: initialDiag.duration_ms, repair_finish_reason: repairDiag?.finish_reason ?? null,
+        repair_input_tokens: repairDiag?.input_tokens ?? null, repair_output_tokens: repairDiag?.output_tokens ?? null,
+        repair_total_tokens: repairDiag?.total_tokens ?? null, repair_ranked_candidates_count: repairDiag?.ranked_candidates_count ?? null,
+        repair_missing_candidates_count: repairDiag?.missing_candidates_count ?? null, repair_returned_count: repairDiag?.returned_count ?? null,
+        repair_duration_ms: repairDiag?.duration_ms ?? null,
+      },
+      warnings: recovered.warnings,
+    };
+  }
   assertRankingSuccess(`Digest Ranking (${input.category})`, result);
   const repaired = result.repair.after;
   const initialDiag = result.diagnostics.initial;
@@ -838,20 +1014,36 @@ async function rankDigest(
       repair_returned_count: repairDiag?.returned_count ?? null,
       repair_duration_ms: repairDiag?.duration_ms ?? null,
     },
+    warnings: {
+      duplicateIds: result.repair.before.duplicateIds,
+      missingIds: result.repair.before.missingIds,
+      rankNormalizationCount: 0,
+    },
   };
 }
 
 async function rankLongForm(
   input: Stage3LongFormRankingInput,
   options: { model: string },
-): Promise<{ output: Stage3RankingOutput; calls: number; retries: number; durationMs: number; tokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | null }> {
+): Promise<{ output: Stage3RankingOutput; calls: number; retries: number; durationMs: number; tokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | null; warnings: { duplicateIds: string[]; missingIds: string[]; rankNormalizationCount: number } }> {
   if (input.candidates.length === 0) {
-    return { output: { rankings: [] }, calls: 0, retries: 0, durationMs: 0, tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } };
+    return { output: { rankings: [] }, calls: 0, retries: 0, durationMs: 0, tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }, warnings: { duplicateIds: [], missingIds: [], rankNormalizationCount: 0 } };
   }
 
   const result = await runStage3LongFormRankingLlm(input, options);
   assertRankingSuccess("Long-form Ranking", result);
-  return rankingMetrics(result);
+  return { ...rankingMetrics(result), warnings: result.warnings };
+}
+
+function addRankingWarnings(
+  current: { warningCount: number; duplicateRankingCount: number; missingRankingCount: number },
+  warnings: { duplicateIds: string[]; missingIds: string[]; rankNormalizationCount: number },
+) {
+  return {
+    warningCount: current.warningCount + warnings.duplicateIds.length + warnings.missingIds.length + warnings.rankNormalizationCount,
+    duplicateRankingCount: current.duplicateRankingCount + warnings.duplicateIds.length,
+    missingRankingCount: current.missingRankingCount + warnings.missingIds.length,
+  };
 }
 
 function assertRankingSuccess(
@@ -1250,6 +1442,31 @@ function buildPersistencePlan(options: {
   };
 }
 
+async function persistStage3Plan(pool: Pool, plan: ReturnType<typeof buildPersistencePlan>): Promise<Stage3PersistenceResult> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const result = await persistStage3Ranks(client, plan);
+    await client.query("commit");
+    return result;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function combineStage3Persistence(
+  left: Stage3PersistenceResult | null,
+  right: Stage3PersistenceResult,
+): Stage3PersistenceResult {
+  return {
+    rankedUpdated: (left?.rankedUpdated ?? 0) + right.rankedUpdated,
+    staleCleared: (left?.staleCleared ?? 0) + right.staleCleared,
+  };
+}
+
 function countByCategory(records: DigestRecord[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const record of records) {
@@ -1331,7 +1548,7 @@ async function writeRunJson(
     model: string;
     dailyDate: string;
     eventReviewRunId: string | null;
-    status: "success" | "failed";
+    status: "success" | "partial" | "failed";
     publishedWithinHours: number;
     eventGroupCount: number;
     eventSelectedCount: number;
@@ -1347,6 +1564,11 @@ async function writeRunJson(
     persistenceStatus: "not_started" | "success" | "failed";
     persistence: Stage3PersistenceResult | null;
     error: string | null;
+    warningCount: number;
+    duplicateRankingCount: number;
+    missingRankingCount: number;
+    inputSnapshotHashes: Stage3JobResult["inputSnapshotHashes"];
+    rankingStatuses: Stage3RankingStatuses;
   },
 ): Promise<void> {
   await writeJson(path, {
@@ -1383,8 +1605,145 @@ async function writeRunJson(
     total_tokens: value.tokenUsage?.totalTokens ?? null,
     persistence_status: value.persistenceStatus,
     persistence: value.persistence,
+    warning_count: value.warningCount,
+    duplicate_ranking_count: value.duplicateRankingCount,
+    missing_ranking_count: value.missingRankingCount,
+    input_snapshot_hashes: value.inputSnapshotHashes && {
+      event: value.inputSnapshotHashes.event,
+      digest: value.inputSnapshotHashes.digest,
+      long_form: value.inputSnapshotHashes.longForm,
+    },
+    ranking_statuses: value.rankingStatuses,
     error: value.error,
   });
+}
+
+function snapshotHash(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function isUsableRankingStatus(status: Stage3RankingStatus): boolean {
+  return status === "success" || status === "skipped";
+}
+
+/** A persisted sub-ranking can resume only against the exact same input snapshot. */
+export function canReuseStage3Ranking(
+  currentInputHash: string,
+  persistedInputHash: string | undefined,
+  persistedStatus: Stage3RankingStatus,
+): boolean {
+  return currentInputHash === persistedInputHash && isUsableRankingStatus(persistedStatus);
+}
+
+async function findStage3ResumeArtifact(
+  rootDir: string,
+  dailyDate: string,
+  eventHash: string,
+): Promise<Stage3ResumeArtifact | null> {
+  const root = join(rootDir, "runtime/stage3");
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if (isMissingPathError(error)) return null;
+    throw error;
+  }
+  for (const entry of entries.filter((item) => item.isDirectory()).sort((a, b) => b.name.localeCompare(a.name))) {
+    try {
+      const run = await readJson<Record<string, unknown>>(join(root, entry.name, "run.json"));
+      const hashes = run.input_snapshot_hashes as Record<string, unknown> | undefined;
+      const statuses = run.ranking_statuses as Partial<Record<keyof Stage3RankingStatuses, unknown>> | undefined;
+      if (run.daily_date !== dailyDate || hashes?.event !== eventHash || typeof run.event_review_run_id !== "string") continue;
+      const event = rankingStatus(statuses?.event);
+      const digest = rankingStatus(statuses?.digest);
+      const longForm = rankingStatus(statuses?.long_form);
+      if (!event || !digest || !longForm) continue;
+      return {
+        runDir: join(root, entry.name), runId: typeof run.run_id === "string" ? run.run_id : entry.name,
+        eventReviewRunId: run.event_review_run_id,
+        hashes: {
+          event: hashes.event,
+          digest: typeof hashes.digest === "string" ? hashes.digest : undefined,
+          longForm: typeof hashes.long_form === "string" ? hashes.long_form : undefined,
+        },
+        statuses: { event, digest, long_form: longForm },
+      };
+    } catch (error) {
+      if (!isMissingPathError(error)) throw error;
+    }
+  }
+  return null;
+}
+
+function rankingStatus(value: unknown): Stage3RankingStatus | null {
+  return value === "pending" || value === "success" || value === "failed" || value === "skipped" ? value : null;
+}
+
+async function loadReusableEventRanking(
+  pool: Pool,
+  resume: Stage3ResumeArtifact,
+  input: Stage3EventRankingInput,
+): Promise<Awaited<ReturnType<typeof rankEvents>> | null> {
+  const snapshot = await pool.query<{ count: string }>(
+    "select count(*)::text as count from event_review_items where review_run_id=$1::uuid",
+    [resume.eventReviewRunId],
+  );
+  if (Number(snapshot.rows[0]?.count ?? 0) === 0) return null;
+  try {
+    const output = await readJson<Stage3EventRankedOutput>(join(resume.runDir, "events/ranking-output.json"));
+    const normalized = normalizeStage3EventRankingOutput(
+      { ordered_ids: output.rankings.map((item) => item.id) }, input.events.map((event) => event.id),
+    );
+    if (!normalized.success) return null;
+    return {
+      output: deriveStage3EventRankings(normalized.output), calls: 0, retries: 0, durationMs: 0,
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      diagnostics: { input_event_count: input.events.length, returned_ranking_count: output.rankings.length, duplicate_ids: [], invalid_ids: [] },
+      warnings: { duplicateIds: [], missingIds: [], rankNormalizationCount: 0 },
+    };
+  } catch (error) {
+    if (isMissingPathError(error) || error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
+async function loadReusableDigestRankings(
+  resume: Stage3ResumeArtifact,
+  inputs: Record<string, Stage3DigestRankingInput>,
+): Promise<Record<string, Stage3RankingOutput> | null> {
+  try {
+    const rankings: Record<string, Stage3RankingOutput> = {};
+    for (const input of Object.values(inputs)) {
+      if (input.candidates.length === 0) continue;
+      const output = await readJson<Stage3RankingOutput>(join(resume.runDir, "digest", `${toSlug(input.category)}-ranking-output.json`));
+      const normalized = normalizeStage3RankingOutput(output, input.candidates.map((candidate) => candidate.id));
+      if (!normalized.success) return null;
+      rankings[input.category] = normalized.output;
+    }
+    return rankings;
+  } catch (error) {
+    if (isMissingPathError(error) || error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
+async function loadReusableLongFormRanking(
+  resume: Stage3ResumeArtifact,
+  input: Stage3LongFormRankingInput,
+): Promise<Awaited<ReturnType<typeof rankLongForm>> | null> {
+  try {
+    const output = await readJson<Stage3RankingOutput>(join(resume.runDir, "long-form/ranking-output.json"));
+    const normalized = normalizeStage3RankingOutput(output, input.candidates.map((candidate) => candidate.id));
+    if (!normalized.success) return null;
+    return {
+      output: normalized.output, calls: 0, retries: 0, durationMs: 0,
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      warnings: { duplicateIds: [], missingIds: [], rankNormalizationCount: 0 },
+    };
+  } catch (error) {
+    if (isMissingPathError(error) || error instanceof SyntaxError) return null;
+    throw error;
+  }
 }
 
 function compareCategoryNames(left: string, right: string): number {

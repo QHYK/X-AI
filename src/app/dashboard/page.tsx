@@ -1,7 +1,7 @@
 /**
  * 内部 Daily Workflow Dashboard 页面。
  *
- * 作为 Server Component 加载数据库归属统计与 runtime 指标；日期详情不会改变顶部最近七期数据。
+ * 作为 Server Component 加载数据库业务统计，以及 DB-first 的 Stage execution summary；日期详情不会改变顶部最近七期数据。
  */
 import { getDatabasePool } from "@/db/index.js";
 import {
@@ -73,7 +73,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             <p className={styles.kicker}>Daily volume</p>
             <h2>最近 7 个已完成 Daily</h2>
           </div>
-          <p>DB 指标为业务数据；runtime 指标取 Completion / 各 Stage 当天最新一次 run。</p>
+          <p>业务数据来自正式业务表；Stage1–4 执行摘要优先读取 pipeline_runs，缺失时才回退 runtime。</p>
         </div>
         <div className={styles.tableWrap}>
           <table className={styles.table}>
@@ -274,7 +274,7 @@ function ContentCompletionCard({
           <StepRetryButton dailyDate={dailyDate} step="content_completion" label="Content Completion" initiallyRunning={false} />
           <span className={styles.naBadge}>N/A</span>
         </div>
-        <p className={styles.empty}>No runtime artifact for this date.</p>
+        <p className={styles.empty}>No execution summary for this date.</p>
       </article>
     );
   }
@@ -300,7 +300,7 @@ function ContentCompletionCard({
 }
 
 function DuplicateFilterCard({ metrics, dailyDate }: { metrics: DashboardDuplicateFilterMetrics | null; dailyDate: string }) {
-  if (!metrics) return <article className={styles.stageCard}><div className={styles.stageHeader}><h3>Exact Duplicate Filter</h3><StepRetryButton dailyDate={dailyDate} step="exact_duplicate_filter" label="Exact Duplicate Filter" initiallyRunning={false} /><span className={styles.naBadge}>N/A</span></div><p className={styles.empty}>No runtime artifact for this date.</p></article>;
+  if (!metrics) return <article className={styles.stageCard}><div className={styles.stageHeader}><h3>Exact Duplicate Filter</h3><StepRetryButton dailyDate={dailyDate} step="exact_duplicate_filter" label="Exact Duplicate Filter" initiallyRunning={false} /><span className={styles.naBadge}>N/A</span></div><p className={styles.empty}>No execution summary for this date.</p></article>;
   return <article className={styles.stageCard}>
     <div className={styles.stageHeader}><h3>Exact Duplicate Filter</h3>{metrics.status !== "success" ? <StepRetryButton dailyDate={dailyDate} step="exact_duplicate_filter" label="Exact Duplicate Filter" initiallyRunning={metrics.status === "running"} /> : null}</div>
     <dl className={styles.metricList}>
@@ -366,7 +366,7 @@ function StageCard({
           <StepRetryButton dailyDate={dailyDate} step={step} label={label} initiallyRunning={false} />
           <span className={styles.naBadge}>N/A</span>
         </div>
-        <p className={styles.empty}>No runtime artifact for this date.</p>
+        <p className={styles.empty}>No execution summary for this date.</p>
       </article>
     );
   }
@@ -375,9 +375,10 @@ function StageCard({
   return (
     <article className={styles.stageCard}>
       <div className={styles.stageHeader}>
-        <h3>{label} <MetricInfo text="该状态来自目标 Daily 对应的最新 runtime artifact，表示此步骤最近一次执行。" /></h3>
+        <h3>{label} <MetricInfo text="该状态表示目标 Daily 此步骤最新一次执行的结果。优先读取数据库 pipeline_runs；仅在没有对应运行记录时使用 legacy runtime artifact。" /></h3>
         {metrics.status !== "success" ? <StepRetryButton dailyDate={dailyDate} step={step} label={label} initiallyRunning={metrics.status === "running"} /> : null}
         <StatusBadge status={metrics.status} partialReady={metrics.readyCount ?? metrics.enrichmentSuccessCount} />
+        {metrics.status?.toLowerCase() === "failed" && metrics.errorSummary ? <MetricInfo text={`Latest attempt error\n${metrics.errorSummary}`} /> : null}
       </div>
       <dl className={styles.metricList}>
         {metrics.stage === "stage3" ? (
@@ -430,6 +431,7 @@ function stageSpecificMetrics(metrics: DashboardStageMetrics): Array<[string, nu
         ["Digest before dedup", metrics.digestBeforeDedup],
         ["Digest after dedup", metrics.digestAfterDedup],
         ["Long-form", metrics.longFormCount],
+        ["Warnings", metrics.warningCount, "Stage3 Ranking 输出存在可确定性修复的非致命异常，例如重复或遗漏 ID；系统已规范化结果并继续 Pipeline。"],
       ];
     case "stage4":
       return [

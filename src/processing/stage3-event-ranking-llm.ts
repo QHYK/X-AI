@@ -10,8 +10,8 @@ import {
   type LlmProvider,
 } from "./llm-client.js";
 import {
-  deduplicateStage3EventRankingOutput,
   deriveStage3EventRankings,
+  normalizeStage3EventRankingOutput,
   parseAndValidateStage3EventRankingOutput,
   stage3EventRankingOutputJsonSchema,
   validateStage3EventRankingIntegrity,
@@ -52,6 +52,7 @@ export type Stage3EventRankingSuccess = {
   elapsedMs: number;
   tokenUsage: Stage3EventRankingTokenUsage | null;
   rawOutputText: string;
+  warnings: import("./stage3-contract.js").Stage3RankingWarnings;
 };
 
 export type Stage3EventRankingFailure = {
@@ -163,23 +164,18 @@ export async function runStage3EventRankingLlm(
           expectedIds,
         );
         lastAssignment = assignment;
-        if (!assignment.passed) {
-          lastError = `Ranking integrity validation failed: ${assignment.errors.join("; ")}`;
-          if (attempt <= maxRetries) {
-            await sleep(RETRY_DELAY_MS * attempt);
-            continue;
-          }
-
+        const normalized = normalizeStage3EventRankingOutput(validation.output, expectedIds);
+        if (!normalized.success) {
+          lastError = `Ranking integrity validation failed: ${normalized.integrity.errors.join("; ")}`;
           break;
         }
-
-        const deduplicatedOutput = deduplicateStage3EventRankingOutput(validation.output);
         return {
           success: true,
           input,
-          output: deduplicatedOutput,
-          rankings: deriveStage3EventRankings(deduplicatedOutput),
+          output: normalized.output,
+          rankings: deriveStage3EventRankings(normalized.output),
           assignment,
+          warnings: normalized.warnings,
           model,
           promptVersion: STAGE3_EVENT_RANKING_PROMPT_VERSION,
           responseId: response.id,

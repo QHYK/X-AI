@@ -216,7 +216,8 @@ try {
     daily_date: "2026-08-19",
     started_at: "2026-08-19T01:30:00.000Z",
     finished_at: "2026-08-19T01:30:01.000Z",
-    status: "success",
+    status: "failed",
+    error: "Ranking integrity validation failed:\nMissing id L066.\nDuplicate ranking for id L056.",
   });
   await writeRun(runtimeRoot, "runtime/stage3/fixture", {
     stage: "stage3",
@@ -378,6 +379,11 @@ try {
   checks.push({
     name: "legacy runtime without a prompt version remains N/A",
     passed: stageRuntime.get("2026-08-19")?.get("stage2")?.promptVersion === null,
+  });
+  checks.push({
+    name: "Dashboard exposes a failed legacy attempt error summary",
+    passed:
+      stageRuntime.get("2026-08-19")?.get("stage2")?.errorSummary?.includes("Missing id L066") ?? false,
   });
   checks.push({
     name: "Dashboard reads real Stage 1–3 prompt versions without merging Stage 3 prompts",

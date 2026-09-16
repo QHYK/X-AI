@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { Pool } from "pg";
 import { readPublishedAtScopeFromEnv } from "../src/lib/daily-scope.js";
 import { assertStageLlmConfiguration } from "../src/processing/llm-client.js";
-import { processStage3 } from "../src/processing/stage3-job.js";
+import { processStage3, stage3WarningMetrics } from "../src/processing/stage3-job.js";
 import { resolveDailyScope } from "../src/lib/daily-scope.js";
 import { resolveStageLlmModel, resolveStageLlmProvider } from "../src/processing/llm-client.js";
 import { pipelineTriggerSource, safelyFinishPipelineRun, safelyStartPipelineRun } from "../src/processing/pipeline-run-log.js";
@@ -52,7 +52,7 @@ async function main() {
     });
     await writeRunPointer(result.runDir);
     await safelyFinishPipelineRun(pool, pipelineRunId, {
-      status: result.success ? "success" : "failed", provider: resolveStageLlmProvider("stage3"), model: resolveStageLlmModel("stage3"),
+      status: result.status, provider: resolveStageLlmProvider("stage3"), model: resolveStageLlmModel("stage3"),
       metrics: { prompt_versions: {
           event: STAGE3_EVENT_RANKING_PROMPT_VERSION,
           digest: STAGE3_DIGEST_RANKING_PROMPT_VERSION,
@@ -61,11 +61,21 @@ async function main() {
         digest_before_dedup: result.digestBeforeDedup, digest_after_dedup: result.digestAfterDedup,
         long_form_count: result.longFormCount, llm_calls: result.llmCallCount, retry_count: result.retryCount,
         llm_duration_ms: result.llmDurationMs, input_tokens: result.tokenUsage?.inputTokens ?? null,
-        output_tokens: result.tokenUsage?.outputTokens ?? null, total_tokens: result.tokenUsage?.totalTokens ?? null }, errorSummary: result.error,
+        output_tokens: result.tokenUsage?.outputTokens ?? null, total_tokens: result.tokenUsage?.totalTokens ?? null,
+        event_review_run_id: result.eventReviewRunId,
+        input_snapshot_hashes: result.inputSnapshotHashes ? {
+          event: result.inputSnapshotHashes.event,
+          digest: result.inputSnapshotHashes.digest,
+          long_form: result.inputSnapshotHashes.longForm,
+        } : null,
+        ranking_statuses: result.rankingStatuses,
+        ...stage3WarningMetrics(result) }, errorSummary: result.error,
     });
 
     console.log(JSON.stringify(result, null, 2));
-    if (!result.success) {
+    // A partial Stage 3 attempt has persisted usable output (notably the Event
+    // Review snapshot), so the Daily orchestrator may continue to Stage 4.
+    if (result.status === "failed") {
       process.exitCode = 1;
     }
     } catch (error) {

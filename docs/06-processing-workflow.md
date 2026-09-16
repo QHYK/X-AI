@@ -624,6 +624,8 @@ Digest    → 按 Category 独立排序
 Long-form → 全局排序
 ```
 
+Event Review snapshot、Digest Ranking 与 Long-form Ranking 分别在自身完成 parse、validation 与可确定性 normalization 后持久化。任一子 Ranking 后续失败不回滚已经完成的独立产物；Stage 3 在已有至少一个合法产物、且没有持久化错误时记录 `partial`，只有未形成任何可用产物时记录 `failed`。数据库持久化错误仍为 `failed`，不以 `partial` 掩盖。Stage 4 只依赖有效的 Event Review snapshot，不要求整个 Stage 3 execution 为 `success`。同一上游输入 snapshot 的 Retry 会复用已持久化且可验证的子 Ranking；输入 hash 变化时重新执行该子 Ranking。
+
 结果写入：
 
 ```text

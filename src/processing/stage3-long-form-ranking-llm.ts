@@ -11,6 +11,7 @@ import {
 } from "./llm-client.js";
 import {
   parseAndValidateStage3RankingOutput,
+  normalizeStage3RankingOutput,
   stage3RankingOutputJsonSchema,
   validateStage3RankingIntegrity,
   type Stage3RankingIntegrity,
@@ -48,6 +49,7 @@ export type Stage3LongFormRankingSuccess = {
   elapsedMs: number;
   tokenUsage: Stage3LongFormRankingTokenUsage | null;
   rawOutputText: string;
+  warnings: import("./stage3-contract.js").Stage3RankingWarnings;
 };
 
 export type Stage3LongFormRankingFailure = {
@@ -156,21 +158,18 @@ export async function runStage3LongFormRankingLlm(
 
         const assignment = validateStage3RankingIntegrity(validation.output, expectedIds);
         lastAssignment = assignment;
-        if (!assignment.passed) {
-          lastError = `Ranking integrity validation failed: ${assignment.errors.join("; ")}`;
-          if (attempt <= maxRetries) {
-            await sleep(RETRY_DELAY_MS * attempt);
-            continue;
-          }
-
+        const normalized = normalizeStage3RankingOutput(validation.output, expectedIds);
+        if (!normalized.success) {
+          lastError = `Ranking integrity validation failed: ${normalized.integrity.errors.join("; ")}`;
           break;
         }
 
         return {
           success: true,
           input,
-          output: validation.output,
+          output: normalized.output,
           assignment,
+          warnings: normalized.warnings,
           model,
           promptVersion: STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
           responseId: response.id,

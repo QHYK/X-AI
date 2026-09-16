@@ -85,6 +85,7 @@ type Stage4BusinessRow = {
 export type DashboardStageMetrics = {
   stage: DashboardStage;
   status: string | null;
+  errorSummary: string | null;
   startedAt: string | null;
   model: string | null;
   promptVersion: string | null;
@@ -122,6 +123,8 @@ export type DashboardStageMetrics = {
   crossGroupMembershipCount: number | null;
   sameGroupDuplicateCount: number | null;
   missingAssignmentCount: number | null;
+  duplicateRankingCount: number | null;
+  missingRankingCount: number | null;
 };
 
 export type DashboardContentCompletionMetrics = {
@@ -673,7 +676,9 @@ function mergeStage4BusinessMetrics(
   const base = runtime ?? emptyStageMetrics("stage4");
   return {
     ...base,
-    status: business?.status ?? base.status,
+    // Execution status belongs to the latest pipeline attempt. Business state
+    // (draft/published counts) must not hide a newer failed retry.
+    status: runtime?.status ?? business?.status ?? base.status,
     readyCount: business ? count(business.ready) : base.readyCount,
     draftCount: business ? count(business.draft) : base.draftCount,
     publishedCount: business ? count(business.published) : base.publishedCount,
@@ -724,7 +729,7 @@ function stageMetricsFromPipelineRun(stage: DashboardStage, row: PipelineRunRow)
   const finishedAt = toIsoString(row.finished_at);
   const selectedEventCount = numberFrom(metrics, "selected_count", "event_selected_count");
   return {
-    ...emptyStageMetrics(stage), stage, status: row.status, startedAt, model: row.model,
+    ...emptyStageMetrics(stage), stage, status: row.status, errorSummary: row.error_summary, startedAt, model: row.model,
     promptVersion: stringValue(metrics.prompt_version),
     promptVersions: stage === "stage3" ? {
       event: stringValue(promptVersions?.event), digest: stringValue(promptVersions?.digest),
@@ -747,6 +752,8 @@ function stageMetricsFromPipelineRun(stage: DashboardStage, row: PipelineRunRow)
     crossGroupMembershipCount: numberFrom(metrics, "cross_group_membership_count"),
     sameGroupDuplicateCount: numberFrom(metrics, "same_group_duplicate_count"),
     missingAssignmentCount: numberFrom(metrics, "missing_assignment_count"),
+    duplicateRankingCount: numberFrom(metrics, "duplicate_ranking_count"),
+    missingRankingCount: numberFrom(metrics, "missing_ranking_count"),
   };
 }
 
@@ -1026,6 +1033,7 @@ function stage1MetricsFromDailyStep(
   return {
     stage: "stage1",
     status: stringValue(step.status),
+    errorSummary: stringValue(step.error),
     startedAt,
     model: stringValue(step.model),
     promptVersion: stringValue(step.prompt_version),
@@ -1059,12 +1067,14 @@ function stage1MetricsFromDailyStep(
     crossGroupMembershipCount: null,
     sameGroupDuplicateCount: null,
     missingAssignmentCount: null,
+    duplicateRankingCount: null,
+    missingRankingCount: null,
   };
 }
 
 function emptyStageMetrics(stage: DashboardStage): DashboardStageMetrics {
   return {
-    stage, status: null, startedAt: null, model: null, promptVersion: null, promptVersions: null,
+    stage, status: null, errorSummary: null, startedAt: null, model: null, promptVersion: null, promptVersions: null,
     durationMs: null, llmDurationMs: null, llmCalls: null, retryCount: null,
     inputTokens: null, outputTokens: null, totalTokens: null, candidateCount: null,
     groupCount: null, selectedEventCount: null, digestBeforeDedup: null,
@@ -1074,6 +1084,7 @@ function emptyStageMetrics(stage: DashboardStage): DashboardStageMetrics {
     singletonBatchCount: null, readyCount: null, draftCount: null, publishedCount: null,
     warningCount: null, crossGroupMembershipCount: null, sameGroupDuplicateCount: null,
     missingAssignmentCount: null,
+    duplicateRankingCount: null, missingRankingCount: null,
   };
 }
 
@@ -1093,6 +1104,7 @@ async function parseStageMetrics(
   return {
     stage,
     status: stringValue(artifact.status),
+    errorSummary: stringValue(artifact.error),
     startedAt,
     model: stringValue(artifact.model),
     promptVersion: stringValue(artifact.prompt_version),
@@ -1143,6 +1155,8 @@ async function parseStageMetrics(
     crossGroupMembershipCount: numberFrom(artifact, "cross_group_membership_count"),
     sameGroupDuplicateCount: numberFrom(artifact, "same_group_duplicate_count"),
     missingAssignmentCount: numberFrom(artifact, "missing_assignment_count"),
+    duplicateRankingCount: numberFrom(artifact, "duplicate_ranking_count"),
+    missingRankingCount: numberFrom(artifact, "missing_ranking_count"),
   };
 }
 
