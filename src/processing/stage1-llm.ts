@@ -29,7 +29,14 @@ export type Stage1LlmOptions = {
   model?: string;
   timeoutMs?: number;
   maxRetries?: number;
-  onAttempt?: (event: { attempt: number; status: "success" | "failed"; errorType: string | null; durationMs: number }) => void | Promise<void>;
+  onAttempt?: (event: {
+    attempt: number;
+    provider: LlmProvider;
+    status: "success" | "failed";
+    errorType: string | null;
+    error: string | null;
+    durationMs: number;
+  }) => void | Promise<void>;
 };
 
 export type Stage1LlmSuccess = {
@@ -106,7 +113,6 @@ export async function runStage1BatchLlmForInput(
   );
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
-  const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const tokenUsage: Stage1TokenUsage = {
     inputTokens: 0,
@@ -118,6 +124,20 @@ export async function runStage1BatchLlmForInput(
   let rawOutputText: string | null = null;
   let lastError = "Unknown Stage 1 LLM failure.";
   let attemptsUsed = 0;
+  let client: ReturnType<typeof createLlmClient>;
+  try {
+    client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
+  } catch (error) {
+    lastError = sanitizeLlmError(error instanceof Error ? error.message : String(error));
+    await options.onAttempt?.({
+      attempt: 0, provider, status: "failed", errorType: "configuration_error", error: lastError,
+      durationMs: Date.now() - startedAt,
+    });
+    return {
+      success: false, input, model, promptVersion: STAGE1_PROMPT_VERSION, attempts: 0,
+      elapsedMs: Date.now() - startedAt, tokenUsage: null, error: lastError, rawOutputText,
+    };
+  }
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
     attemptsUsed = attempt;
@@ -164,8 +184,8 @@ export async function runStage1BatchLlmForInput(
       rawOutputText = response.output_text;
       const validation = parseAndValidateStage1BatchOutput(rawOutputText);
       if (!validation.success) {
-        await options.onAttempt?.({ attempt, status: "failed", errorType: "structured_output_validation", durationMs: Date.now() - attemptStartedAt });
         lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
+        await options.onAttempt?.({ attempt, provider, status: "failed", errorType: "structured_output_validation", error: lastError, durationMs: Date.now() - attemptStartedAt });
         if (attempt <= maxRetries) {
           await sleep(RETRY_DELAY_MS * attempt);
           continue;
@@ -176,8 +196,8 @@ export async function runStage1BatchLlmForInput(
 
       const assignment = validateStage1Assignments(validation.output, input);
       if (!assignment.passed) {
-        await options.onAttempt?.({ attempt, status: "failed", errorType: "assignment_validation", durationMs: Date.now() - attemptStartedAt });
         lastError = `Assignment integrity validation failed: ${assignment.errors.join("; ")}`;
+        await options.onAttempt?.({ attempt, provider, status: "failed", errorType: "assignment_validation", error: lastError, durationMs: Date.now() - attemptStartedAt });
         if (attempt <= maxRetries) {
           await sleep(RETRY_DELAY_MS * attempt);
           continue;
@@ -186,7 +206,7 @@ export async function runStage1BatchLlmForInput(
         break;
       }
 
-      await options.onAttempt?.({ attempt, status: "success", errorType: null, durationMs: Date.now() - attemptStartedAt });
+      await options.onAttempt?.({ attempt, provider, status: "success", errorType: null, error: null, durationMs: Date.now() - attemptStartedAt });
 
       return {
         success: true,
@@ -202,7 +222,7 @@ export async function runStage1BatchLlmForInput(
       };
     } catch (error) {
       lastError = sanitizeLlmError(error instanceof Error ? error.message : String(error));
-      await options.onAttempt?.({ attempt, status: "failed", errorType: getHttpStatus(error)?.toString() ?? "request_error", durationMs: Date.now() - attemptStartedAt });
+      await options.onAttempt?.({ attempt, provider, status: "failed", errorType: getHttpStatus(error)?.toString() ?? "request_error", error: lastError, durationMs: Date.now() - attemptStartedAt });
       if (isNonRetryableLlmError(lastError)) {
         break;
       }

@@ -97,6 +97,7 @@ async function main() {
           scope_start_at: summary.scopeStartAt,
           scope_end_at: summary.scopeEndAt,
           model: summary.model,
+          provider_strategy: `logical batches 1-3: codex; subsequent batches and Codex fallback: ${resolveStageLlmProvider("stage1")}`,
           prompt_version: STAGE1_PROMPT_VERSION,
           duration_ms: artifact.durationMs,
           candidate_count: summary.loadedCount,
@@ -122,7 +123,8 @@ async function main() {
           llm_duration_ms: summary.llmDurationMs, input_tokens: summary.tokenUsage?.inputTokens ?? null,
           output_tokens: summary.tokenUsage?.outputTokens ?? null, total_tokens: summary.tokenUsage?.totalTokens ?? null,
           batch_count: summary.batchCount, fallback_batch_count: summary.fallbackBatchCount,
-          split_count: summary.splitCount, singleton_batch_count: summary.singletonBatchCount },
+          split_count: summary.splitCount, singleton_batch_count: summary.singletonBatchCount,
+          provider_strategy: `logical batches 1-3: codex; subsequent batches and Codex fallback: ${resolveStageLlmProvider("stage1")}` },
       });
       console.log(JSON.stringify({ ...summary, runtimeDir: runDir }, null, 2));
     } catch (error) {

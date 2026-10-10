@@ -14,7 +14,7 @@ import type {
   Stage1Output,
   Stage1Routing,
 } from "./stage1-contract.js";
-import { resolveStageLlmModel } from "./llm-client.js";
+import { resolveStageLlmModel, resolveStageLlmProvider, type LlmProvider } from "./llm-client.js";
 import { resolveDailyScope, type PublishedAtScope } from "../lib/daily-scope.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
@@ -34,12 +34,16 @@ export type Stage1JobOptions = Stage1LlmOptions & {
 
 export type Stage1AttemptRecord = {
   batchId: string;
+  logicalBatchNumber: number;
   parentBatchId: string | null;
   articleCount: number;
   attempt: number;
   type: "initial" | "retry" | "split";
+  provider: LlmProvider;
+  codexFallbackToDefaultProvider: boolean;
   status: "success" | "failed";
   errorType: string | null;
+  error: string | null;
   durationMs: number;
 };
 
@@ -119,6 +123,7 @@ export async function processStage1Batch(
   const batches = createStage1MicroBatches(articles, batchConfig);
   await options.onInitialBatches?.(batches);
 
+  const defaultProvider = options.provider ?? resolveStageLlmProvider("stage1");
   const batchResults = await runWithConcurrency(batches, concurrency, async (batch, index) =>
     processStage1MicroBatch(
       pool,
@@ -127,6 +132,9 @@ export async function processStage1Batch(
       0,
       `batch-${String(index + 1).padStart(3, "0")}`,
       null,
+      index + 1,
+      stage1ProviderForLogicalBatch(index + 1, defaultProvider),
+      defaultProvider,
     ),
   );
   const results = batchResults.flatMap((result) => result.results);
@@ -156,6 +164,22 @@ export async function processStage1Batch(
     tokenUsage,
     results,
   };
+}
+
+/** Provider assignment is based on deterministic logical batch order, not completion order. */
+export function stage1ProviderForLogicalBatch(
+  logicalBatchNumber: number,
+  defaultProvider: LlmProvider,
+): LlmProvider {
+  return logicalBatchNumber <= 3 ? "codex" : defaultProvider;
+}
+
+export function shouldFallbackCodexBatch(
+  logicalBatchNumber: number,
+  provider: LlmProvider,
+  success: boolean,
+): boolean {
+  return logicalBatchNumber <= 3 && provider === "codex" && !success;
 }
 
 export function resolveStage1BatchConfig(
@@ -386,25 +410,51 @@ async function processStage1MicroBatch(
   inheritedAttempts = 0,
   batchId = "batch",
   parentBatchId: string | null = null,
+  logicalBatchNumber = 1,
+  provider: LlmProvider = resolveStageLlmProvider("stage1"),
+  defaultProvider: LlmProvider = resolveStageLlmProvider("stage1"),
 ): Promise<Stage1MicroBatchResult> {
   const dailyDate = options.dailyDate ?? resolveDailyScope(undefined).dailyDate;
-  const llmResult = await runStage1BatchLlm(articles, {
-    ...options,
-    onAttempt: async (event) => {
+  const runWithProvider = async (requestedProvider: LlmProvider, codexFallbackToDefaultProvider: boolean) =>
+    runStage1BatchLlm(articles, {
+      ...options,
+      provider: requestedProvider,
+      // A Stage1 model override belongs to the configured/default provider;
+      // Codex must resolve its own existing CODEX_MODEL configuration.
+      model: requestedProvider === "codex" ? undefined : options.model,
+      onAttempt: async (event) => {
       await options.onAttempt?.(event);
       await (options as Stage1JobOptions).onAttemptRecord?.({
         batchId,
+        logicalBatchNumber,
         parentBatchId,
         articleCount: articles.length,
         attempt: event.attempt,
         type: event.attempt > 1 ? "retry" : parentBatchId ? "split" : "initial",
+        provider: event.provider,
+        codexFallbackToDefaultProvider,
         status: event.status,
         errorType: event.errorType,
+        error: event.error,
         durationMs: event.durationMs,
       });
     },
   });
-  const metrics = createBatchMetrics(llmResult);
+  let llmResult = await runWithProvider(provider, false);
+  let metrics = createBatchMetrics(llmResult);
+  let attemptsForThisBatch = llmResult.attempts;
+  let providerForSplit = provider;
+
+  // Only the initial logical batches 1–3 are assigned to Codex. After its
+  // normal retry budget is exhausted, retry this one batch with the existing
+  // Stage1 provider; other logical batches keep their predetermined provider.
+  if (shouldFallbackCodexBatch(logicalBatchNumber, provider, llmResult.success)) {
+    const fallbackResult = await runWithProvider(defaultProvider, true);
+    metrics = mergeBatchMetrics(metrics, createBatchMetrics(fallbackResult));
+    attemptsForThisBatch += fallbackResult.attempts;
+    llmResult = fallbackResult;
+    providerForSplit = defaultProvider;
+  }
 
   if (llmResult.success) {
     return {
@@ -413,7 +463,7 @@ async function processStage1MicroBatch(
       splitCount: 0,
       singletonBatchCount: articles.length === 1 ? 1 : 0,
       results: await persistSuccessfulBatch(pool, articles, llmResult.output.results, {
-        attempts: inheritedAttempts + llmResult.attempts,
+        attempts: inheritedAttempts + attemptsForThisBatch,
         dailyDate,
       }),
     };
@@ -426,7 +476,7 @@ async function processStage1MicroBatch(
       splitCount: 0,
       singletonBatchCount: 1,
       results: [
-        await persistFailedArticle(pool, articles[0], llmResult.error, inheritedAttempts + llmResult.attempts),
+        await persistFailedArticle(pool, articles[0], llmResult.error, inheritedAttempts + attemptsForThisBatch),
       ],
     };
   }
@@ -436,17 +486,23 @@ async function processStage1MicroBatch(
     pool,
     articles.slice(0, midpoint),
     options,
-    inheritedAttempts + llmResult.attempts,
+    inheritedAttempts + attemptsForThisBatch,
     `${batchId}.left`,
     batchId,
+    logicalBatchNumber,
+    providerForSplit,
+    defaultProvider,
   );
   const right = await processStage1MicroBatch(
     pool,
     articles.slice(midpoint),
     options,
-    inheritedAttempts + llmResult.attempts,
+    inheritedAttempts + attemptsForThisBatch,
     `${batchId}.right`,
     batchId,
+    logicalBatchNumber,
+    providerForSplit,
+    defaultProvider,
   );
 
   return {

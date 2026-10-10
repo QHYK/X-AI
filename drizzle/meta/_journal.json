@@ -99,6 +99,13 @@
       "when": 1789563031048,
       "tag": "0013_processed_contents_daily_date_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791590400000,
+      "tag": "0014_content_read_more",
+      "breakpoints": true
     }
   ]
 }

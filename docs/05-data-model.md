@@ -88,8 +88,6 @@ failed
 ```
 暂不使用数据库 CHECK，方便运行后增加状态。
 
----
-
 ## 3 `processed_contents`
 
 保存 Stage 1 保留内容：(Ignore 内容不入此表)
@@ -130,6 +128,16 @@ event | digest | long_form | inspiration
 `daily_date` 表示该内容首次进入 Production Workflow 时所属的 Daily attribution date；具体归属与 late-arrival 规则见 `06-processing-workflow.md`。
 
 `ai_rank` 保存 AI 排序；`display_rank` 是页面最终顺序。人工调整只改 `display_rank`。
+
+### `content_read_more`
+
+保存用户按需生成、且通过 Read More 输出校验的中文详细导读：
+
+```text
+id, content_id, summary_zh, created_at, updated_at
+```
+
+`content_id` 唯一且关联 `processed_contents.id`；它是 Read More 的持久化缓存，不参与 Production Stage 1–4。
 
 ## 4 `events`
 保存 Stage 4 最终 Event：

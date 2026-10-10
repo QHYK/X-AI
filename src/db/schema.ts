@@ -198,6 +198,18 @@ export const processedContents = pgTable(
   ],
 );
 
+/** 用户按需生成且已通过 Read More 输出校验的详细中文导读。 */
+export const contentReadMore = pgTable("content_read_more", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  contentId: uuid("content_id")
+    .notNull()
+    .references(() => processedContents.id, { onDelete: "cascade" }),
+  summaryZh: text("summary_zh").notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("content_read_more_content_id_unique").on(table.contentId),
+]);
+
 export const feedback = pgTable("feedback", {
   id: uuid("id").primaryKey().defaultRandom(),
   targetType: text("target_type").notNull(),
@@ -289,6 +301,8 @@ export type RawArticle = typeof rawArticles.$inferSelect;
 export type NewRawArticle = typeof rawArticles.$inferInsert;
 export type ProcessedContent = typeof processedContents.$inferSelect;
 export type NewProcessedContent = typeof processedContents.$inferInsert;
+export type ContentReadMore = typeof contentReadMore.$inferSelect;
+export type NewContentReadMore = typeof contentReadMore.$inferInsert;
 export type Event = typeof events.$inferSelect;
 export type NewEvent = typeof events.$inferInsert;
 export type EventReviewItem = typeof eventReviewItems.$inferSelect;

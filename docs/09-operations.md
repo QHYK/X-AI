@@ -156,6 +156,8 @@ Scope 的时间含义和 current/historical 行为在 [Workflow Overview](02-wor
 | `STAGE3_LLM_TIMEOUT_MS` | `240000` ms | Stage3 Event/Digest/Long-form 单 request timeout |
 | `STAGE3_LLM_MAX_RETRIES` | `2` | Stage3 Event/Digest/Long-form 最大重试数 |
 | `STAGE3_LLM_RETRY_DELAY_MS` | `1000` ms | Stage3 Event/Digest/Long-form retry delay |
+
+Stage 1 的逻辑 Batch 1–3 使用已有 Codex 配置；Codex retry 耗尽后回退当前 `STAGE1_LLM_PROVIDER`（未设置时使用项目默认）。每个 Batch 的实际 provider、retry、fallback 与脱敏错误见 `runtime/stage1/<run-id>/attempts.jsonl`。
 | `STAGE4_LLM_TIMEOUT_MS` | `240000` ms | Stage4 单 request timeout |
 | `STAGE4_LLM_MAX_RETRIES` | `2` | Stage4 transient-error 最大重试数 |
 | `STAGE4_LLM_RETRY_DELAY_MS` | `1000` ms | Stage4 retry delay |
@@ -177,6 +179,9 @@ Representative long-lived checks:
 ```bash
 npm run test:daily-scope
 npm run test:pre-stage1-duplicates
+npm run test:stage1-codex-rollout
+npm run test:read-more-cache
+npm run test:brief-read-more-availability
 npm run test:stage3-persistence
 npm run test:stage4-event-date
 npm run test:stage4-persistence
@@ -224,7 +229,10 @@ npm run test:content-completion-runtime
 | `test-pre-stage1-duplicates.ts` | Regression test | `test:pre-stage1-duplicates` |
 | `test-ranking-review.ts` | Regression test | `test:ranking-review` |
 | `test-stage1-chat-structured.ts` | Reusable diagnostic | `test:stage1:chat`；真实 DB/LLM 调用 |
+| `test-stage1-codex-rollout.ts` | Regression test | `test:stage1-codex-rollout` |
 | `test-stage1-persistence.ts` | Regression test | `test:stage1-persistence` |
+| `test-read-more-cache.ts` | Regression test | `test:read-more-cache` |
+| `test-brief-read-more-availability.ts` | Regression test | `test:brief-read-more-availability` |
 | `test-stage2-standalone.ts` | Regression test | `test:stage2-standalone` |
 | `test-stage3-persistence-rules.ts` | Regression test | `test:stage3-persistence` |
 | `test-stage4-event-date.ts` | Regression test | `test:stage4-event-date` |

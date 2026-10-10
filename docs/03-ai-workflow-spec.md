@@ -257,7 +257,7 @@ Topic 本身重要，不代表文章自动值得阅读全文；知名媒体、Op
 ## 6. Read More — On-demand Detailed Summary
 
 **Responsibility**
-当用户在 Daily Brief 中主动点击 Read More 时，基于完整正文生成更深入的中文阅读导读。该能力由用户按需触发，不属于 Production Stage 1–4 的预生成流程。
+当用户在 Daily Brief 中主动点击 Read More 时，基于可用正文生成更深入的中文阅读导读。优先使用完整正文；完整正文缺失时，可使用长度达到 3000 个 Unicode 字符的正文内容。API 使用 JavaScript `Array.from()` 计数，与 Brief SQL 的 `char_length()` 对齐。该能力由用户按需触发，不属于 Production Stage 1–4 的预生成流程。
 
 **Input**  
 Full article content
@@ -273,7 +273,7 @@ Full article content
 - On-demand Chinese detailed summary / reading guide
 
 **Definition of Done**
-- 忠于完整正文；
+- 忠于所提供正文；
 - 覆盖文章真正重要的观点、证据或推理；
 - 相比已有 Summary 提供明显更多的理解价值；
 - 不臆测或虚构原文没有的信息；

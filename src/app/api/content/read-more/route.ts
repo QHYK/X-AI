@@ -19,7 +19,7 @@ export async function POST(request: Request): Promise<Response> {
 
   if (!isReadMoreRequest(body)) {
     return jsonResponse(
-      { error: "contentId must be a non-empty string." },
+      { error: "contentId must be a UUID string." },
       { status: 400, headers },
     );
   }
@@ -47,9 +47,11 @@ function isReadMoreRequest(value: unknown): value is { contentId: string } {
     !Array.isArray(value) &&
     "contentId" in value &&
     typeof value.contentId === "string" &&
-    Boolean(value.contentId.trim())
+    UUID_PATTERN.test(value.contentId.trim())
   );
 }
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function corsHeaders(request: Request): HeadersInit {
   const headers: Record<string, string> = {

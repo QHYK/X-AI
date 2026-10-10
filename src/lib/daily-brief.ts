@@ -322,10 +322,15 @@ async function loadDigestItems(
         ra.url,
         ra.published_at,
         pc.created_at,
-        coalesce(nullif(btrim(ra.full_content_text), ''), '') <> '' as "hasFullContent"
+        (
+          coalesce(nullif(btrim(crm.summary_zh), ''), '') <> ''
+          or coalesce(nullif(btrim(ra.full_content_text), ''), '') <> ''
+          or char_length(btrim(coalesce(ra.content_text, ''))) >= 3000
+        ) as "hasFullContent"
       from processed_contents pc
       join raw_articles ra on ra.id = pc.raw_article_id
       join sources s on s.id = ra.source_id
+      left join content_read_more crm on crm.content_id = pc.id
       where pc.routing = 'digest'
         and coalesce(pc.display_rank, pc.ai_rank) is not null
         and pc.daily_date = $1::date
@@ -361,10 +366,15 @@ async function loadLongFormItems(
         ra.url,
         ra.published_at,
         pc.created_at,
-        coalesce(nullif(btrim(ra.full_content_text), ''), '') <> '' as "hasFullContent"
+        (
+          coalesce(nullif(btrim(crm.summary_zh), ''), '') <> ''
+          or coalesce(nullif(btrim(ra.full_content_text), ''), '') <> ''
+          or char_length(btrim(coalesce(ra.content_text, ''))) >= 3000
+        ) as "hasFullContent"
       from processed_contents pc
       join raw_articles ra on ra.id = pc.raw_article_id
       join sources s on s.id = ra.source_id
+      left join content_read_more crm on crm.content_id = pc.id
       where pc.routing = 'long_form'
         and coalesce(pc.display_rank, pc.ai_rank) is not null
         and pc.daily_date = $1::date
