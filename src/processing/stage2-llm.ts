@@ -8,6 +8,7 @@ import {
   resolveStageLlmModel,
   resolveStageLlmProvider,
   type LlmProvider,
+  type LlmResponse,
 } from "./llm-client.js";
 import {
   stage2OutputJsonSchema,
@@ -25,6 +26,35 @@ export type Stage2LlmOptions = {
   model?: string;
   timeoutMs?: number;
   maxRetries?: number;
+  /** Test seam; production callers use the configured LLM client. */
+  request?: (request: Stage2ResponseRequest, options: { timeout?: number }) => Promise<LlmResponse>;
+};
+
+type Stage2ResponseRequest = {
+  model: string;
+  instructions: string;
+  input: Array<{ role: string; content: Array<{ type: "input_text"; text: string }> }>;
+  max_output_tokens: number;
+  store: boolean;
+  text: {
+    format: {
+      type: "json_schema";
+      name: string;
+      description: string;
+      schema: typeof stage2OutputJsonSchema;
+      strict: boolean;
+    };
+  };
+};
+
+export type Stage2LlmAttempt = {
+  attempt: number;
+  provider: LlmProvider;
+  durationMs: number;
+  statusCode: number | null;
+  errorCode: string | null;
+  errorType: string | null;
+  error: string | null;
 };
 
 export type Stage2TokenUsage = {
@@ -45,6 +75,7 @@ export type Stage2LlmSuccess = {
   tokenUsage: Stage2TokenUsage | null;
   finishReason: string | null;
   rawOutputText: string;
+  attemptLog: Stage2LlmAttempt[];
 };
 
 export type Stage2LlmFailure = {
@@ -58,6 +89,7 @@ export type Stage2LlmFailure = {
   finishReason: string | null;
   error: string;
   rawOutputText: string | null;
+  attemptLog: Stage2LlmAttempt[];
 };
 
 export type Stage2LlmResult = Stage2LlmSuccess | Stage2LlmFailure;
@@ -82,7 +114,12 @@ export async function runStage2MergeLlm(
   );
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
-  const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
+  // SDK retries stay disabled: Stage 2 owns attempt accounting and retry policy.
+  const client = options.request ? null : createLlmClient({ provider, timeoutMs, maxRetries: 0 });
+  const request = options.request ?? client?.responses.create;
+  if (!request) {
+    throw new Error("Stage 2 LLM request function is unavailable.");
+  }
   const startedAt = Date.now();
 
   let rawOutputText: string | null = null;
@@ -90,11 +127,13 @@ export async function runStage2MergeLlm(
   let attemptsUsed = 0;
   let tokenUsage: Stage2TokenUsage | null = null;
   let finishReason: string | null = null;
+  const attemptLog: Stage2LlmAttempt[] = [];
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
     attemptsUsed = attempt;
+    const attemptStartedAt = Date.now();
     try {
-      const response = await client.responses.create(
+      const response = await request(
         {
           model,
           instructions: buildStage2Instructions(),
@@ -126,6 +165,16 @@ export async function runStage2MergeLlm(
         },
       );
 
+      attemptLog.push({
+        attempt,
+        provider,
+        durationMs: Date.now() - attemptStartedAt,
+        statusCode: null,
+        errorCode: null,
+        errorType: null,
+        error: null,
+      });
+
       rawOutputText = response.output_text;
       tokenUsage = response.usage
         ? {
@@ -152,9 +201,18 @@ export async function runStage2MergeLlm(
         tokenUsage,
         finishReason,
         rawOutputText,
+        attemptLog,
       };
     } catch (error) {
       lastError = sanitizeLlmError(error instanceof Error ? error.message : String(error));
+      const diagnostic = diagnoseLlmError(error, lastError);
+      attemptLog.push({
+        attempt,
+        provider,
+        durationMs: Date.now() - attemptStartedAt,
+        ...diagnostic,
+        error: lastError,
+      });
       if (isNonRetryableLlmError(lastError)) {
         break;
       }
@@ -175,8 +233,9 @@ export async function runStage2MergeLlm(
     elapsedMs: Date.now() - startedAt,
     tokenUsage,
     finishReason,
-    error: lastError,
+    error: `Attempts: ${attemptsUsed}, Retries: ${Math.max(0, attemptsUsed - 1)}. ${lastError}`,
     rawOutputText,
+    attemptLog,
   };
 }
 
@@ -184,8 +243,39 @@ function isNonRetryableLlmError(errorMessage: string): boolean {
   return (
     errorMessage.includes("401") ||
     errorMessage.includes("Incorrect API key") ||
-    errorMessage.includes("invalid_api_key")
+    errorMessage.includes("invalid_api_key") ||
+    /\bauthentication(?:\s+failed)?\b/i.test(errorMessage) ||
+    /\bunauthorized\b/i.test(errorMessage)
   );
+}
+
+function diagnoseLlmError(
+  error: unknown,
+  fallbackMessage: string,
+): Omit<Stage2LlmAttempt, "attempt" | "provider" | "durationMs" | "error"> {
+  const message = error instanceof Error ? error.message : fallbackMessage;
+  const prefix = "LLM HTTP request failed: ";
+  if (message.startsWith(prefix)) {
+    try {
+      const diagnostic = JSON.parse(message.slice(prefix.length)) as {
+        response?: { status?: unknown; code?: unknown; type?: unknown };
+      };
+      return {
+        statusCode: typeof diagnostic.response?.status === "number" ? diagnostic.response.status : null,
+        errorCode: typeof diagnostic.response?.code === "string" ? diagnostic.response.code : null,
+        errorType: typeof diagnostic.response?.type === "string" ? diagnostic.response.type : null,
+      };
+    } catch {
+      // Preserve the sanitized error even when a proxy returned malformed diagnostic data.
+    }
+  }
+
+  const value = typeof error === "object" && error !== null ? error as { name?: unknown; code?: unknown; status?: unknown } : {};
+  return {
+    statusCode: typeof value.status === "number" ? value.status : null,
+    errorCode: typeof value.code === "string" ? value.code : null,
+    errorType: typeof value.name === "string" ? value.name : null,
+  };
 }
 
 function sanitizeLlmError(errorMessage: string): string {

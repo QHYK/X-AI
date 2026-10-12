@@ -278,6 +278,8 @@ content_text = empty
 
 当前使用 Firecrawl `/v2/scrape` 获取 Markdown。
 
+一次 Content Completion 最多选择 80 个既有排序后的候选；固定分为两个并行工作池：A 使用 `FIRECRAWL_API_KEY`，B 使用 `FIRECRAWL_API_KEY_2`。候选按原有顺序前半（向上取整）分配给 A、后半分配给 B，每池最多 40 个；不会在某个池提前结束后转移任务。两个 Key 必须同时配置，避免缺少第二个 Key 时意外消耗第一个账号。具体环境变量见 [Operations](09-operations.md#53-collection-与-content-completion)。
+
 提取优先关注：
 
 ```text
@@ -294,6 +296,8 @@ Article body
 - 原始 Firecrawl Markdown 只进入 runtime artifact；
 - 只有经过清洗、足够完整且具有后续详情复用价值的正文才写入 `full_content_text`；
 - Stage 1 不读取 `full_content_text`。
+
+runtime 会额外记录每个工作池的分配、成功/失败、Firecrawl 请求、retry，以及最终可识别的 429 / timeout 错误计数；这些仅用于运行观测。
 
 ### 5.4 Failure
 
@@ -537,7 +541,7 @@ runtime/stage2/<run-id>/
     run.json
 ```
 
-`run.json` 记录 model / prompt version、token usage、retry / duration、assignment validation、warnings、success / failed 等运行信息。warnings 保存 cross-group memberships、same-group duplicates 与 missing IDs；`pipeline_runs.metrics` 只保存相应的计数摘要。runtime artifacts 用于 observability / debug，不作为 Stage 3 的 Production Source of Truth。
+`run.json` 记录 model / prompt version、token usage、retry / duration、assignment validation、warnings、success / failed 等运行信息。`llm_attempts` 记录每个请求的编号、provider、耗时与脱敏错误诊断。warnings 保存 cross-group memberships、same-group duplicates 与 missing IDs；`pipeline_runs.metrics` 只保存相应的计数摘要。runtime artifacts 用于 observability / debug，不作为 Stage 3 的 Production Source of Truth。
 
 ---
 

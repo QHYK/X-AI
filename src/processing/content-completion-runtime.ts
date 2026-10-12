@@ -5,6 +5,7 @@
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { ContentCompletionPoolSummary } from "./content-completion.js";
 
 export type ContentCompletionRuntimeArtifact = {
   status: "running" | "success" | "failed";
@@ -29,6 +30,7 @@ export type ContentCompletionRuntimeArtifact = {
   raw_length: number | null;
   content_text_length: number | null;
   full_content_text_length: number | null;
+  pool_metrics: Record<"A" | "B", ContentCompletionPoolSummary> | null;
   limit: number;
   per_source_limit: number;
   error: string | null;

@@ -18,6 +18,7 @@ import {
 } from "./stage2-contract.js";
 import {
   runStage2MergeLlm,
+  type Stage2LlmAttempt,
   type Stage2LlmOptions,
   type Stage2TokenUsage,
 } from "./stage2-llm.js";
@@ -49,6 +50,7 @@ type Stage2JobBase = {
   elapsedMs: number;
   tokenUsage: Stage2TokenUsage | null;
   finishReason: string | null;
+  attemptLog: Stage2LlmAttempt[];
 };
 
 export type Stage2JobSuccess = Stage2JobBase & {
@@ -101,13 +103,16 @@ export async function processStage2Merge(
       elapsedMs: Date.now() - startedAt,
       tokenUsage: null,
       finishReason: null,
+      attemptLog: [],
       error: null,
     };
   }
 
   const llmResult = await runStage2MergeLlm(input, {
     ...options,
-    maxRetries: options.maxRetries ?? 0,
+    // Omit maxRetries unless a programmatic caller explicitly supplied it so
+    // runStage2MergeLlm can apply STAGE2_LLM_MAX_RETRIES.
+    ...(options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries }),
   });
   if (!llmResult.success) {
     return {
@@ -126,6 +131,7 @@ export async function processStage2Merge(
       elapsedMs: Date.now() - startedAt,
       tokenUsage: llmResult.tokenUsage,
       finishReason: llmResult.finishReason,
+      attemptLog: llmResult.attemptLog,
       error: llmResult.error,
     };
   }
@@ -149,7 +155,8 @@ export async function processStage2Merge(
       elapsedMs: Date.now() - startedAt,
       tokenUsage: llmResult.tokenUsage,
       finishReason: llmResult.finishReason,
-      error: `Stage 2 assignment validation failed: ${assignment.errors.join(" ")}`,
+      attemptLog: llmResult.attemptLog,
+      error: `Attempts: ${llmResult.attempts}, Retries: ${Math.max(0, llmResult.attempts - 1)}. Stage 2 assignment validation failed: ${assignment.errors.join(" ")}`,
     };
   }
 
@@ -178,6 +185,7 @@ export async function processStage2Merge(
     elapsedMs: Date.now() - startedAt,
     tokenUsage: llmResult.tokenUsage,
     finishReason: llmResult.finishReason,
+    attemptLog: llmResult.attemptLog,
     error: null,
   };
 }

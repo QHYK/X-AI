@@ -69,7 +69,7 @@ assert.deepEqual(rollback.snapshot(), beforeFailure);
 const summary = summarizeStage2Result({
   success: true, input: { event_candidates: [] }, idMap: {}, candidateRows: [], output: { events: [] }, eventGroups: [],
   assignment: validateStage2Assignments({ events: [] }, { event_candidates: [] }), model: "test", promptVersion: "test",
-  llmCallCount: 0, retryCount: 0, llmDurationMs: 0, elapsedMs: 0, tokenUsage: null, finishReason: null, error: null,
+  llmCallCount: 0, retryCount: 0, llmDurationMs: 0, elapsedMs: 0, tokenUsage: null, finishReason: null, attemptLog: [], error: null,
 } satisfies Stage2JobSuccess);
 assert.deepEqual(stage2WarningMetrics(summary), {
   warning_count: 0, cross_group_membership_count: 0, same_group_duplicate_count: 0, missing_assignment_count: 0,

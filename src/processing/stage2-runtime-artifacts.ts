@@ -64,6 +64,7 @@ export async function writeStage2RuntimeArtifacts(
     llm_calls: summary.llmCallCount,
     llm_duration_ms: summary.llmDurationMs,
     retry_count: summary.retryCount,
+    llm_attempts: result.attemptLog,
     total_duration_ms: result.elapsedMs,
     input_tokens: result.tokenUsage?.inputTokens ?? null,
     output_tokens: result.tokenUsage?.outputTokens ?? null,

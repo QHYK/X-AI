@@ -160,8 +160,11 @@ function completionResult(
     fullContentLength: null,
     requestCount: status === "skipped" ? 0 : 1,
     retryCount: 0,
+    rateLimitedCount: 0,
+    timeoutCount: 0,
     error: status === "failed" ? "fetch failed" : null,
     rawMarkdown: null,
+    pool: "A",
   };
 }
 
@@ -198,6 +201,7 @@ async function writeFixture(
     raw_length: 1000,
     content_text_length: 800,
     full_content_text_length: 0,
+    pool_metrics: null,
     limit: 50,
     per_source_limit: 10,
     error: null,

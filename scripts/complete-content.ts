@@ -65,6 +65,7 @@ async function main() {
     raw_length: null,
     content_text_length: null,
     full_content_text_length: null,
+    pool_metrics: null,
     limit: limits.limit,
     per_source_limit: limits.perSourceLimit,
     error: null,
@@ -138,7 +139,8 @@ async function main() {
 function completionMetrics(artifact: ContentCompletionRuntimeArtifact) {
   return { candidate_count: artifact.candidate_count, selected_count: artifact.selected_count,
     success_count: artifact.success_count, failed_count: artifact.failed_count, skipped_count: artifact.skipped_count,
-    remaining_count: artifact.remaining_count, retry_count: artifact.retry_count, duration_ms: artifact.duration_ms };
+    remaining_count: artifact.remaining_count, retry_count: artifact.retry_count, duration_ms: artifact.duration_ms,
+    pool_metrics: artifact.pool_metrics };
 }
 
 async function writeRawMarkdown(
@@ -162,6 +164,7 @@ function applySummaryMetrics(artifact: ContentCompletionRuntimeArtifact, summary
   artifact.raw_length = summary.rawLength;
   artifact.content_text_length = summary.contentTextLength;
   artifact.full_content_text_length = summary.fullContentTextLength;
+  artifact.pool_metrics = summary.poolMetrics;
 }
 
 function applyMetrics(

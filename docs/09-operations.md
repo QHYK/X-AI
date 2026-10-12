@@ -127,9 +127,10 @@ Scope 的时间含义和 current/historical 行为在 [Workflow Overview](02-wor
 |---|---:|---|
 | `RSS_COLLECTOR_CONCURRENCY` | `4` | RSS collection 并发 |
 | `RSS_FETCH_TIMEOUT_MS` | `20000` ms | RSS fetch timeout |
-| `FIRECRAWL_API_KEY` | — | Content Completion 及 Firecrawl diagnostic 必填 |
+| `FIRECRAWL_API_KEY` | — | Content Completion pool A 必填；Firecrawl diagnostic 使用此 Key |
+| `FIRECRAWL_API_KEY_2` | — | Content Completion pool B 必填；缺失时有候选的 Completion 会在发起请求前失败 |
 | `CONTENT_COMPLETION_SOURCE_NAMES` | 全部 source | 逗号分隔 source name filter |
-| `CONTENT_COMPLETION_LIMIT` | `50` | Content Completion 最大处理数 |
+| `CONTENT_COMPLETION_LIMIT` | `80` | Content Completion 最大处理数；显式设置可降低此值，但不能超过 80 |
 | `CONTENT_COMPLETION_PER_SOURCE_LIMIT` | `10` | 每个 source 最大处理数 |
 | `CONTENT_COMPLETION_CONCURRENCY` | `2` | Content Completion 并发 |
 | `CONTENT_COMPLETION_SHORT_CHARS` | `80` | Completion 候选正文长度阈值；Dashboard 也读取此值显示阈值 |
@@ -153,6 +154,8 @@ Scope 的时间含义和 current/historical 行为在 [Workflow Overview](02-wor
 | `STAGE2_LLM_MAX_RETRIES` | `0` | Stage2 最大重试数 |
 | `STAGE2_LLM_RETRY_DELAY_MS` | `1000` ms | Stage2 retry delay |
 | `STAGE2_LLM_MAX_OUTPUT_TOKENS` | `64000` | Stage2 最大输出 token |
+
+Stage2 关闭 SDK 自动重试，使用自己的 retry loop；`STAGE2_LLM_MAX_RETRIES` 是单次 Stage2 execution 中额外 LLM request 的最大次数。每次 attempt 的脱敏诊断写入 `runtime/stage2/<run-id>/run.json` 的 `llm_attempts`；Dashboard 的 Retries 表示实际 LLM retry 数，不包含整个 Stage2 的再次运行。
 | `STAGE3_LLM_TIMEOUT_MS` | `240000` ms | Stage3 Event/Digest/Long-form 单 request timeout |
 | `STAGE3_LLM_MAX_RETRIES` | `2` | Stage3 Event/Digest/Long-form 最大重试数 |
 | `STAGE3_LLM_RETRY_DELAY_MS` | `1000` ms | Stage3 Event/Digest/Long-form retry delay |
@@ -188,6 +191,8 @@ npm run test:stage4-persistence
 npm run test:ranking-review
 npm run test:model-evaluation
 npm run test:content-completion-runtime
+npm run test:content-completion-pools
+npm run test:stage2-retry
 ```
 
 ## 7. Reusable Diagnostics and Smoke Tests
