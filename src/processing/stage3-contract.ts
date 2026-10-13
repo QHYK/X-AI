@@ -81,20 +81,23 @@ export type Stage3RankingIntegrity = {
 export type Stage3RankingWarnings = {
   duplicateIds: string[];
   missingIds: string[];
+  inventedIds: string[];
+  modelValidIdCount: number;
+  fallbackIdCount: number;
   rankNormalizationCount: number;
 };
 
 /**
- * Converts a structurally valid, known-ID ranking into a complete permutation.
- * The first item in model rank order wins; omitted input IDs append in stable
- * input order. Unknown IDs remain fatal and are never silently discarded.
+ * Converts a structurally valid ranking into a complete permutation.
+ * Unknown and duplicate IDs are excluded; the first valid model occurrence
+ * wins, then omitted candidates append in stable input order. The result is
+ * accepted only when the model supplied at least one valid candidate ID.
  */
 export function normalizeStage3RankingOutput(
   output: Stage3RankingOutput,
   expectedIds: string[],
 ): { success: true; output: Stage3RankingOutput; warnings: Stage3RankingWarnings } | { success: false; integrity: Stage3RankingIntegrity } {
   const integrity = validateStage3RankingIntegrity(output, expectedIds);
-  if (integrity.inventedIds.length > 0) return { success: false, integrity };
 
   const expected = new Set(expectedIds);
   const seen = new Set<string>();
@@ -106,6 +109,15 @@ export function normalizeStage3RankingOutput(
       seen.add(ranking.id);
       return [ranking];
     });
+  if (kept.length === 0 && expectedIds.length > 0) {
+    return {
+      success: false,
+      integrity: {
+        ...integrity,
+        errors: [...integrity.errors, "No valid candidate IDs returned."],
+      },
+    };
+  }
   const missing = expectedIds.filter((id) => !seen.has(id));
   const normalized = [...kept, ...missing.map((id) => ({
     id,
@@ -119,6 +131,9 @@ export function normalizeStage3RankingOutput(
     warnings: {
       duplicateIds: integrity.duplicateIds,
       missingIds: integrity.missingIds,
+      inventedIds: integrity.inventedIds,
+      modelValidIdCount: kept.length,
+      fallbackIdCount: missing.length,
       rankNormalizationCount:
         integrity.duplicateRanks.length + integrity.missingRanks.length > 0 ? 1 : 0,
     },
@@ -477,26 +492,38 @@ export function deduplicateStage3EventRankingOutput(
   };
 }
 
-/** Event Ranking is Top-50, so missing IDs are only anomalous when all inputs fit. */
+/** Event Ranking is Top-50. It preserves every valid model-selected ID without filling omissions. */
 export function normalizeStage3EventRankingOutput(
   output: Stage3EventRankingOutput,
   expectedIds: string[],
 ): { success: true; output: Stage3EventRankingOutput; warnings: Stage3RankingWarnings } | { success: false; integrity: Stage3EventRankingIntegrity } {
   const integrity = validateStage3EventRankingIntegrity(output, expectedIds);
-  if (integrity.inventedIds.length > 0) return { success: false, integrity };
-  const deduplicated = deduplicateStage3EventRankingOutput(output);
+  const expected = new Set(expectedIds);
+  const deduplicated = deduplicateStage3EventRankingOutput({
+    ordered_ids: output.ordered_ids.filter((id) => expected.has(id)),
+  });
   if (deduplicated.ordered_ids.length === 0 && expectedIds.length > 0) {
-    return { success: false, integrity };
+    return {
+      success: false,
+      integrity: {
+        ...integrity,
+        errors: [...integrity.errors, "No valid candidate IDs returned."],
+      },
+    };
   }
-  const missingIds = expectedIds.length <= MAX_STAGE3_EVENT_RANKINGS
-    ? integrity.missingIds
-    : [];
   return {
     success: true,
     output: {
-      ordered_ids: [...deduplicated.ordered_ids, ...missingIds],
+      ordered_ids: deduplicated.ordered_ids,
     },
-    warnings: { duplicateIds: integrity.duplicateIds, missingIds, rankNormalizationCount: 0 },
+    warnings: {
+      duplicateIds: integrity.duplicateIds,
+      missingIds: [],
+      inventedIds: integrity.inventedIds,
+      modelValidIdCount: deduplicated.ordered_ids.length,
+      fallbackIdCount: 0,
+      rankNormalizationCount: 0,
+    },
   };
 }
 

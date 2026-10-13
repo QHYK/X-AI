@@ -172,7 +172,7 @@ Rank by:
 
 ### Common Rules
 - Event Ranking returns at most 50 IDs; Code handles final Top N selection.
-- Digest Ranking must rank all provided candidates exactly once; missing / duplicate / invalid IDs trigger one repair attempt, and the ranking fails if repair still cannot produce a complete valid ordering.
+- Digest Ranking must rank all provided candidates exactly once. Runtime validation and deterministic recovery behavior are defined in [Processing Workflow](06-processing-workflow.md).
 - Long-form Ranking ranks all provided IDs exactly once through `rankings`; its `rank` values start at 1 and remain consecutive.
 - Returned IDs must come from the corresponding input.
 - Do not rank only by publish time, breaking-news tone, or source diversity.

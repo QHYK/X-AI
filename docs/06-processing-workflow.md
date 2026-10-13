@@ -609,6 +609,16 @@ Code Top N selection
 Top 15 Events
 ```
 
+#### Ranking ID normalization
+
+Stage 3 只持久化本次候选集合中的唯一 ID。模型返回的 unknown / modified ID 与后续重复 ID 会被剔除并写入 runtime warning / diagnostics；保留其余合法 ID 的模型相对顺序。
+
+- Event Ranking 不补齐模型遗漏项；只要候选非空且仍有至少一个合法 ID，即可输出不超过 50 项的连续排名。
+- Digest 与 Long-form 将遗漏的合法候选按稳定输入顺序追加到末尾，形成覆盖全部候选的连续排名。
+- 若候选非空且模型没有返回任何合法 ID，该子 Ranking 失败；不会把未知 ID 写入业务数据。
+
+每次执行的 `run.json` 汇总 unknown / duplicate / deterministic fallback 计数；各 Ranking 的 `ranking-diagnostics.json` 保存具体 ID 和计数。即使子 Ranking 最终失败，已发生的 LLM attempts、retry、duration 与可用 token usage 也会保留在 `run.json` / `pipeline_runs.metrics`，失败详情写入 `ranking-failure-diagnostics.json`。
+
 ### 8.4 Cross-channel Exact Dedup
 
 Selected Events 确定后，Digest / Long-form 中与其属于**同一原文**的内容被排除。

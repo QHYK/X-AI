@@ -1,6 +1,6 @@
 /**
- * Stage 3 Source Digest 排名与单次修复调用层。
- * 初次结果不完整时仅修复 ID 排列，避免第二次调用把已完成的相对排序整体推翻。
+ * Stage 3 Source Digest 排名调用层。
+ * ID 异常由确定性 normalization 修复，不额外发起 repair 请求。
  */
 import {
   createLlmClient,
@@ -12,23 +12,19 @@ import {
 import {
   parseAndValidateStage3DigestOrderedIdsOutput,
   rebuildStage3DigestRankingFromOrderedIds,
+  normalizeStage3RankingOutput,
   stage3DigestOrderedIdsOutputJsonSchema,
   validateStage3DigestRankingIntegrity,
   type Stage3RankingIntegrity,
   type Stage3RankingOutput,
+  type Stage3RankingWarnings,
 } from "./stage3-contract.js";
 import {
   buildStage3DigestRankingInstructions,
   buildStage3DigestRankingUserPrompt,
   STAGE3_DIGEST_RANKING_PROMPT_VERSION,
-  type Stage3DigestRankingCandidate,
   type Stage3DigestRankingInput,
 } from "../prompts/stage3-digest-ranking.js";
-import {
-  buildStage3DigestRepairInstructions,
-  buildStage3DigestRepairUserPrompt,
-  type Stage3DigestRepairInput,
-} from "../prompts/stage3-digest-repair.js";
 
 export type Stage3DigestRankingLlmOptions = {
   provider?: LlmProvider;
@@ -99,6 +95,7 @@ export type Stage3DigestRankingSuccess = {
   elapsedMs: number;
   rawOutputText: string;
   diagnostics: Stage3DigestDiagnostics;
+  warnings: Stage3RankingWarnings;
 };
 
 export type Stage3DigestRankingFailure = {
@@ -152,8 +149,8 @@ export async function runStage3DigestRankingLlm(
   };
 
   try {
-    // Phase 1: initial full ranking. Retries are reserved for schema / transport
-    // failures only; an integrity failure is handed off to a single repair pass.
+    // Retries are reserved for schema / transport failures. ID anomalies are
+    // normalized deterministically after a structurally valid response.
     let initial: {
       output: Stage3RankingOutput;
       assignment: Stage3RankingIntegrity;
@@ -274,21 +271,41 @@ export async function runStage3DigestRankingLlm(
       };
     }
 
-  const noRepairSummary: Stage3DigestRepairSummary = {
-    attempted: false,
-    success: null,
-    before: initial.assignment,
-    beforeReturnedCount: initial.output.rankings.length,
-    after: null,
-  };
+    const normalized = normalizeStage3RankingOutput(initial.output, expectedIds);
+    if (!normalized.success) {
+      return {
+        success: false,
+        input,
+        assignment: normalized.integrity,
+        repair: null,
+        model,
+        promptVersion: STAGE3_DIGEST_RANKING_PROMPT_VERSION,
+        attempts: attemptsUsed,
+        elapsedMs: Date.now() - startedAt,
+        error: `Ranking integrity validation failed: ${normalized.integrity.errors.join("; ")}`,
+        rawOutputText: initial.rawOutputText,
+        diagnostics: {
+          initial: buildStage3DigestInitialDiagnostics(
+            input.category, expectedIds.length, startedAt, initial.finishReason,
+            initial.usage, initial.orderedIds, expectedIds, normalized.integrity,
+          ),
+          repair: null,
+        },
+      };
+    }
 
-  if (initial.assignment.passed) {
-  return {
+    return {
       success: true,
       input,
-      output: initial.output,
+      output: normalized.output,
       assignment: initial.assignment,
-      repair: noRepairSummary,
+      repair: {
+        attempted: false,
+        success: null,
+        before: initial.assignment,
+        beforeReturnedCount: initial.output.rankings.length,
+        after: null,
+      },
       model,
       promptVersion: STAGE3_DIGEST_RANKING_PROMPT_VERSION,
       responseId: initial.responseId,
@@ -308,281 +325,10 @@ export async function runStage3DigestRankingLlm(
         ),
         repair: null,
       },
-    };
-  }
-
-  // Phase 2: a single lightweight repair pass. It only fixes the permutation
-  // (missing / duplicate IDs); it does not re-rank the candidates.
-  const repair = await runStage3DigestRepair(client, model, timeoutMs, expectedIds, input, initial);
-  attemptsUsed += 1;
-
-  if (repair.success) {
-    return {
-      success: true,
-      input,
-      output: repair.output,
-      assignment: repair.assignment,
-      repair: {
-        attempted: true,
-        success: true,
-        before: initial.assignment,
-        beforeReturnedCount: initial.output.rankings.length,
-        after: repair.assignment,
-      },
-      model,
-      promptVersion: STAGE3_DIGEST_RANKING_PROMPT_VERSION,
-      responseId: initial.responseId,
-      attempts: attemptsUsed,
-      elapsedMs: Date.now() - startedAt,
-      rawOutputText: repair.rawOutputText,
-      diagnostics: {
-        initial: buildStage3DigestInitialDiagnostics(
-          input.category,
-          expectedIds.length,
-          startedAt,
-          initial.finishReason,
-          initial.usage,
-          initial.orderedIds,
-          expectedIds,
-          initial.assignment,
-        ),
-        repair: buildStage3DigestRepairDiagnostics(
-          input.category,
-          startedAt,
-          repair.rankedCandidatesCount,
-          repair.missingCandidatesCount,
-          repair.finishReason,
-          repair.usage,
-          repair.orderedIds,
-          repair.assignment,
-        ),
-      },
-    };
-  }
-
-  return {
-      success: false,
-      input,
-      assignment: repair.assignment ?? initial.assignment,
-      repair: {
-        attempted: true,
-        success: false,
-        before: initial.assignment,
-        beforeReturnedCount: initial.output.rankings.length,
-        after: repair.assignment,
-      },
-      model,
-      promptVersion: STAGE3_DIGEST_RANKING_PROMPT_VERSION,
-      attempts: attemptsUsed,
-      elapsedMs: Date.now() - startedAt,
-      error: repair.error,
-      rawOutputText: repair.rawOutputText ?? initial.rawOutputText,
-      diagnostics: {
-        initial: buildStage3DigestInitialDiagnostics(
-          input.category,
-          expectedIds.length,
-          startedAt,
-          initial.finishReason,
-          initial.usage,
-          initial.orderedIds,
-          expectedIds,
-          initial.assignment,
-        ),
-        repair: buildStage3DigestRepairDiagnostics(
-          input.category,
-          startedAt,
-          repair.rankedCandidatesCount,
-          repair.missingCandidatesCount,
-          repair.finishReason,
-          repair.usage,
-          repair.orderedIds,
-          repair.assignment,
-        ),
-      },
+      warnings: normalized.warnings,
     };
   } finally {
     await client.close();
-  }
-}
-
-type Stage3DigestRepairCallResult =
-  | {
-      success: true;
-      output: Stage3RankingOutput;
-      assignment: Stage3RankingIntegrity;
-      rawOutputText: string;
-      orderedIds: string[];
-      finishReason: string | null;
-      usage: Stage3DigestLlmUsage;
-      rankedCandidatesCount: number;
-      missingCandidatesCount: number;
-    }
-  | {
-      success: false;
-      assignment: Stage3RankingIntegrity | null;
-      error: string;
-      rawOutputText: string | null;
-      orderedIds: string[] | null;
-      finishReason: string | null;
-      usage: Stage3DigestLlmUsage;
-      rankedCandidatesCount: number;
-      missingCandidatesCount: number;
-    };
-
-/** 从首次输出提取有效排序与遗漏候选，构造不需要重新理解全部数据的修复输入。 */
-export function buildStage3DigestRepairInput(
-  input: Stage3DigestRankingInput,
-  initialOutput: Stage3RankingOutput,
-  assignment: Stage3RankingIntegrity,
-): Stage3DigestRepairInput {
-  const candidateById = new Map<string, Stage3DigestRankingCandidate>(
-    input.candidates.map((candidate) => [candidate.id, candidate]),
-  );
-  const validIds = new Set(input.candidates.map((candidate) => candidate.id));
-
-  const rankedCandidates: Stage3DigestRankingCandidate[] = [];
-  const seenIds = new Set<string>();
-  for (const ranking of initialOutput.rankings) {
-    if (!validIds.has(ranking.id) || seenIds.has(ranking.id)) {
-      continue;
-    }
-    seenIds.add(ranking.id);
-    const candidate = candidateById.get(ranking.id);
-    if (candidate) {
-      rankedCandidates.push(candidate);
-    }
-  }
-
-  const missingCandidates: Stage3DigestRankingCandidate[] = [];
-  for (const id of assignment.missingIds) {
-    const candidate = candidateById.get(id);
-    if (candidate) {
-      missingCandidates.push(candidate);
-    }
-  }
-
-  return {
-    category: input.category,
-    ranked_candidates: rankedCandidates,
-    missing_candidates: missingCandidates,
-    duplicate_ids: assignment.duplicateIds,
-  };
-}
-
-async function runStage3DigestRepair(
-  client: ReturnType<typeof createLlmClient>,
-  model: string,
-  timeoutMs: number,
-  expectedIds: string[],
-  input: Stage3DigestRankingInput,
-  initial: {
-    output: Stage3RankingOutput;
-    assignment: Stage3RankingIntegrity;
-    responseId: string;
-    rawOutputText: string;
-  },
-): Promise<Stage3DigestRepairCallResult> {
-  const repairInput = buildStage3DigestRepairInput(input, initial.output, initial.assignment);
-  const rankedCandidatesCount = repairInput.ranked_candidates.length;
-  const missingCandidatesCount = repairInput.missing_candidates.length;
-
-  try {
-    const response = await client.structured.create(
-      {
-        model,
-        instructions: buildStage3DigestRepairInstructions(),
-        input: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: buildStage3DigestRepairUserPrompt(repairInput),
-              },
-            ],
-          },
-        ],
-        max_output_tokens: 6_000,
-        store: false,
-        text: {
-          format: {
-            type: "json_schema",
-            name: "stage3_digest_repair",
-            description: "Structured Stage 3 Source Digest ranking repair output.",
-            schema: stage3DigestOrderedIdsOutputJsonSchema,
-            strict: true,
-          },
-        },
-      },
-      {
-        timeout: timeoutMs,
-      },
-    );
-
-    const rawOutputText = response.output_text;
-    const finishReason = response.finish_reason ?? null;
-    const usage: Stage3DigestLlmUsage = {
-      input_tokens: response.usage?.input_tokens ?? null,
-      output_tokens: response.usage?.output_tokens ?? null,
-      total_tokens: response.usage?.total_tokens ?? null,
-    };
-
-    const validation = parseAndValidateStage3DigestOrderedIdsOutput(rawOutputText);
-    if (!validation.success) {
-      return {
-        success: false,
-        assignment: null,
-        error: `Repair structured output validation failed: ${validation.errors.join("; ")}`,
-        rawOutputText,
-        orderedIds: null,
-        finishReason,
-        usage,
-        rankedCandidatesCount,
-        missingCandidatesCount,
-      };
-    }
-
-    const orderedIds = validation.output.ordered_ids;
-    const output = rebuildStage3DigestRankingFromOrderedIds(orderedIds);
-    const assignment = validateStage3DigestRankingIntegrity(output, expectedIds);
-    if (!assignment.passed) {
-      return {
-        success: false,
-        assignment,
-        error: `Repair integrity validation failed: ${assignment.errors.join("; ")}`,
-        rawOutputText,
-        orderedIds,
-        finishReason,
-        usage,
-        rankedCandidatesCount,
-        missingCandidatesCount,
-      };
-    }
-
-    return {
-      success: true,
-      output,
-      assignment,
-      rawOutputText,
-      orderedIds,
-      finishReason,
-      usage,
-      rankedCandidatesCount,
-      missingCandidatesCount,
-    };
-  } catch (error) {
-    const message = sanitizeLlmError(error instanceof Error ? error.message : String(error));
-    return {
-      success: false,
-      assignment: null,
-      error: `Repair LLM call failed: ${message}`,
-      rawOutputText: null,
-      orderedIds: null,
-      finishReason: null,
-      usage: { input_tokens: null, output_tokens: null, total_tokens: null },
-      rankedCandidatesCount,
-      missingCandidatesCount,
-    };
   }
 }
 
@@ -617,32 +363,6 @@ function buildStage3DigestInitialDiagnostics(
     total_tokens: usage.total_tokens,
     returned_count: orderedIds === null ? null : orderedIds.length,
     unique_valid_ids: uniqueValidIds,
-    missing_count: assignment === null ? null : assignment.missingIds.length,
-    duplicate_count: assignment === null ? null : assignment.duplicateIds.length,
-    invalid_count: assignment === null ? null : assignment.inventedIds.length,
-    duration_ms: Date.now() - startedAt,
-  };
-}
-
-function buildStage3DigestRepairDiagnostics(
-  category: string,
-  startedAt: number,
-  rankedCandidatesCount: number,
-  missingCandidatesCount: number,
-  finishReason: string | null,
-  usage: Stage3DigestLlmUsage,
-  orderedIds: string[] | null,
-  assignment: Stage3RankingIntegrity | null,
-): Stage3DigestRepairCallDiagnostics {
-  return {
-    category,
-    ranked_candidates_count: rankedCandidatesCount,
-    missing_candidates_count: missingCandidatesCount,
-    finish_reason: finishReason,
-    input_tokens: usage.input_tokens,
-    output_tokens: usage.output_tokens,
-    total_tokens: usage.total_tokens,
-    returned_count: orderedIds === null ? null : orderedIds.length,
     missing_count: assignment === null ? null : assignment.missingIds.length,
     duplicate_count: assignment === null ? null : assignment.duplicateIds.length,
     invalid_count: assignment === null ? null : assignment.inventedIds.length,

@@ -38,6 +38,7 @@ import type {
   Stage3EventRankedOutput,
   Stage3EventRankingInput,
   Stage3RankingOutput,
+  Stage3RankingWarnings,
 } from "./stage3-contract.js";
 import {
   deriveStage3EventRankings,
@@ -141,6 +142,21 @@ type Stage3RankingStatuses = {
   long_form: Stage3RankingStatus;
 };
 
+type Stage3RankingLlmResult =
+  | Stage3EventRankingResult
+  | Stage3DigestRankingResult
+  | Stage3LongFormRankingResult;
+
+class Stage3RankingFailureError extends Error {
+  constructor(
+    label: string,
+    readonly result: Extract<Stage3RankingLlmResult, { success: false }>,
+  ) {
+    super(`${label} failed: ${result.error}`);
+    this.name = "Stage3RankingFailureError";
+  }
+}
+
 type Stage3ResumeArtifact = {
   runDir: string;
   runId: string;
@@ -180,15 +196,19 @@ export type Stage3JobResult = {
   warningCount: number;
   duplicateRankingCount: number;
   missingRankingCount: number;
+  invalidRankingCount: number;
+  deterministicFallbackCount: number;
   inputSnapshotHashes: { event: string; digest: string; longForm: string } | null;
   rankingStatuses: Stage3RankingStatuses;
 };
 
-export function stage3WarningMetrics(result: Pick<Stage3JobResult, "warningCount" | "duplicateRankingCount" | "missingRankingCount">) {
+export function stage3WarningMetrics(result: Pick<Stage3JobResult, "warningCount" | "duplicateRankingCount" | "missingRankingCount" | "invalidRankingCount" | "deterministicFallbackCount">) {
   return {
     warning_count: result.warningCount,
     duplicate_ranking_count: result.duplicateRankingCount,
     missing_ranking_count: result.missingRankingCount,
+    invalid_ranking_count: result.invalidRankingCount,
+    deterministic_fallback_count: result.deterministicFallbackCount,
   };
 }
 
@@ -256,6 +276,8 @@ export async function processStage3(
   let warningCount = 0;
   let duplicateRankingCount = 0;
   let missingRankingCount = 0;
+  let invalidRankingCount = 0;
+  let deterministicFallbackCount = 0;
 
   try {
     // Runtime is retained as optional lineage only. DB event_groups is the business input.
@@ -288,8 +310,8 @@ export async function processStage3(
       rankingStatuses.event = "skipped";
       eventReviewRunId = resume!.eventReviewRunId;
     } else {
-      ({ warningCount, duplicateRankingCount, missingRankingCount } = addRankingWarnings(
-        { warningCount, duplicateRankingCount, missingRankingCount }, eventRanking.warnings,
+      ({ warningCount, duplicateRankingCount, missingRankingCount, invalidRankingCount, deterministicFallbackCount } = addRankingWarnings(
+        { warningCount, duplicateRankingCount, missingRankingCount, invalidRankingCount, deterministicFallbackCount }, eventRanking.warnings,
       ));
       llmCallCount += eventRanking.calls;
       retryCount += eventRanking.retries;
@@ -390,8 +412,8 @@ export async function processStage3(
       }
 
       const result = await rankDigest(input, { model });
-      ({ warningCount, duplicateRankingCount, missingRankingCount } = addRankingWarnings(
-        { warningCount, duplicateRankingCount, missingRankingCount }, result.warnings,
+      ({ warningCount, duplicateRankingCount, missingRankingCount, invalidRankingCount, deterministicFallbackCount } = addRankingWarnings(
+        { warningCount, duplicateRankingCount, missingRankingCount, invalidRankingCount, deterministicFallbackCount }, result.warnings,
       ));
       llmCallCount += result.calls;
       retryCount += result.retries;
@@ -428,8 +450,8 @@ export async function processStage3(
     if (reusableLongForm) {
       rankingStatuses.long_form = "skipped";
     } else {
-      ({ warningCount, duplicateRankingCount, missingRankingCount } = addRankingWarnings(
-        { warningCount, duplicateRankingCount, missingRankingCount }, longFormRanking.warnings,
+      ({ warningCount, duplicateRankingCount, missingRankingCount, invalidRankingCount, deterministicFallbackCount } = addRankingWarnings(
+        { warningCount, duplicateRankingCount, missingRankingCount, invalidRankingCount, deterministicFallbackCount }, longFormRanking.warnings,
       ));
       llmCallCount += longFormRanking.calls;
       retryCount += longFormRanking.retries;
@@ -439,8 +461,11 @@ export async function processStage3(
     await writeJson(join(longFormDir, "ranking-output.json"), longFormRanking.output);
     await writeJson(join(longFormDir, "ranking-diagnostics.json"), {
       input_count: longFormInput.candidates.length,
+      model_valid_id_count: longFormRanking.warnings.modelValidIdCount,
       duplicate_ids: longFormRanking.warnings.duplicateIds,
+      invalid_ids: longFormRanking.warnings.inventedIds,
       missing_ids: longFormRanking.warnings.missingIds,
+      fallback_id_count: longFormRanking.warnings.fallbackIdCount,
       rank_normalization_count: longFormRanking.warnings.rankNormalizationCount,
     });
 
@@ -492,6 +517,8 @@ export async function processStage3(
       warningCount,
       duplicateRankingCount,
       missingRankingCount,
+      invalidRankingCount,
+      deterministicFallbackCount,
       inputSnapshotHashes,
       rankingStatuses,
     });
@@ -517,11 +544,29 @@ export async function processStage3(
       warningCount,
       duplicateRankingCount,
       missingRankingCount,
+      invalidRankingCount,
+      deterministicFallbackCount,
       inputSnapshotHashes,
       rankingStatuses,
     };
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
+    if (caught instanceof Stage3RankingFailureError) {
+      const failureMetrics = stage3RankingFailureMetrics(caught.result);
+      llmCallCount += failureMetrics.calls;
+      retryCount += failureMetrics.retries;
+      llmDurationMs += failureMetrics.durationMs;
+      ({ tokenUsage, hasMissingTokenUsage } = addStage3TokenUsage(
+        tokenUsage,
+        hasMissingTokenUsage,
+        failureMetrics.tokenUsage,
+      ));
+      ({ warningCount, duplicateRankingCount, missingRankingCount, invalidRankingCount, deterministicFallbackCount } = addRankingWarnings(
+        { warningCount, duplicateRankingCount, missingRankingCount, invalidRankingCount, deterministicFallbackCount },
+        rankingFailureWarnings(caught.result),
+      ));
+      await writeJson(join(runDir, "ranking-failure-diagnostics.json"), rankingFailureDiagnostics(caught.result));
+    }
     const failedRanking = Object.entries(rankingStatuses).find(([, status]) => status === "pending")?.[0] as keyof Stage3RankingStatuses | undefined;
     if (failedRanking) rankingStatuses = { ...rankingStatuses, [failedRanking]: "failed" };
     // A persistence error is never represented as partial: it is not safe to
@@ -561,6 +606,8 @@ export async function processStage3(
       warningCount,
       duplicateRankingCount,
       missingRankingCount,
+      invalidRankingCount,
+      deterministicFallbackCount,
       inputSnapshotHashes,
       rankingStatuses,
     });
@@ -586,6 +633,8 @@ export async function processStage3(
       warningCount,
       duplicateRankingCount,
       missingRankingCount,
+      invalidRankingCount,
+      deterministicFallbackCount,
       inputSnapshotHashes,
       rankingStatuses,
     };
@@ -845,13 +894,15 @@ async function rankEvents(
   retries: number;
   durationMs: number;
   tokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | null;
-  diagnostics: {
-    input_event_count: number;
-    returned_ranking_count: number;
-    duplicate_ids: string[];
-    invalid_ids: string[];
-  };
-  warnings: { duplicateIds: string[]; missingIds: string[]; rankNormalizationCount: number };
+    diagnostics: {
+      input_event_count: number;
+      returned_ranking_count: number;
+      model_valid_id_count: number;
+      duplicate_ids: string[];
+      invalid_ids: string[];
+      fallback_ids: string[];
+    };
+  warnings: Stage3RankingWarnings;
 }> {
   if (input.events.length === 0) {
     return {
@@ -863,10 +914,12 @@ async function rankEvents(
       diagnostics: {
         input_event_count: 0,
         returned_ranking_count: 0,
+        model_valid_id_count: 0,
         duplicate_ids: [],
         invalid_ids: [],
+        fallback_ids: [],
       },
-      warnings: { duplicateIds: [], missingIds: [], rankNormalizationCount: 0 },
+      warnings: emptyRankingWarnings(),
     };
   }
 
@@ -881,8 +934,10 @@ async function rankEvents(
     diagnostics: {
       input_event_count: input.events.length,
       returned_ranking_count: result.rankings.rankings.length,
+      model_valid_id_count: result.warnings.modelValidIdCount,
       duplicate_ids: result.assignment.duplicateIds,
       invalid_ids: result.assignment.inventedIds,
+      fallback_ids: result.warnings.missingIds,
     },
     warnings: result.warnings,
   };
@@ -902,6 +957,8 @@ async function rankDigest(
     input_count: number;
     returned_count: number;
     missing_count: number;
+    model_valid_id_count: number;
+    fallback_id_count: number;
     duplicate_ids: string[];
     invalid_ids: string[];
     repair_attempted: boolean;
@@ -926,7 +983,7 @@ async function rankDigest(
     repair_returned_count: number | null;
     repair_duration_ms: number | null;
   };
-  warnings: { duplicateIds: string[]; missingIds: string[]; rankNormalizationCount: number };
+  warnings: Stage3RankingWarnings;
 }> {
   const result = await runStage3DigestRankingLlm(input, options);
   if (!result.success) {
@@ -957,6 +1014,7 @@ async function rankDigest(
       diagnostics: {
         category: input.category, input_count: input.candidates.length,
         returned_count: initialDiag.returned_count ?? 0, missing_count: initialDiag.missing_count ?? 0,
+        model_valid_id_count: recovered.warnings.modelValidIdCount, fallback_id_count: recovered.warnings.fallbackIdCount,
         duplicate_ids: result.assignment?.duplicateIds ?? [], invalid_ids: result.assignment?.inventedIds ?? [],
         repair_attempted: result.repair?.attempted ?? false, repair_success: result.repair?.success ?? null,
         repaired_count: recovered.output.rankings.length, repair_missing_ids: [], repair_duplicate_ids: [], repair_invalid_ids: [],
@@ -990,6 +1048,8 @@ async function rankDigest(
       input_count: input.candidates.length,
       returned_count: result.repair.beforeReturnedCount,
       missing_count: result.repair.before.missingIds.length,
+      model_valid_id_count: result.warnings.modelValidIdCount,
+      fallback_id_count: result.warnings.fallbackIdCount,
       duplicate_ids: result.repair.before.duplicateIds,
       invalid_ids: result.repair.before.inventedIds,
       repair_attempted: result.repair.attempted,
@@ -1014,20 +1074,16 @@ async function rankDigest(
       repair_returned_count: repairDiag?.returned_count ?? null,
       repair_duration_ms: repairDiag?.duration_ms ?? null,
     },
-    warnings: {
-      duplicateIds: result.repair.before.duplicateIds,
-      missingIds: result.repair.before.missingIds,
-      rankNormalizationCount: 0,
-    },
+    warnings: result.warnings,
   };
 }
 
 async function rankLongForm(
   input: Stage3LongFormRankingInput,
   options: { model: string },
-): Promise<{ output: Stage3RankingOutput; calls: number; retries: number; durationMs: number; tokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | null; warnings: { duplicateIds: string[]; missingIds: string[]; rankNormalizationCount: number } }> {
+): Promise<{ output: Stage3RankingOutput; calls: number; retries: number; durationMs: number; tokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | null; warnings: Stage3RankingWarnings }> {
   if (input.candidates.length === 0) {
-    return { output: { rankings: [] }, calls: 0, retries: 0, durationMs: 0, tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }, warnings: { duplicateIds: [], missingIds: [], rankNormalizationCount: 0 } };
+    return { output: { rankings: [] }, calls: 0, retries: 0, durationMs: 0, tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }, warnings: emptyRankingWarnings() };
   }
 
   const result = await runStage3LongFormRankingLlm(input, options);
@@ -1036,13 +1092,22 @@ async function rankLongForm(
 }
 
 function addRankingWarnings(
-  current: { warningCount: number; duplicateRankingCount: number; missingRankingCount: number },
-  warnings: { duplicateIds: string[]; missingIds: string[]; rankNormalizationCount: number },
+  current: { warningCount: number; duplicateRankingCount: number; missingRankingCount: number; invalidRankingCount: number; deterministicFallbackCount: number },
+  warnings: Stage3RankingWarnings,
 ) {
   return {
-    warningCount: current.warningCount + warnings.duplicateIds.length + warnings.missingIds.length + warnings.rankNormalizationCount,
+    warningCount: current.warningCount + warnings.duplicateIds.length + warnings.missingIds.length + warnings.inventedIds.length + warnings.rankNormalizationCount,
     duplicateRankingCount: current.duplicateRankingCount + warnings.duplicateIds.length,
     missingRankingCount: current.missingRankingCount + warnings.missingIds.length,
+    invalidRankingCount: current.invalidRankingCount + warnings.inventedIds.length,
+    deterministicFallbackCount: current.deterministicFallbackCount + warnings.fallbackIdCount,
+  };
+}
+
+function emptyRankingWarnings(): Stage3RankingWarnings {
+  return {
+    duplicateIds: [], missingIds: [], inventedIds: [], modelValidIdCount: 0,
+    fallbackIdCount: 0, rankNormalizationCount: 0,
   };
 }
 
@@ -1051,7 +1116,7 @@ function assertRankingSuccess(
   result: Stage3EventRankingResult | Stage3DigestRankingResult | Stage3LongFormRankingResult,
 ): asserts result is Extract<typeof result, { success: true }> {
   if (!result.success) {
-    throw new Error(`${label} failed: ${result.error}`);
+    throw new Stage3RankingFailureError(label, result);
   }
 }
 
@@ -1072,6 +1137,68 @@ function rankingMetrics(result: {
 }
 
 type Stage3TokenUsage = { inputTokens: number; outputTokens: number; totalTokens: number };
+
+export function stage3RankingFailureMetrics(
+  result: Extract<Stage3RankingLlmResult, { success: false }>,
+): { calls: number; retries: number; durationMs: number; tokenUsage: Stage3TokenUsage | null } {
+  const tokenUsage = "diagnostics" in result
+    ? sumKnownStage3TokenUsages([
+      toStage3TokenUsage(
+        result.diagnostics.initial.input_tokens,
+        result.diagnostics.initial.output_tokens,
+        result.diagnostics.initial.total_tokens,
+      ),
+      result.diagnostics.repair
+        ? toStage3TokenUsage(
+          result.diagnostics.repair.input_tokens,
+          result.diagnostics.repair.output_tokens,
+          result.diagnostics.repair.total_tokens,
+        )
+        : { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    ])
+    : result.tokenUsage;
+  return {
+    calls: result.attempts,
+    retries: Math.max(0, result.attempts - 1),
+    durationMs: result.elapsedMs,
+    tokenUsage,
+  };
+}
+
+function rankingFailureWarnings(
+  result: Extract<Stage3RankingLlmResult, { success: false }>,
+): Stage3RankingWarnings {
+  const assignment = result.assignment;
+  const expectedCount = "events" in result.input
+    ? result.input.events.length
+    : result.input.candidates.length;
+  return {
+    duplicateIds: assignment?.duplicateIds ?? [],
+    missingIds: assignment?.missingIds ?? [],
+    inventedIds: assignment?.inventedIds ?? [],
+    modelValidIdCount: assignment ? expectedCount - assignment.missingIds.length : 0,
+    fallbackIdCount: 0,
+    rankNormalizationCount: 0,
+  };
+}
+
+function rankingFailureDiagnostics(
+  result: Extract<Stage3RankingLlmResult, { success: false }>,
+) {
+  const warnings = rankingFailureWarnings(result);
+  return {
+    ranking: "events" in result.input ? "event" : "diagnostics" in result ? "digest" : "long_form",
+    attempts: result.attempts,
+    retries: Math.max(0, result.attempts - 1),
+    llm_duration_ms: result.elapsedMs,
+    model_valid_id_count: warnings.modelValidIdCount,
+    duplicate_ids: warnings.duplicateIds,
+    invalid_ids: warnings.inventedIds,
+    missing_ids: warnings.missingIds,
+    fallback_id_count: 0,
+    error: result.error,
+  };
+}
 
 function addStage3TokenUsage(current: Stage3TokenUsage, missing: boolean, next: Stage3TokenUsage | null): { tokenUsage: Stage3TokenUsage; hasMissingTokenUsage: boolean } {
   if (next === null) return { tokenUsage: current, hasMissingTokenUsage: true };
@@ -1567,6 +1694,8 @@ async function writeRunJson(
     warningCount: number;
     duplicateRankingCount: number;
     missingRankingCount: number;
+    invalidRankingCount: number;
+    deterministicFallbackCount: number;
     inputSnapshotHashes: Stage3JobResult["inputSnapshotHashes"];
     rankingStatuses: Stage3RankingStatuses;
   },
@@ -1608,6 +1737,8 @@ async function writeRunJson(
     warning_count: value.warningCount,
     duplicate_ranking_count: value.duplicateRankingCount,
     missing_ranking_count: value.missingRankingCount,
+    invalid_ranking_count: value.invalidRankingCount,
+    deterministic_fallback_count: value.deterministicFallbackCount,
     input_snapshot_hashes: value.inputSnapshotHashes && {
       event: value.inputSnapshotHashes.event,
       digest: value.inputSnapshotHashes.digest,
@@ -1698,8 +1829,15 @@ async function loadReusableEventRanking(
     return {
       output: deriveStage3EventRankings(normalized.output), calls: 0, retries: 0, durationMs: 0,
       tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-      diagnostics: { input_event_count: input.events.length, returned_ranking_count: output.rankings.length, duplicate_ids: [], invalid_ids: [] },
-      warnings: { duplicateIds: [], missingIds: [], rankNormalizationCount: 0 },
+      diagnostics: {
+        input_event_count: input.events.length,
+        returned_ranking_count: output.rankings.length,
+        model_valid_id_count: output.rankings.length,
+        duplicate_ids: [],
+        invalid_ids: [],
+        fallback_ids: [],
+      },
+      warnings: emptyRankingWarnings(),
     };
   } catch (error) {
     if (isMissingPathError(error) || error instanceof SyntaxError) return null;
@@ -1738,7 +1876,7 @@ async function loadReusableLongFormRanking(
     return {
       output: normalized.output, calls: 0, retries: 0, durationMs: 0,
       tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-      warnings: { duplicateIds: [], missingIds: [], rankNormalizationCount: 0 },
+      warnings: emptyRankingWarnings(),
     };
   } catch (error) {
     if (isMissingPathError(error) || error instanceof SyntaxError) return null;
