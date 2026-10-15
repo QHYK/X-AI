@@ -12,7 +12,7 @@ MVP 采用简单的三层架构：
 Data Layer → Processing Layer → Presentation Layer
 ```
 
-MVP 保持单一 Next.js + PostgreSQL 应用，不引入微服务、Queue、Workflow Engine 或复杂 Agent Framework。
+MVP 保持单一 Next.js + PostgreSQL 应用，不引入微服务、Queue 或 Workflow Engine。Discovery 使用限定范围的单 Agent SDK；与 Daily Processing 是两个独立任务。Daily 执行规则见 `06-processing-workflow.md`，Discovery 执行规则见 `06a-discovery-workflow.md`，其技术实现边界见 `04a-discovery-technical-spec.md`。
 
 ### 1.1 Data Layer
 
@@ -102,6 +102,8 @@ Stage 4 可在确实缺少必要外部上下文时使用 Web Search；默认仍�
 
 具体 AI 判断语义以 `03-ai-workflow-spec.md` 为准；Daily Scope、执行顺序、重试、幂等、持久化和 lineage 等执行语义以 `06-processing-workflow.md` 为准。
 
+**In-depth Discovery 是独立 Workflow**，消费 Daily Brief 数据，不属于 Stage 1–4；业务执行语义见 `06a-discovery-workflow.md`，技术实现见 `04a-discovery-technical-spec.md`。
+
 ### 1.3 Presentation Layer
 
 X-AI-field 负责生成和提供 publish-ready 数据，不负责最终用户侧 Daily Brief 页面。
@@ -123,12 +125,12 @@ X-AI-field 同时包含 Internal Dashboard，用于运行观察、Daily Job Repo
 - Runtime：Next.js + TypeScript
 - Database：PostgreSQL / Supabase
 - ORM：Drizzle ORM
-- AI Integration：共享 LLM compatibility layer
+- AI Integration：Daily / 常规结构化调用使用共享 LLM compatibility layer；Discovery 自适应探索使用 OpenAI Agents SDK（TypeScript）
 - Supported Providers：OpenAI / DeepSeek / Kimi
 - Structured Output：Provider 输出 + Application Schema Validation
-- External Retrieval：可选 `web_search` in Stage 4
+- External Retrieval：Daily Stage 4 可选 `web_search`；Discovery 优先使用 Agents SDK 托管 Web Search
 - Scheduling：Cron / Scheduled Job
-- Runtime Artifacts：本地文件系统，Git ignored
+- Runtime Artifacts：Daily 等既有流程使用本地文件系统（Git ignored）；Discovery Trace 优先存 PostgreSQL
 
 ---
 
@@ -142,9 +144,10 @@ Production 数据主要包括：
 Production Content Data
 Review / Feedback Data
 Model Evaluation Data
+Discovery Runs / Candidates / Trace Data
 ```
 
-数据库负责持久化业务状态；`runtime/` 只保存运行级 artifacts，不替代数据库。
+数据库负责持久化业务状态；Daily 的 `runtime/` 只保存运行级 artifacts，不替代数据库。Discovery 的执行 Trace 使用 Agents SDK Tracing 扩展接口写入 PostgreSQL，具体见 `04a-discovery-technical-spec.md`。
 
 详细表结构、字段、关系、约束和索引定义见 `05-data-model.md`。
 
@@ -152,7 +155,7 @@ Model Evaluation Data
 
 ## 4. Processing Workflow
 
-Production Workflow、Human Review 与 Model Evaluation 是三个职责不同的流程：
+Daily Production Workflow、Human Review 与 Model Evaluation 是既有的三个职责不同的流程；另有独立的 In-depth Discovery Workflow，具体见 `06a-discovery-workflow.md`。
 
 ```mermaid
 flowchart TD
@@ -194,7 +197,7 @@ Model Evaluation 是独立的观察与比较流程：
 
 ## 5. LLM Integration
 
-LLM Integration 通过共享 compatibility layer 与业务逻辑解耦：
+常规 LLM Integration 通过共享 compatibility layer 与业务逻辑解耦。Discovery 的 Agent Loop 单独通过 Agents SDK 接入；二者共用业务契约，不要求复用同一个 SDK Client：
 
 ```mermaid
 flowchart LR
@@ -206,6 +209,8 @@ flowchart LR
 
 LLM 的 Runtime Prompt 位于 `src/prompts/`，Prompt 与 Structured Output Contract 见 `07-prompt-spec.md`
 
+
+Discovery 的 Agent 工具调用、模型兼容性与 Trace 细节由 `04a-discovery-technical-spec.md` 定义。
 
 ### 5.1 Structured Output 边界
 
@@ -323,6 +328,7 @@ X-AI-field/
 │   ├── db/
 │   ├── lib/
 │   ├── processing/
+│   ├── discovery/     # In-depth Discovery 独立模块
 │   └── prompts/
 ├── scripts/
 ├── drizzle/
@@ -332,8 +338,10 @@ X-AI-field/
 │   ├── 02-workflow-overview.md
 │   ├── 03-ai-workflow-spec.md
 │   ├── 04-technical-spec.md
+│   ├── 04a-discovery-technical-spec.md
 │   ├── 05-data-model.md
 │   ├── 06-processing-workflow.md
+│   ├── 06a-discovery-workflow.md
 │   ├── 07-prompt-spec.md
 │   ├── 08-source-list.md
 │   └── 09-operations.md
@@ -346,7 +354,8 @@ Technical Spec 维护目录级职责，不需要镜像每一个具体 Source Fil
 ### 8.2 Module Boundaries
 
 - `collectors`：外部数据采集与标准化。
-- `processing`：Production Processing、Review / Evaluation Services 与相关 Persistence Orchestration。
+- `processing`：Daily Production Processing、Review / Evaluation Services 与相关 Persistence Orchestration。
+- `discovery`：独立 Discovery Workflow 编排、Agent、候选验证与持久化协调；不依赖 Daily Stage 内部执行入口。
 - `prompts`：Runtime LLM Prompts。
 - `db`：Database Schema 与 Connection。
 - `lib`：共享 Application Logic 与 API Composition Helpers。
@@ -390,7 +399,8 @@ db / llm / external adapters
 - 保留足够信息支持针对性 Retry 与 Diagnosis；
 - 不通过 Silent Fallback 隐藏异常。
 
-具体 Step Retry / Recovery 语义见 `06-processing-workflow.md`；Operational Recovery Commands 见 `09-operations.md`。
+Daily 的 Step Retry / Recovery 语义见 `06-processing-workflow.md`；
+Discovery 的失败与重跑语义见 `06a-discovery-workflow.md`；Operational Commands 见 `09-operations.md`。
 
 ### 8.6 Testing Boundary
 
@@ -432,4 +442,6 @@ Internal Dashboard 可以读取 Runtime Artifacts，用于 Daily Job Report 与�
 
 Runtime Artifacts 可以在明确需要时辅助 Debug 与 Recovery Analysis，但 Recovery Semantics 应由 Processing Workflow 定义，而不是依赖未文档化的文件系统约定。
 
-具体执行语义与 Operational Procedures 见 `06-processing-workflow.md` 和 `09-operations.md`。
+Daily 执行语义见 `06-processing-workflow.md`；
+Discovery 执行语义见 `06a-discovery-workflow.md`；
+操作规程见 `09-operations.md`。

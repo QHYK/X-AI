@@ -321,3 +321,132 @@ Source Digest 查询后续如有性能需求，再增加：
 source_id + date
 ```
 等组合索引。不要提前优化。
+
+## 11 Discovery 数据模型（设计稿 v0.2）
+
+Discovery 与 Daily Production 独立。首版新增以下四张表，不修改既有 `feedback`、`pipeline_runs` 或 `raw_articles`。执行流程见 `06a-discovery-workflow.md`，技术边界见 `04a-discovery-technical-spec.md`。
+
+### 11.1 `discovery_runs`
+
+每次执行单独创建 Run；人工触发 Open Discovery 创建新的 Run，并通过 `parent_run_id` 关联原常规 Run。相同输入允许不同输出。
+
+| Field | Type | Constraint / Notes |
+|---|---|---|
+| `id` | uuid | Primary Key |
+| `parent_run_id` | uuid | nullable, FK → `discovery_runs.id`；人工 Open 或单条 Lead 执行时指向原常规 Run |
+| `source_lead_id` | text | nullable；`single_lead` 必填，引用原 Run 的 `selection_output.leads[].leadId`（应用层校验） |
+| `run_type` | text | NOT NULL；`regular` / `open` / `single_lead` |
+| `trigger_source` | text | NOT NULL；`schedule` / `manual` |
+| `status` | text | NOT NULL；`pending` / `running` / `completed` / `partial` / `failed` / `blocked` |
+| `end_reason` | text | 运行中为 NULL；`completed` 对应 `candidates_found`（有候选）或 `no_candidates`（无合格候选）；异常情况如 `timeout` / `budget_exhausted` / `upstream_not_ready` / `error` |
+| `window_start_date` | date | nullable；常规 Run 目标 Daily 日期范围起点 |
+| `window_end_date` | date | nullable；常规 Run 目标 Daily 日期范围终点 |
+| `input_content_ids` | jsonb | nullable；实际送入 Topic Selection 的 Daily 内容 ID 列表（按 Event / Digest / Long-form 分类），不复制正文 |
+| `selection_output` | jsonb | nullable；Topic Selection 的结构化输出（Direct + Topic 总数最多 8）；Code 为每条 Lead 分配稳定 `leadId`，保留 D2 顺序和类型 |
+| `config_snapshot` | jsonb | nullable；模型、Prompt 版本、输入规则版本、资源限制、当次适用的 Memory，以及人工 Open 的补充说明 / 审核上下文等必要配置 |
+| `started_at` | timestamptz | nullable |
+| `finished_at` | timestamptz | nullable |
+| `error_summary` | text | nullable |
+| `created_at` | timestamptz | NOT NULL |
+| `updated_at` | timestamptz | NOT NULL |
+
+- 日期字段记录**计划输入窗口**，不从实际执行时间推导；`input_content_ids` 记录当次选入的内容 ID，避免复制 Daily 正文。仅凭 ID 无法精确复原后来被修改的内容，首版接受此限制。
+- 上游 Daily 未就绪可记录 `blocked` 和 `upstream_not_ready`，不冒充已完成 Discovery。
+- 人工 Open 或 `single_lead` 均不重新执行 Topic Selection；单条执行通过 `parent_run_id + source_lead_id` 定位原线索，Direct 复用 D4、Topic 复用 D3；原运行结果不覆盖。
+- 各 Lead 的执行状态及关联结果首版通过 Run 的 `selection_output`、关联的 `single_lead` Run 和候选记录查询计算，不新增 Lead 表或冗余状态字段。
+- 自动 Open 仅在常规 Direct / Topic 均正常完成且合计 0 篇合格作品时触发；分支失败不自动重跑、不自动 Open。
+- `status` 与 `end_reason` 分开：例如 `partial + timeout`、`completed + candidates_found` 与 `completed + no_candidates` 的业务含义不同；`end_reason` 只在运行结束时填写。
+
+### 11.2 `discovery_trace_spans`
+
+记录 Agent SDK Trace / Span，支持按 Run 查看 Agent 内实际搜索、阅读、模型调用和错误。**此表是执行证据，不作为候选审核状态的 Source of Truth。**
+
+| Field | Type | Constraint / Notes |
+|---|---|---|
+| `id` | uuid | Primary Key；本地数据库标识 |
+| `run_id` | uuid | NOT NULL, FK → `discovery_runs.id` |
+| `trace_id` | text | NOT NULL；SDK Trace ID 或应用统一 Trace ID |
+| `span_id` | text | NOT NULL；SDK Span ID 或应用生成 ID |
+| `parent_span_id` | text | nullable；同一 Trace 中的父 Span |
+| `span_type` | text | NOT NULL；如 agent / generation / function / custom，保留 SDK 原始类型 |
+| `name` | text | nullable；便于 Dashboard 显示步骤 |
+| `started_at` | timestamptz | nullable |
+| `ended_at` | timestamptz | nullable |
+| `status` | text | nullable；成功、失败等展示用状态 |
+| `payload` | jsonb | nullable；经过敏感信息过滤的 SDK 原生结构或自定义业务数据 |
+| `created_at` | timestamptz | NOT NULL |
+
+- `UNIQUE(trace_id, span_id)`；不预设 SDK 的深层 JSON 字段结构。`parent_span_id` 仅作逻辑关联，不强制自引用 FK。
+- SDK Tracing Processor 负责接收 / 持久化 SDK Span。首版不要求将普通 LLM Client 与 Code 检查接入 SDK Span；Topic Selection 输出、最终候选与运行结果等必要业务信息分别由 `discovery_runs`、`discovery_candidates` 等业务表保存。
+- 不在每个 Span 重复保存完整抓取正文；只保存真实 URL、抓取状态、必要阅读证据和错误摘要。Token 信息若 SDK 返回，可保留在 `payload`，首版不强制独立列。
+- Processor 的具体生命周期、缓冲、flush、导出策略以开发时 SDK 实验结果为准。
+
+### 11.3 `discovery_candidates`
+
+记录进入实质阅读 / 评价的候选作品，包括最终未入选者；不要求把每条搜索结果都落为 Candidate。
+
+| Field | Type | Constraint / Notes |
+|---|---|---|
+| `id` | uuid | Primary Key |
+| `run_id` | uuid | NOT NULL, FK → `discovery_runs.id` |
+| `discovery_path` | text | NOT NULL；`direct` / `topic` / `open` |
+| `source_content_id` | uuid | nullable；Direct 路径关联原 Daily 内容时使用；实际目标表在实现前核实 |
+| `topic_context` | jsonb | nullable；知识探索问题、来源 Daily IDs、News Context 等 |
+| `url` | text | NOT NULL；作品原始 URL |
+| `normalized_url` | text | nullable；去重用规范化 URL |
+| `title` | text | nullable |
+| `author` | text | nullable |
+| `content_type` | text | nullable；`article` / `video` / `podcast` |
+| `published_at` | timestamptz | nullable |
+| `estimated_duration_minutes` | integer | nullable |
+| `evidence` | jsonb | nullable；实际阅读来源、正文获取程度、引用证据、局限 |
+| `evaluation` | jsonb | nullable；编辑判断、入选或淘汰理由 |
+| `status` | text | NOT NULL；`discovered` / `evaluated` / `selected` / `rejected` / `unverifiable` |
+| `created_at` | timestamptz | NOT NULL |
+| `updated_at` | timestamptz | NOT NULL |
+
+- 一篇作品可在不同 Run 或不同路径中再次发现，不设置全局 URL UNIQUE；在**同一次审核汇总**时由 Code 进行去重。
+- `source_content_id` 只适用于确有单条 Daily 内容来源的情况；Event 与其他来源 ID 的具体映射须在实现时核实，不强制复用 `raw_articles`。
+- `evidence` 保存实际获取的内容证据及其来源，不把 Agent 的自然语言声明当成已阅读证据。
+- 若某篇作品由多个路径发现，可在 `topic_context` / `evidence` 中保留额外来源关联；首版不增加候选来源关系表。
+
+### 11.4 `in_depth_candidates`
+
+正式进入人工审核的作品。与 `discovery_candidates` 分离，避免把探索记录误当作待上架内容。
+
+| Field | Type | Constraint / Notes |
+|---|---|---|
+| `id` | uuid | Primary Key |
+| `discovery_candidate_id` | uuid | NOT NULL, FK → `discovery_candidates.id` |
+| `review_status` | text | NOT NULL；`pending` / `approved` / `rejected` |
+| `editorial_notes` | text | nullable；人工审核意见 |
+| `editorial_overrides` | jsonb | nullable；人工修改后的必要展示 / 编辑字段 |
+| `reviewed_at` | timestamptz | nullable |
+| `created_at` | timestamptz | NOT NULL |
+| `updated_at` | timestamptz | NOT NULL |
+
+- `UNIQUE(discovery_candidate_id)`；同一候选不重复进入审核队列。
+- 常规路径每次最多 Direct 3 篇 + Topic 3 篇；自动或人工 Open 每次最多 3 篇。数量由 Workflow 校验，不通过数据库复杂 CHECK 实现。
+- 人工触发 Open 后，新增 Run 和审核候选，不覆盖原有记录。
+- 审核通过不代表已经自动发布；最终上架内容与既有 X-field 内容库的映射留待上架流程 Spec 确定。
+- 本轮不改 `feedback`；明确要求长期记住的偏好由独立 Memory 流程处理。
+
+### 11.5 初始索引与实现前核实项
+
+```text
+discovery_runs(parent_run_id)
+discovery_runs(status, started_at DESC)
+discovery_trace_spans(run_id, started_at)
+discovery_trace_spans(trace_id, span_id) UNIQUE
+discovery_candidates(run_id, discovery_path)
+discovery_candidates(normalized_url)
+in_depth_candidates(discovery_candidate_id) UNIQUE
+in_depth_candidates(review_status, created_at DESC)
+```
+
+实现前核实：
+
+1. Daily API 实际使用的 Event / Digest / Long-form 标识及 `input_content_ids` 的分类结构；Event 可覆盖窗口内全部 Event。
+2. SDK Trace / Span 原生字段与 `TracingProcessor` 生命周期；上述列名是**业务持久化设计**，不代表 SDK 已提供完全相同字段。
+3. 人工审核 UI 是否需要独立的审核批次；首版优先通过 Candidate → Run → Parent Run 关联，不额外建表。
+4. 最终上架的目标数据表和审核状态迁移；当前只定义进入待审核队列，不擅自改动既有内容库。

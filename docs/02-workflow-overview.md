@@ -5,7 +5,9 @@
 具体规则分别由对应 Source of Truth 定义：
 
 - AI 判断语义 → `03-ai-workflow-spec.md`
-- Production Pipeline 执行、scope、retry、persistence、lineage → `06-processing-workflow.md`
+- Daily Production Pipeline 执行、scope、retry、persistence、lineage → `06-processing-workflow.md`
+- Discovery 执行流程、分支与验证规则 → `06a-discovery-workflow.md`
+- 数据结构与关联 → `05-data-model.md`
 - Prompt / Structured Output → `07-prompt-spec.md`
 - Commands / Tests / Diagnostics → `09-operations.md`
 
@@ -13,21 +15,24 @@
 
 ## 1. System Overview
 
-X-AI-field 当前包含三条主要工作流：
+X-AI-field 包含两条独立的内容生产工作流，以及 Human Review 和 Model Evaluation：
 
 ```mermaid
 flowchart LR
-    P["Production Workflow<br/>生成正式 Daily Brief"]
-    H["Human Review<br/>检查排序 · 调整展示 · Feedback"]
+    P["Daily Production Workflow<br/>生成正式 Daily Brief"]
+    D["In-depth Discovery<br/>发现深度内容候选"]
+    H["Human Review<br/>检查排序 · 调整展示 · Feedback · 审核与展示决策"]
     E["Model Evaluation<br/>Frozen Input · Multi-model Comparison"]
 
+    P -->|Daily 数据作为线索| D
     P --> H
-    P -. "提供 Production Data" .-> E
-    E -. "不写回 Production" .-> P
+    D -->|候选作品| H
+    P -. "Production Data" .-> E
 ```
 
-- **Production Workflow**：生成正式 Daily Brief 数据。
-- **Human Review**：位于 Production 结果之上，用于人工检查排序、调整最终展示顺序并记录反馈。
+- **Daily Production Workflow**：生成正式 Daily Brief 数据。
+- **In-depth Discovery**：独立运行，消费已完成的 Daily 数据，寻找深度作品并提交人工审核；不修改 Daily Production Workflow。
+- **Human Review**：分别审核 Daily 排序 / 展示，以及 Discovery 提交的作品；两者的审核对象和操作不同。
 - **Model Evaluation**：独立旁路，在相同 Frozen Input 下比较不同模型，不修改 Production 数据。
 
 ---
@@ -100,7 +105,7 @@ flowchart TD
 
 ---
 
-## 3. 四个 AI Stages
+## 3. Daily 的四个 AI Stages
 
 | Stage | High-level responsibility |
 |---|---|
@@ -113,7 +118,44 @@ AI 判断规则见 `03-ai-workflow-spec.md`；Prompt、Structured Output 和模�
 
 ---
 
-## 4. Human Review Workflow
+## 4. In-depth Discovery Workflow
+
+```mermaid
+flowchart TD
+    DB["[DB] 已完成的两期 Daily Brief"]
+    TS["[LLM] Topic Selection"]
+    DD["[Code] Direct 历史 URL 去重"]
+    DC["[Code + LLM] Direct Verification"]
+    TD["[Agent] Topic Discovery"]
+    TC["[Code] Topic 历史 URL 去重 / 证据核查"]
+    POOL["[Code] Candidate Pool / 跨路径去重"]
+    OK{"常规路径有合格作品？"}
+    OPEN["[Agent] Open Discovery"]
+    OC["[Code] Open 历史 URL 去重 / 证据核查"]
+    REVIEW["[DB] 待人工审核作品"]
+    NONE["[DB] 正常空结果"]
+    HUMAN["[Human] 作品审核 / 上架决定"]
+
+    DB --> TS
+    TS -->|Direct| DD --> DC --> POOL
+    TS -->|Topic| TD --> TC --> POOL
+    POOL --> OK
+    OK -->|是| REVIEW
+    OK -->|否| OPEN --> OC
+    OC -->|有合格作品| REVIEW
+    OC -->|无合格作品| NONE
+    REVIEW --> HUMAN
+```
+
+- **Direct**：验证 Daily 已有的 Long-form；**Topic**：由 Agent 围绕知识问题搜索、阅读外部作品。
+- **Open Discovery**：常规路径没有合格作品时自动运行；人工审核后也可以独立发起补充 Open Run。
+- **审核边界**：机器选出的作品先进入待审核数据，不自动上架。
+
+运行窗口、具体输入规则、URL 去重时机、内容验证、候选数量、失败与重跑见 `06a-discovery-workflow.md`；Agent / LLM 判断语义见 `03-ai-workflow-spec.md`。
+
+---
+
+## 5. Human Review Workflow
 
 ```mermaid
 flowchart LR
@@ -126,13 +168,13 @@ flowchart LR
     R --> UI --> H --> F --> P
 ```
 
-Human Review 不重新执行完整 Production Pipeline。它用于检查 AI Ranking、调整最终展示顺序并留下反馈；当人工调整导致最终展示需要尚未生成的 Event 内容时，可以复用 Production 的 Event Enrichment 能力。
+本节图示的是 **Daily Human Review**：不重新执行完整 Production Pipeline，用于检查 AI Ranking、调整最终展示顺序并留下反馈；当人工调整导致最终展示需要尚未生成的 Event 内容时，可以复用 Production 的 Event Enrichment 能力。Discovery 作品审核由上一节的独立候选链路进入，不共用 Daily 排序调整流程。
 
 具体执行和 persistence 规则见对应 Processing / Data Model Spec。
 
 ---
 
-## 5. Model Evaluation Workflow
+## 6. Model Evaluation Workflow
 
 ```mermaid
 flowchart LR
@@ -156,7 +198,7 @@ Model Evaluation 用于在**相同输入**下比较不同模型的结果。它�
 
 ---
 
-## 6. Daily Brief Output
+## 7. Daily Brief Output
 
 Production 最终形成：
 
