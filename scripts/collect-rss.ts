@@ -1,9 +1,8 @@
-import { config } from "dotenv";
 import { Pool } from "pg";
 import { collectRssSources } from "../src/collectors/rss.js";
+import { loadPipelineEnvironment } from "../src/lib/pipeline-env.js";
 
-config({ path: ".env" });
-config({ path: ".env.local", override: true });
+loadPipelineEnvironment();
 
 async function main() {
   const databaseUrl = process.env.DATABASE_URL;

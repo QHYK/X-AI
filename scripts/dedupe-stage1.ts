@@ -1,15 +1,14 @@
-import { config } from "dotenv";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Pool } from "pg";
 import { readPublishedAtScopeFromEnv, resolveDailyScope } from "../src/lib/daily-scope.js";
 import { ignorePreStage1ExactDuplicates } from "../src/processing/pre-stage1-exact-duplicates.js";
 import { pipelineTriggerSource, safelyFinishPipelineRun, safelyStartPipelineRun } from "../src/processing/pipeline-run-log.js";
+import { loadPipelineEnvironment } from "../src/lib/pipeline-env.js";
 
+loadPipelineEnvironment();
 const inheritedScope = readPublishedAtScopeFromEnv(process.env);
 const inheritedRunPointer = process.env.DAILY_STAGE_RUN_POINTER;
-config({ path: ".env" });
-config({ path: ".env.local", override: true });
 
 async function main() {
   const databaseUrl = process.env.DATABASE_URL;

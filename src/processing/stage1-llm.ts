@@ -23,6 +23,7 @@ import {
   resolveStageLlmProvider,
   type LlmProvider,
 } from "./llm-client.js";
+import { resolveStageLlmRuntimeConfig } from "./stage-llm-runtime-config.js";
 
 export type Stage1LlmOptions = {
   provider?: LlmProvider;
@@ -72,9 +73,6 @@ export type Stage1TokenUsage = {
   totalTokens: number;
 };
 
-const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE1_LLM_TIMEOUT_MS ?? 45_000);
-const DEFAULT_MAX_RETRIES = Number(process.env.STAGE1_LLM_MAX_RETRIES ?? 2);
-const RETRY_DELAY_MS = Number(process.env.STAGE1_LLM_RETRY_DELAY_MS ?? 1_000);
 const HTTP_503_RETRY_DELAY_MS = 10_000;
 const MAX_OUTPUT_TOKENS_PER_ARTICLE = 1_200;
 
@@ -111,8 +109,9 @@ export async function runStage1BatchLlmForInput(
       ? resolveLlmModel(undefined, provider)
       : resolveStageLlmModel("stage1")
   );
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const runtimeConfig = resolveStageLlmRuntimeConfig("stage1");
+  const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
+  const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
   const startedAt = Date.now();
   const tokenUsage: Stage1TokenUsage = {
     inputTokens: 0,
@@ -187,7 +186,7 @@ export async function runStage1BatchLlmForInput(
         lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
         await options.onAttempt?.({ attempt, provider, status: "failed", errorType: "structured_output_validation", error: lastError, durationMs: Date.now() - attemptStartedAt });
         if (attempt <= maxRetries) {
-          await sleep(RETRY_DELAY_MS * attempt);
+          await sleep(runtimeConfig.retryDelayMs * attempt);
           continue;
         }
 
@@ -199,7 +198,7 @@ export async function runStage1BatchLlmForInput(
         lastError = `Assignment integrity validation failed: ${assignment.errors.join("; ")}`;
         await options.onAttempt?.({ attempt, provider, status: "failed", errorType: "assignment_validation", error: lastError, durationMs: Date.now() - attemptStartedAt });
         if (attempt <= maxRetries) {
-          await sleep(RETRY_DELAY_MS * attempt);
+          await sleep(runtimeConfig.retryDelayMs * attempt);
           continue;
         }
 
@@ -229,10 +228,10 @@ export async function runStage1BatchLlmForInput(
 
       if (attempt <= maxRetries) {
         if (getHttpStatus(error) === 503) {
-          console.warn("Stage 1 LLM returned 503; waiting 600s before retrying...");
+          console.warn("Stage 1 LLM returned 503; waiting 10s before retrying...");
           await sleep(HTTP_503_RETRY_DELAY_MS);
         } else {
-          await sleep(RETRY_DELAY_MS * attempt);
+          await sleep(runtimeConfig.retryDelayMs * attempt);
         }
         continue;
       }

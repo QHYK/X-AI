@@ -18,6 +18,7 @@ import { resolveStageLlmModel, resolveStageLlmProvider, type LlmProvider } from 
 import { resolveDailyScope, type PublishedAtScope } from "../lib/daily-scope.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
+const CODEX_LOGICAL_BATCH_COUNT = 12;
 
 export type Stage1JobOptions = Stage1LlmOptions & {
   dailyDate?: string;
@@ -171,7 +172,7 @@ export function stage1ProviderForLogicalBatch(
   logicalBatchNumber: number,
   defaultProvider: LlmProvider,
 ): LlmProvider {
-  return logicalBatchNumber <= 3 ? "codex" : defaultProvider;
+  return logicalBatchNumber <= CODEX_LOGICAL_BATCH_COUNT ? "codex" : defaultProvider;
 }
 
 export function shouldFallbackCodexBatch(
@@ -179,7 +180,7 @@ export function shouldFallbackCodexBatch(
   provider: LlmProvider,
   success: boolean,
 ): boolean {
-  return logicalBatchNumber <= 3 && provider === "codex" && !success;
+  return logicalBatchNumber <= CODEX_LOGICAL_BATCH_COUNT && provider === "codex" && !success;
 }
 
 export function resolveStage1BatchConfig(
@@ -445,7 +446,7 @@ async function processStage1MicroBatch(
   let attemptsForThisBatch = llmResult.attempts;
   let providerForSplit = provider;
 
-  // Only the initial logical batches 1–3 are assigned to Codex. After its
+  // Only the initial logical batches 1–12 are assigned to Codex. After its
   // normal retry budget is exhausted, retry this one batch with the existing
   // Stage1 provider; other logical batches keep their predetermined provider.
   if (shouldFallbackCodexBatch(logicalBatchNumber, provider, llmResult.success)) {

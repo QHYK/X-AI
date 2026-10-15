@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { config } from "dotenv";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Pool } from "pg";
@@ -10,9 +9,9 @@ import {
   type DailyStageName,
 } from "../src/lib/daily-workflow.js";
 import { safelyFinishPipelineRun, safelyStartPipelineRun } from "../src/processing/pipeline-run-log.js";
+import { loadPipelineEnvironment } from "../src/lib/pipeline-env.js";
 
-config({ path: ".env" });
-config({ path: ".env.local", override: true });
+loadPipelineEnvironment();
 
 const STEPS = [
   "collect:rss",

@@ -1,4 +1,3 @@
-import { config } from "dotenv";
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Pool } from "pg";
@@ -13,13 +12,13 @@ import {
   readPublishedAtScopeFromEnv,
   resolveDailyScope,
 } from "../src/lib/daily-scope.js";
+import { loadPipelineEnvironment } from "../src/lib/pipeline-env.js";
 
+loadPipelineEnvironment();
 const inheritedDailyScope = readPublishedAtScopeFromEnv(process.env);
 const inheritedCatchupScope = readCatchupPublishedAtScopeFromEnv(process.env);
 const inheritedRunPointer = process.env.DAILY_STAGE_RUN_POINTER;
 
-config({ path: ".env" });
-config({ path: ".env.local", override: true });
 
 async function main() {
   const databaseUrl = process.env.DATABASE_URL;

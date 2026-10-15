@@ -1,4 +1,3 @@
-import { config } from "dotenv";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Pool } from "pg";
@@ -19,11 +18,10 @@ import {
   type ContentCompletionRuntimeArtifact,
 } from "../src/processing/content-completion-runtime.js";
 import { pipelineTriggerSource, safelyFinishPipelineRun, safelyStartPipelineRun } from "../src/processing/pipeline-run-log.js";
+import { loadPipelineEnvironment } from "../src/lib/pipeline-env.js";
 
+loadPipelineEnvironment();
 const inheritedRunPointer = process.env.DAILY_STAGE_RUN_POINTER;
-
-config({ path: ".env" });
-config({ path: ".env.local", override: true });
 
 async function main() {
   const startedAt = new Date();

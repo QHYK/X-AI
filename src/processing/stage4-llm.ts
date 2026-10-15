@@ -18,6 +18,7 @@ import {
   stage4EventEnrichmentOutputJsonSchema,
   type Stage4EventEnrichmentOutput,
 } from "./stage4-contract.js";
+import { resolveStageLlmRuntimeConfig } from "./stage-llm-runtime-config.js";
 
 export type Stage4LlmOptions = {
   model?: string;
@@ -84,10 +85,6 @@ export function classifyStage4LlmError(message: string): Stage4LlmErrorKind {
   return "ordinary";
 }
 
-const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE4_LLM_TIMEOUT_MS ?? 240_000);
-const DEFAULT_MAX_RETRIES = Number(process.env.STAGE4_LLM_MAX_RETRIES ?? 2);
-const RETRY_DELAY_MS = Number(process.env.STAGE4_LLM_RETRY_DELAY_MS ?? 1_000);
-
 /** 生成单个已选 Event 的可持久化双语内容，并校验 Structured Output。 */
 export async function runStage4EventEnrichmentLlm(
   input: Stage4EventEnrichmentInput,
@@ -95,8 +92,9 @@ export async function runStage4EventEnrichmentLlm(
 ): Promise<Stage4LlmResult> {
   const provider = resolveStageLlmProvider("stage4");
   const model = resolveStageLlmModel("stage4", options.model);
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const runtimeConfig = resolveStageLlmRuntimeConfig("stage4");
+  const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
+  const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const contextDecision = await determineWhetherExternalContextIsNeeded(client, model, input, timeoutMs);
@@ -152,7 +150,7 @@ export async function runStage4EventEnrichmentLlm(
       if (!validation.success) {
         lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
         if (attempt <= maxRetries) {
-          await sleep(RETRY_DELAY_MS * attempt);
+          await sleep(runtimeConfig.retryDelayMs * attempt);
           continue;
         }
 
@@ -187,7 +185,7 @@ export async function runStage4EventEnrichmentLlm(
       }
 
       if (attempt <= maxRetries) {
-        await sleep(RETRY_DELAY_MS * attempt);
+        await sleep(runtimeConfig.retryDelayMs * attempt);
         continue;
       }
     }

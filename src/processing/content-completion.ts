@@ -152,23 +152,6 @@ export type FirecrawlExtraction = {
 
 const MAX_TOTAL_LIMIT = 80;
 const MAX_POOL_ASSIGNMENT = 40;
-const DEFAULT_LIMIT = Number(process.env.CONTENT_COMPLETION_LIMIT ?? MAX_TOTAL_LIMIT);
-const DEFAULT_PER_SOURCE_LIMIT = Number(
-  process.env.CONTENT_COMPLETION_PER_SOURCE_LIMIT ?? 10,
-);
-const DEFAULT_CONCURRENCY = Number(
-  process.env.CONTENT_COMPLETION_CONCURRENCY ?? 2,
-);
-// 是否值得触发 Content Completion 的正文长度阈值；不同于 Firecrawl 结果的最低可用阈值。
-const SHORT_CONTENT_CHARS = Number(
-  process.env.CONTENT_COMPLETION_SHORT_CHARS ?? 80,
-);
-const TIMEOUT_MS = Number(
-  process.env.CONTENT_COMPLETION_FIRECRAWL_TIMEOUT_MS ?? 30_000,
-);
-const MAX_RETRIES = Number(
-  process.env.CONTENT_COMPLETION_FIRECRAWL_MAX_RETRIES ?? 2,
-);
 const SPECIAL_SKIP_SOURCE_NAMES = new Set(["xkcd", "NASA Image of the Day"]);
 const INSTITUTIONAL_RELEASE_SOURCE_NAMES = new Set([
   "CPI",
@@ -183,6 +166,30 @@ const INSTITUTIONAL_SUMMARY_MAX_CHARS = 2_500;
 const MIN_USEFUL_CHARS = 80;
 // 供 Stage1 使用的 content_text 上限，避免单篇正文无限放大模型输入。达到此长度额外保留完整正文，供需要更长上下文的后续用途使用。
 const STAGE1_MAX_CHARS = 4_000;
+
+export type ContentCompletionRuntimeConfig = {
+  limit: number;
+  perSourceLimit: number;
+  concurrency: number;
+  shortContentChars: number;
+  timeoutMs: number;
+  maxRetries: number;
+};
+
+/** Resolves completion settings only when a pipeline operation begins. */
+export function resolveContentCompletionRuntimeConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+): ContentCompletionRuntimeConfig {
+  return {
+    limit: Number(environment.CONTENT_COMPLETION_LIMIT ?? MAX_TOTAL_LIMIT),
+    perSourceLimit: Number(environment.CONTENT_COMPLETION_PER_SOURCE_LIMIT ?? 10),
+    concurrency: Number(environment.CONTENT_COMPLETION_CONCURRENCY ?? 2),
+    // 是否值得触发 Content Completion 的正文长度阈值；不同于 Firecrawl 结果的最低可用阈值。
+    shortContentChars: Number(environment.CONTENT_COMPLETION_SHORT_CHARS ?? 80), 
+    timeoutMs: Number(environment.CONTENT_COMPLETION_FIRECRAWL_TIMEOUT_MS ?? 30_000),
+    maxRetries: Number(environment.CONTENT_COMPLETION_FIRECRAWL_MAX_RETRIES ?? 2),
+  };
+}
 
 const ELIGIBILITY = `
   ra.stage1_status = 'pending'
@@ -209,7 +216,7 @@ export async function completeRawArticleContent(
 
   const assignments = splitCompletionCandidates(candidates);
   const firecrawlPools = candidates.length > 0 ? resolveFirecrawlPools() : null;
-  const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY);
+  const concurrency = Math.max(1, options.concurrency ?? resolveContentCompletionRuntimeConfig().concurrency);
   const [poolAResults, poolBResults] = firecrawlPools
     ? await Promise.all([
       concurrent(assignments.A, concurrency, (candidate) => complete(pool, candidate, firecrawlPools.A)),
@@ -254,8 +261,8 @@ export function resolveContentCompletionLimits(
   return {
     // CONTENT_COMPLETION_LIMIT may lower the run cap, but cannot make either
     // Firecrawl account receive more than its fixed 40-item assignment.
-    limit: Math.min(options.limit ?? DEFAULT_LIMIT, MAX_TOTAL_LIMIT),
-    perSourceLimit: options.perSourceLimit ?? DEFAULT_PER_SOURCE_LIMIT,
+    limit: Math.min(options.limit ?? resolveContentCompletionRuntimeConfig().limit, MAX_TOTAL_LIMIT),
+    perSourceLimit: options.perSourceLimit ?? resolveContentCompletionRuntimeConfig().perSourceLimit,
   };
 }
 
@@ -324,7 +331,7 @@ function values(
 
   return [
     sources,
-    SHORT_CONTENT_CHARS,
+    resolveContentCompletionRuntimeConfig().shortContentChars,
     options.scopeStartAt ?? null,
     options.scopeEndAt ?? null,
   ];
@@ -433,6 +440,7 @@ async function scrape(
   url: string,
   pool: FirecrawlPool,
 ): Promise<FetchResult> {
+  const runtimeConfig = resolveContentCompletionRuntimeConfig();
   let requests = 0;
   let rateLimitedCount = 0;
   let timeoutCount = 0;
@@ -442,7 +450,7 @@ async function scrape(
     timeoutCount,
   });
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+  for (let attempt = 0; attempt <= runtimeConfig.maxRetries; attempt += 1) {
     await pool.limiter.beforeRequest();
     requests += 1;
 
@@ -458,7 +466,7 @@ async function scrape(
           formats: ["markdown"],
           onlyMainContent: true,
         }),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(runtimeConfig.timeoutMs),
       });
       const body = (await response.json().catch(() => null)) as FirecrawlBody | null;
       const markdown = markdownFrom(body);
@@ -508,7 +516,7 @@ async function scrape(
         await sleep(1_000 * (attempt + 1));
       }
 
-      if (attempt === MAX_RETRIES) {
+      if (attempt === runtimeConfig.maxRetries) {
         return observed({
           markdown: null,
           rawLength: null,
@@ -520,7 +528,7 @@ async function scrape(
       }
     } catch (error) {
       if (isTimeoutError(error)) timeoutCount += 1;
-      if (attempt === MAX_RETRIES) {
+      if (attempt === runtimeConfig.maxRetries) {
         return observed({
           markdown: null,
           rawLength: null,

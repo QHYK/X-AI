@@ -1,4 +1,3 @@
-import { config } from "dotenv";
 import { writeFile } from "node:fs/promises";
 import { Pool } from "pg";
 import { readPublishedAtScopeFromEnv } from "../src/lib/daily-scope.js";
@@ -10,14 +9,14 @@ import { pipelineTriggerSource, safelyFinishPipelineRun, safelyStartPipelineRun 
 import { STAGE3_EVENT_RANKING_PROMPT_VERSION } from "../src/prompts/stage3-event-ranking.js";
 import { STAGE3_DIGEST_RANKING_PROMPT_VERSION } from "../src/prompts/stage3-digest-ranking.js";
 import { STAGE3_LONG_FORM_RANKING_PROMPT_VERSION } from "../src/prompts/stage3-long-form-ranking.js";
+import { loadPipelineEnvironment } from "../src/lib/pipeline-env.js";
 
+loadPipelineEnvironment();
 const inheritedDailyScope = readPublishedAtScopeFromEnv(process.env);
 const inheritedDailyDate = process.env.DAILY_DATE;
 const inheritedStage2RunDir = process.env.STAGE3_STAGE2_RUN_DIR;
 const inheritedRunPointer = process.env.DAILY_STAGE_RUN_POINTER;
 
-config({ path: ".env" });
-config({ path: ".env.local", override: true });
 
 async function main() {
   const databaseUrl = process.env.DATABASE_URL;

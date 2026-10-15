@@ -60,10 +60,18 @@ type ContentChoice = {
   fields: Record<string, { present: boolean; textLength: number }>;
 };
 
-const RSS_CONCURRENCY = Number(process.env.RSS_COLLECTOR_CONCURRENCY ?? 4);
-const RSS_FETCH_TIMEOUT_MS = Number(process.env.RSS_FETCH_TIMEOUT_MS ?? 20_000);
 const REGULAR_LOOKBACK_DAYS = 7;
 const POLICY_LOOKBACK_DAYS = 90;
+
+export function resolveRssRuntimeConfig(environment: NodeJS.ProcessEnv = process.env): {
+  concurrency: number;
+  fetchTimeoutMs: number;
+} {
+  return {
+    concurrency: Number(environment.RSS_COLLECTOR_CONCURRENCY ?? 4),
+    fetchTimeoutMs: Number(environment.RSS_FETCH_TIMEOUT_MS ?? 20_000),
+  };
+}
 
 const parser = new Parser<Record<string, unknown>, Record<string, unknown>>({
   customFields: {
@@ -135,7 +143,7 @@ export async function collectRssSources(pool: Pool): Promise<RssCollectionSummar
   const sources = await loadEnabledRssSources(pool);
   const results = await runWithConcurrency(
     sources,
-    Math.max(1, RSS_CONCURRENCY),
+    Math.max(1, resolveRssRuntimeConfig().concurrency),
     (source) => collectRssSource(pool, source),
   );
 
@@ -233,7 +241,7 @@ async function collectRssSource(pool: Pool, source: RssSource): Promise<SourceCo
 
 async function fetchFeedXml(url: string): Promise<string> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), RSS_FETCH_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), resolveRssRuntimeConfig().fetchTimeoutMs);
 
   try {
     const response = await fetch(url, {

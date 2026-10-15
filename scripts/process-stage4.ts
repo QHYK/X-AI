@@ -1,4 +1,3 @@
-import { config } from "dotenv";
 import { writeFile } from "node:fs/promises";
 import { Pool } from "pg";
 import { assertStageLlmConfiguration, resolveStageLlmModel, resolveStageLlmProvider } from "../src/processing/llm-client.js";
@@ -6,12 +5,12 @@ import { processStage4 } from "../src/processing/stage4-job.js";
 import { resolveDailyScope } from "../src/lib/daily-scope.js";
 import { pipelineTriggerSource, safelyFinishPipelineRun, safelyStartPipelineRun } from "../src/processing/pipeline-run-log.js";
 import { STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION } from "../src/prompts/stage4-event-enrichment.js";
+import { loadPipelineEnvironment } from "../src/lib/pipeline-env.js";
 
+loadPipelineEnvironment();
 const inheritedStage3RunDir = process.env.STAGE4_STAGE3_RUN_DIR;
 const inheritedRunPointer = process.env.DAILY_STAGE_RUN_POINTER;
 
-config({ path: ".env" });
-config({ path: ".env.local", override: true });
 
 async function main() {
   const databaseUrl = process.env.DATABASE_URL;

@@ -25,6 +25,7 @@ import {
   buildStage3EventRankingUserPrompt,
   STAGE3_EVENT_RANKING_PROMPT_VERSION,
 } from "../prompts/stage3-event-ranking.js";
+import { resolveStageLlmRuntimeConfig } from "./stage-llm-runtime-config.js";
 
 export type Stage3EventRankingLlmOptions = {
   provider?: LlmProvider;
@@ -72,10 +73,6 @@ export type Stage3EventRankingResult =
   | Stage3EventRankingSuccess
   | Stage3EventRankingFailure;
 
-const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE3_LLM_TIMEOUT_MS ?? 240_000);
-const DEFAULT_MAX_RETRIES = Number(process.env.STAGE3_LLM_MAX_RETRIES ?? 2);
-const RETRY_DELAY_MS = Number(process.env.STAGE3_LLM_RETRY_DELAY_MS ?? 1_000);
-
 /** 调用模型返回最多 50 个 Event Group 的排序，并保留 token 与重试观测。 */
 export async function runStage3EventRankingLlm(
   input: Stage3EventRankingInput,
@@ -87,8 +84,9 @@ export async function runStage3EventRankingLlm(
       ? resolveLlmModel(undefined, provider)
       : resolveStageLlmModel("stage3")
   );
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const runtimeConfig = resolveStageLlmRuntimeConfig("stage3");
+  const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
+  const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const expectedIds = input.events.map((event) => event.id);
@@ -152,7 +150,7 @@ export async function runStage3EventRankingLlm(
           lastAssignment = null;
           lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
           if (attempt <= maxRetries) {
-            await sleep(RETRY_DELAY_MS * attempt);
+            await sleep(runtimeConfig.retryDelayMs * attempt);
             continue;
           }
 
@@ -191,7 +189,7 @@ export async function runStage3EventRankingLlm(
         }
 
         if (attempt <= maxRetries) {
-          await sleep(RETRY_DELAY_MS * attempt);
+          await sleep(runtimeConfig.retryDelayMs * attempt);
           continue;
         }
       }

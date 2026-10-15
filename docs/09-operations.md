@@ -4,7 +4,9 @@
 
 它不定义 Daily scope、阶段资格、排序、持久化/幂等性、AI 判断、Prompt 或数据模型。需要理解这些语义时，分别链接至 [Workflow Overview](02-workflow-overview.md)、[Technical Spec](04-technical-spec.md)、[Prompt Spec](07-prompt-spec.md) 与 [Data Model](05-data-model.md)。
 
-需要环境变量的 TypeScript CLI 会先加载 `.env`，再以 `.env.local` 覆盖；不要提交凭据。
+Pipeline CLI 在读取环境派生参数或执行处理模块前，统一通过 `loadPipelineEnvironment` 加载配置。配置优先级：Shell > .env.local > .env > 默认值；不要提交凭据。Daily 与 Dashboard Retry 启动的子进程继承父进程已解析的环境，子 CLI 重复 bootstrap 时会保留这些继承值。Next.js 的 API/Dashboard 保持 Next.js 自身的环境变量加载机制。
+
+可运行 `npm run test:pipeline-env` 验证非敏感的 Pipeline 配置在 ESM 模块已导入后仍会于调用时正确解析。
 
 ## 1. 快速入口
 
@@ -160,7 +162,7 @@ Stage2 关闭 SDK 自动重试，使用自己的 retry loop；`STAGE2_LLM_MAX_RE
 | `STAGE3_LLM_MAX_RETRIES` | `2` | Stage3 Event/Digest/Long-form 最大重试数 |
 | `STAGE3_LLM_RETRY_DELAY_MS` | `1000` ms | Stage3 Event/Digest/Long-form retry delay |
 
-Stage 1 的逻辑 Batch 1–3 使用已有 Codex 配置；Codex retry 耗尽后回退当前 `STAGE1_LLM_PROVIDER`（未设置时使用项目默认）。每个 Batch 的实际 provider、retry、fallback 与脱敏错误见 `runtime/stage1/<run-id>/attempts.jsonl`。
+Stage 1 的逻辑 Batch 1–12 使用已有 Codex 配置；Codex retry 耗尽后回退当前 `STAGE1_LLM_PROVIDER`（未设置时使用项目默认）。每个 Batch 的实际 provider、retry、fallback 与脱敏错误见 `runtime/stage1/<run-id>/attempts.jsonl`。
 | `STAGE4_LLM_TIMEOUT_MS` | `240000` ms | Stage4 单 request timeout |
 | `STAGE4_LLM_MAX_RETRIES` | `2` | Stage4 transient-error 最大重试数 |
 | `STAGE4_LLM_RETRY_DELAY_MS` | `1000` ms | Stage4 retry delay |
@@ -193,6 +195,7 @@ npm run test:model-evaluation
 npm run test:content-completion-runtime
 npm run test:content-completion-pools
 npm run test:stage2-retry
+npm run test:pipeline-env
 ```
 
 ## 7. Reusable Diagnostics and Smoke Tests

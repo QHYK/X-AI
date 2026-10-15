@@ -25,6 +25,7 @@ import {
   STAGE3_DIGEST_RANKING_PROMPT_VERSION,
   type Stage3DigestRankingInput,
 } from "../prompts/stage3-digest-ranking.js";
+import { resolveStageLlmRuntimeConfig } from "./stage-llm-runtime-config.js";
 
 export type Stage3DigestRankingLlmOptions = {
   provider?: LlmProvider;
@@ -116,10 +117,6 @@ export type Stage3DigestRankingResult =
   | Stage3DigestRankingSuccess
   | Stage3DigestRankingFailure;
 
-const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE3_LLM_TIMEOUT_MS ?? 240_000);
-const DEFAULT_MAX_RETRIES = Number(process.env.STAGE3_LLM_MAX_RETRIES ?? 2);
-const RETRY_DELAY_MS = Number(process.env.STAGE3_LLM_RETRY_DELAY_MS ?? 1_000);
-
 /** 执行分类 Digest 排名；必要时进行一次针对遗漏或重复 ID 的轻量修复。 */
 export async function runStage3DigestRankingLlm(
   input: Stage3DigestRankingInput,
@@ -131,8 +128,9 @@ export async function runStage3DigestRankingLlm(
       ? resolveLlmModel(undefined, provider)
       : resolveStageLlmModel("stage3")
   );
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const runtimeConfig = resolveStageLlmRuntimeConfig("stage3");
+  const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
+  const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const expectedIds = input.candidates.map((candidate) => candidate.id);
@@ -209,7 +207,7 @@ export async function runStage3DigestRankingLlm(
           lastAssignment = null;
           lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
           if (attempt <= maxRetries) {
-            await sleep(RETRY_DELAY_MS * attempt);
+            await sleep(runtimeConfig.retryDelayMs * attempt);
             continue;
           }
 
@@ -237,7 +235,7 @@ export async function runStage3DigestRankingLlm(
         }
 
         if (attempt <= maxRetries) {
-          await sleep(RETRY_DELAY_MS * attempt);
+          await sleep(runtimeConfig.retryDelayMs * attempt);
           continue;
         }
       }

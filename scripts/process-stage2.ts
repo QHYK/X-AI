@@ -1,9 +1,8 @@
-import { config } from "dotenv";
 import { writeFile } from "node:fs/promises";
 import { Pool } from "pg";
+import { loadPipelineEnvironment } from "../src/lib/pipeline-env.js";
 
-config({ path: ".env" });
-config({ path: ".env.local", override: true });
+loadPipelineEnvironment();
 
 // Stage 2 reads retry/timeout defaults during module initialization. Load dotenv
 // before dynamically importing processing modules so .env.local takes effect.

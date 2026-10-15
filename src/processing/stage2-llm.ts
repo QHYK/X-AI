@@ -20,6 +20,10 @@ import {
   buildStage2UserPrompt,
   STAGE2_PROMPT_VERSION,
 } from "../prompts/stage2-event-merge.js";
+import {
+  resolveStage2MaxOutputTokens,
+  resolveStageLlmRuntimeConfig,
+} from "./stage-llm-runtime-config.js";
 
 export type Stage2LlmOptions = {
   provider?: LlmProvider;
@@ -94,12 +98,8 @@ export type Stage2LlmFailure = {
 
 export type Stage2LlmResult = Stage2LlmSuccess | Stage2LlmFailure;
 
-const DEFAULT_TIMEOUT_MS = Number(process.env.STAGE2_LLM_TIMEOUT_MS ?? 240_000);
-const DEFAULT_MAX_RETRIES = Number(process.env.STAGE2_LLM_MAX_RETRIES ?? 0);
-export const DEFAULT_STAGE2_MAX_OUTPUT_TOKENS = Number(
-  process.env.STAGE2_LLM_MAX_OUTPUT_TOKENS ?? 64_000,
-);
-const RETRY_DELAY_MS = Number(process.env.STAGE2_LLM_RETRY_DELAY_MS ?? 1_000);
+/** Stable fallback value; environment overrides are resolved per request. */
+export const DEFAULT_STAGE2_MAX_OUTPUT_TOKENS = 64_000;
 
 /** 调用模型将 Event candidates 归并为真实世界事件组。 */
 export async function runStage2MergeLlm(
@@ -112,8 +112,10 @@ export async function runStage2MergeLlm(
       ? resolveLlmModel(undefined, provider)
       : resolveStageLlmModel("stage2")
   );
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const runtimeConfig = resolveStageLlmRuntimeConfig("stage2");
+  const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
+  const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
+  const maxOutputTokens = resolveStage2MaxOutputTokens();
   // SDK retries stay disabled: Stage 2 owns attempt accounting and retry policy.
   const client = options.request ? null : createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const request = options.request ?? client?.responses.create;
@@ -148,7 +150,7 @@ export async function runStage2MergeLlm(
               ],
             },
           ],
-          max_output_tokens: DEFAULT_STAGE2_MAX_OUTPUT_TOKENS,
+          max_output_tokens: maxOutputTokens,
           store: false,
           text: {
             format: {
@@ -218,7 +220,7 @@ export async function runStage2MergeLlm(
       }
 
       if (attempt <= maxRetries) {
-        await sleep(RETRY_DELAY_MS * attempt);
+        await sleep(runtimeConfig.retryDelayMs * attempt);
         continue;
       }
     }
