@@ -162,7 +162,7 @@ Stage2 关闭 SDK 自动重试，使用自己的 retry loop；`STAGE2_LLM_MAX_RE
 | `STAGE3_LLM_MAX_RETRIES` | `2` | Stage3 Event/Digest/Long-form 最大重试数 |
 | `STAGE3_LLM_RETRY_DELAY_MS` | `1000` ms | Stage3 Event/Digest/Long-form retry delay |
 
-Stage 1 的逻辑 Batch 1–12 使用已有 Codex 配置；Codex retry 耗尽后回退当前 `STAGE1_LLM_PROVIDER`（未设置时使用项目默认）。每个 Batch 的实际 provider、retry、fallback 与脱敏错误见 `runtime/stage1/<run-id>/attempts.jsonl`。
+Stage 1 的逻辑 Batch 1–15 使用已有 Codex 配置；Codex retry 耗尽后回退当前 `STAGE1_LLM_PROVIDER`（未设置时使用项目默认）。每个 Batch 的实际 provider、retry、fallback 与脱敏错误见 `runtime/stage1/<run-id>/attempts.jsonl`。
 | `STAGE4_LLM_TIMEOUT_MS` | `240000` ms | Stage4 单 request timeout |
 | `STAGE4_LLM_MAX_RETRIES` | `2` | Stage4 transient-error 最大重试数 |
 | `STAGE4_LLM_RETRY_DELAY_MS` | `1000` ms | Stage4 retry delay |

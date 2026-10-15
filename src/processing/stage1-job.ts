@@ -18,7 +18,7 @@ import { resolveStageLlmModel, resolveStageLlmProvider, type LlmProvider } from 
 import { resolveDailyScope, type PublishedAtScope } from "../lib/daily-scope.js";
 
 type Queryable = Pick<Pool | PoolClient, "query">;
-const CODEX_LOGICAL_BATCH_COUNT = 12;
+const CODEX_LOGICAL_BATCH_COUNT = 15;
 
 export type Stage1JobOptions = Stage1LlmOptions & {
   dailyDate?: string;
