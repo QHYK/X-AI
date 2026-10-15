@@ -222,10 +222,15 @@ export type DashboardData = {
  */
 export async function getDashboardData(
   pool: Pool,
-  options: { detailDate?: string | null; rootDir?: string; now?: Date } = {},
+  options: {
+    detailDate?: string | null;
+    rootDir?: string;
+    now?: Date;
+    overviewScopes?: DailyScope[];
+  } = {},
 ): Promise<DashboardData> {
   const now = options.now ?? new Date();
-  const scopes = resolveRecentCompletedDailyScopes(DASHBOARD_DAYS, now);
+  const scopes = options.overviewScopes ?? resolveRecentCompletedDailyScopes(DASHBOARD_DAYS, now);
   const latestScope = scopes[0];
   if (!latestScope) {
     throw new Error("Dashboard Daily scope range is empty.");

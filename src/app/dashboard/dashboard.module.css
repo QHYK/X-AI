@@ -135,6 +135,91 @@
   overflow: hidden;
 }
 
+.analyticsLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.55fr);
+  max-width: 1600px;
+  margin: 20px auto;
+  gap: 16px;
+  align-items: start;
+}
+
+.analyticsLayout > .panel {
+  width: 100%;
+  margin: 0;
+}
+
+.analyticsDetail {
+  overflow: hidden;
+  border: 1px solid #dce2df;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(19 36 28 / 4%);
+}
+
+.analyticsControls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.analyticsControls select,
+.analyticsControls input {
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid #cad2ce;
+  border-radius: 7px;
+  background: #fff;
+  color: #24322b;
+  font: inherit;
+  font-size: 0.76rem;
+}
+
+.sortButton {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.analyticsIgnored {
+  padding: 18px 20px;
+}
+
+.analyticsIgnored h3 {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+}
+
+.analyticsIgnored ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.analyticsIgnored li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  padding-top: 8px;
+  border-top: 1px solid #edf0ee;
+  font-size: 0.78rem;
+}
+
+.analyticsIgnored li strong { color: #9a5b32; font-size: 0.68rem; }
+.analyticsIgnored li span { overflow-wrap: anywhere; }
+.analyticsIgnored li small { display: block; margin-top: 3px; color: #68756f; }
+.analyticsIgnored li a { color: #294437; font-weight: 700; }
+
 .metricAuditList {
   max-width: 1600px;
   margin: 0;
@@ -545,6 +630,10 @@
 
   .stageGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .analyticsLayout {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -104,6 +104,26 @@ export function resolveRecentCompletedDailyScopes(
   );
 }
 
+/** Returns completed Daily scopes in an inclusive, validated Daily-date range. */
+export function resolveCompletedDailyScopesInRange(
+  startDate: string,
+  endDate: string,
+  now: Date = new Date(),
+): DailyScope[] {
+  const start = resolveDailyScope(startDate);
+  const end = resolveDailyScope(endDate);
+  if (start.dailyDate > end.dailyDate) {
+    throw new Error("Daily date range start must not be after end.");
+  }
+
+  const scopes: DailyScope[] = [];
+  for (let date = start.dailyDate; date <= end.dailyDate; date = shiftDailyDate(date, 1)) {
+    const scope = resolveDailyScope(date);
+    if (isDailyScopeCompleted(scope, now)) scopes.push(scope);
+  }
+  return scopes.reverse();
+}
+
 /** 当前正常 workflow Daily 才允许使用 late-arrival catch-up window。 */
 export function isCurrentWorkflowDailyDate(
   dailyDate: string,

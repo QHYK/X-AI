@@ -89,6 +89,8 @@
 - 不要静默忽略 Error。
 - Production data、runtime artifact 与 Stage lineage 的边界遵循 `04-technical-spec.md` 和 `06-processing-workflow.md`，不要自行建立新的业务 Source of Truth 或隐式 lineage。
 - 修改 Prompt、runtime prompt implementation 或 Structured Output contract 时，检查三者是否仍一致。
+- 代码格式遵循项目 `.prettierrc`，修改代码时仅格式化本次涉及的文件。
+- JSX/TSX 保持清晰的层级缩进；复杂函数和表达式应便于人工 Review，避免压缩成单行。
 
 ## 5. Change Scope
 

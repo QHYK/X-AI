@@ -56,6 +56,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         <div className={styles.headerActions}>
           <a href={`./review/events?date=${data.latestDailyDate}`}>Event Review</a>
           <a href={`./review/long-form?date=${data.latestDailyDate}`}>Long-form Review</a>
+          <a href="./dashboard/analytics">Analytics</a>
           <a href="./dashboard/metrics">指标说明</a>
           <div className={styles.today}>Latest Daily · {data.latestDailyDate}</div>
         </div>
