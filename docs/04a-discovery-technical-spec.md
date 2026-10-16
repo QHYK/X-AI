@@ -2,7 +2,7 @@
 
 本文档只定义 X-AI-field Discovery 的**技术实现边界与关键决策**。通用架构见 `04-technical-spec.md`；AI 语义见 `03-ai-workflow-spec.md`；执行分支、人工触发与失败语义见 `06a-discovery-workflow.md`；字段定义见 `05-data-model.md`；Prompt 与输出契约见 `07-prompt-spec.md`；运行命令见 `09-operations.md`。
 
-> 状态：供技术评审。本文档描述拟采用的实现方案，不代表已在仓库中实现；需结合实际代码核对 API 复用入口、Firecrawl 接口与模型兼容性。
+> 状态：Discovery Agent 技术 Spike 已通过（Codex Responses endpoint）；本文档其余部分为待实现的生产方案，不能将 Spike 视为正式 Workflow 已上线。
 
 ## 1. 技术目标与边界
 
@@ -58,15 +58,20 @@ Discovery 默认在 Asia/Shanghai 12:00 启动，前提是依赖的两期 Daily 
 
 Agent 每轮依据工具观察结果决定搜索、阅读、追踪或结束。工具调用与结果必须可记录，最终自然语言声明不能替代真实执行证据。
 
-**模型接入**：Discovery Agent 首版使用 OpenAI 官方 API 与支持托管 Web Search 的模型，通过 Agents SDK 调用；普通 Topic Selection / 编辑评价仍使用现有共享 LLM Client。开发开始时先做最小连通性实验，验证选定模型、SDK 版本、Hosted Tool 与 Structured Output 的组合，不预设多 Provider 自动切换。
+常规 D3 使用一个 Agent Run 接收 D2 按优先级输出的全部 Topic Leads。整个 Run 最多输出 3 篇，每篇必须声明一个属于当前输入的主要 `sourceLeadId`，由 Code 校验后持久化。
+
+**模型接入（Spike 已验证）**：Discovery Agent 首版通过已实测的 Codex Responses endpoint 接入 GPT 模型，使用 OpenAI Agents SDK；普通 Topic Selection / Direct 编辑评价仍使用现有共享 LLM Client。Spike 使用 `@openai/agents@0.20.0`、`zod@4.6.7`，在 `gpt-5.6-terra` 上真实验证 Hosted Web Search、Function Tool、Structured Output 和自定义 TracingProcessor。生产代码应将 Endpoint、Key、Model 置于配置层，不将本机地址写死，不预设多 Provider 自动切换。
 
 ### 4.3 工具与搜索方案
 
 首版优先使用以下两种工具：
 
-- **Agents SDK 托管 Web Search**：优先使用 SDK 提供的 `webSearchTool()`（由 OpenAI 服务端执行搜索），由 Agent 决定搜索什么、何时继续；**不自建 `search_web(query)` 封装**。是否可用及搜索结果可追溯粒度以开发阶段实际测试为准。
+- **Agents SDK 托管 Web Search**：优先使用 SDK 提供的 `webSearchTool()`（由 OpenAI 服务端执行搜索），由 Agent 决定搜索什么、何时继续；**不自建 `search_web(query)` 封装**。Spike 已验证实际 `web_search_call`；在当前 SDK 中该调用出现在 `response` Span 的 output items 中，不是独立的搜索 Span。
 - **自定义 `fetch_content(url)`**：通过 Agents SDK Function Tool 接入现有抓取 / Firecrawl 能力，返回真实取得的正文、可用转写文本、来源及读取状态；明确区分完整、部分与不可获取。搜索摘要不能替代全文验证。
 
+Hosted Tool 和自定义 Function Tool 都属于 Agent 的工具调用；使用平台提供的搜索能力不改变 X-field 自己负责 Workflow、Agent 指令、验证、数据存储和人工审核的职责。**不需要 Skill**。
+
+如果 Hosted Web Search 在实际模型、SDK 或证据记录要求下无法满足需求，再引入第三方搜索 API 并实现自定义 `search_web`，不提前维护两套搜索实现。
 
 视频 / 播客只有在能取得足够内容用于验证时才进入最终候选。暂不专门处理付费墙。外部内容属于不可信数据，不允许其中的指令改变 Agent 的系统任务。
 
@@ -88,7 +93,7 @@ Agent 每轮依据工具观察结果决定搜索、阅读、追踪或结束。�
 
 ## 6. 数据持久化与执行追踪
 
-首版使用 PostgreSQL 保存业务对象与执行 Trace，不为 Discovery 新建 `runtime/` 文件日志。**优先复用 Agents SDK 原生 Tracing 与 Processor 扩展接口**，而不是手写一套 Agent Loop 事件采集器。具体接口名称、事件结构及导出行为以开发时锁定的 SDK 版本和最小实验为准。
+首版使用 PostgreSQL 保存业务对象与执行 Trace，不为 Discovery 新建 `runtime/` 文件日志。**优先复用 Agents SDK 原生 Tracing 与 Processor 扩展接口**，而不是手写一套 Agent Loop 事件采集器。Spike 已验证 `TracingProcessor`、`setTraceProcessors` 和 `forceFlush`；生产实现仍需验证 PostgreSQL 写入、异常隔离和可靠 flush。
 
 | 对象 | 技术职责 |
 |---|---|
@@ -97,18 +102,20 @@ Agent 每轮依据工具观察结果决定搜索、阅读、追踪或结束。�
 | `discovery_candidates` | 候选作品、发现路径、证据、验证结论及筛选状态 |
 | `in_depth_candidates` | 通过机器筛选、提交人工审核的作品及审核状态 |
 
+`discovery_runs.execution_state` 保存 D3 / D4 分支的最小动态完成状态。它与不可变的 `config_snapshot` 分离；分支更新必须使用局部 JSONB 更新，缺失或遗留 `running` 不视为完成。
+
 字段、关联、索引、状态枚举和写入事务由 `05-data-model.md` 定义。本轮不修改既有 `feedback` 表；显式 Memory 写入由独立后续能力负责。
 
 ### 6.1 Trace 的职责与存储
 
 - **Trace** 是一次执行的逻辑调用链，不等于 `runtime/` 文件；**Span** 是其中的模型调用、工具调用或自定义业务操作等记录。
-- 使用 SDK 的 Tracing Processor 接收 Trace / Span，经过敏感数据过滤后写入 PostgreSQL；优先保存 SDK 原生结构。
+- 使用 SDK 的 `TracingProcessor` 接收 Trace / Span，经过敏感数据过滤后写入 PostgreSQL；优先保存 SDK 原生结构。
 - 数据表只将 `run_id`、`trace_id`、`span_id`、`parent_span_id`、类型、时间等必要查询字段独立索引，其余 SDK 事件载荷放 JSONB。SDK 结构可能随版本变化，Dashboard 不直接依赖不稳定的深层字段。
 - **保留业务记录与 Trace 的分工**：运行状态、上游 Daily 就绪检查、人工触发、候选审核状态属于业务表，不应仅依靠 Trace 推导。
 - Topic Selection 等普通 LLM Client 调用，以及 Code 执行的关键业务检查，也需要与 Run 关联；若 SDK Trace 不会自动覆盖这些操作，使用其自定义 Span 能力或最小业务记录补充，避免误称所有步骤都由 SDK 自动捕获。
 - 不默认复制完整抓取正文到每个 Span；保留必要的真实检索 URL、抓取状态、阅读证据和候选关联，避免数据库无界增长。
 - 不存 API Key、认证头及其他 Secrets。需要确认 Processor 的缓冲、批量写入、异常隔离和退出前 flush 行为，防止日志写入阻塞主要业务或运行结束时丢失尾部事件。
-- SDK 默认可能导出 Trace 到平台端。首版需明确数据发送策略：若只保存在本地 PostgreSQL，使用所选 SDK 版本支持的**替换默认 Processor**方式，而非无意追加双重导出。
+- Spike 已使用 `setTraceProcessors([processor])` 替换默认导出器。生产版若只写 PostgreSQL，沿用该策略，并显式 `forceFlush` / `shutdown`，避免无意向平台重复发送 Trace。
 
 ### 6.2 可追溯与重跑
 
@@ -149,10 +156,10 @@ Agent 每轮依据工具观察结果决定搜索、阅读、追踪或结束。�
 ## 9. 实现前待核实
 
 - Daily Brief API / 查询层的真实复用入口，以及全部 Event 的查询方式。
-- 现有 Firecrawl 抓取封装能否用于 Discovery 的独立 URL。
-- Agents SDK 版本、OpenAI 模型、托管 Web Search / Structured Output 的最小连通性验证。
-- `webSearchTool()` 的实际结果证据格式、引用与可追溯粒度；不满足要求时再评估自定义搜索工具。
-- SDK Trace Processor 接口、默认导出行为、数据库 Span 保存粒度、正文证据与保留期限。
-- 两期 Daily 的日期映射、完成状态判定与补跑参数（默认 12:00）。
+- Firecrawl Spike 已证实可复用 `extractFirecrawlContent()`，但现有生产 `scrape()` 耦合候选与限流；需将 Spike 的独立 URL adapter 整理为生产模块。
+- Agents SDK 0.20.0 + Codex Responses endpoint + GPT 模型的连通性、托管搜索及结构化输出已实测；生产部署时仍需验证目标运行环境的 Endpoint 可达性。
+- Hosted Search 的 `web_search_call` 和 query 已验证；生产候选引用仍需从实际结果中保存 URL / citation，不能仅靠 Span。
+- Processor 接口与默认导出替换已验证；待实现数据库 Span 保存、业务 `run_id` 关联、正文脱敏与保留策略。
+- 两期 Daily 的日期映射与补跑参数（默认 12:00）；完成状态判定以 `06a-discovery-workflow.md` 的上游就绪规则为准。
 
 这些事项核实后更新对应技术或运行文档；不要将未验证的假设写成既有实现事实。

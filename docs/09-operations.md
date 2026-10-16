@@ -104,6 +104,14 @@ npm run eval:stage3:long-form -- --run-id=UUID
 | `OPENAI_MODEL` / `DEEPSEEK_MODEL` / `KIMI_MODEL` / `CODEX_MODEL` | 对应 Provider model | 未设置使用 `llm-client.ts` 的 provider 默认值 |
 | `LLM_PROVIDER` | generic LLM client / provider diagnostics | 默认 `openai` |
 | `LLM_MODEL` | generic LLM model override | 覆盖 Provider model 解析 |
+| `DISCOVERY_LLM_PROVIDER` | Discovery D2 / D4 shared Provider | 覆盖既有 `LLM_PROVIDER`；模型、Base URL 与 API Key 均由该 Provider 的既有配置解析 |
+| `DISCOVERY_D2_PROVIDER` / `DISCOVERY_D4_PROVIDER` | Discovery D2 / D4 stage Provider | 优先级最高；覆盖 `DISCOVERY_LLM_PROVIDER` |
+| `DISCOVERY_LLM_TIMEOUT_MS` | Discovery D2 / D4 shared request timeout | 正整数毫秒；被对应 stage timeout 覆盖；未设置则使用共享 LLM Client 的 SDK 默认值 |
+| `DISCOVERY_D2_TIMEOUT_MS` / `DISCOVERY_D4_TIMEOUT_MS` | Discovery D2 / D4 stage request timeout | 正整数毫秒；优先级最高；未设置时回退至 `DISCOVERY_LLM_TIMEOUT_MS`，再回退 SDK 默认值 |
+| `DISCOVERY_AGENT_MODEL` | Discovery D3 Agents SDK model | 回退至 `CODEX_MODEL`，再回退代码默认 `gpt-5.6-terra`；D3 固定使用 Codex Responses endpoint |
+| `DISCOVERY_D3_TIMEOUT_MS` | D3 Agent Run 整体 timeout | 默认 `480000` ms |
+| `DISCOVERY_D3_MAX_TURNS` | D3 Agent 最大轮数 | 默认 `8` |
+| `DISCOVERY_FETCH_CONTENT_TIMEOUT_MS` | D3 `fetch_content` 单次工具 timeout | 默认 `90000` ms |
 | `STAGE1_LLM_PROVIDER` / `STAGE2_LLM_PROVIDER` / `STAGE3_LLM_PROVIDER` / `STAGE4_LLM_PROVIDER` | 对应正式 Stage 的 Provider | 默认依次为 `openai`、`deepseek`、`openai`、`openai` |
 | `LLM_DEBUG_HTTP` | LLM 请求诊断日志 | 仅 `true` 启用；输出经过脱敏的 HTTP 诊断 |
 | `BRIEF_API_ALLOWED_ORIGIN` | Brief / read-more API 的 CORS allowlist | 逗号分隔 origin；空值不配置额外 allowlist |
@@ -196,6 +204,9 @@ npm run test:content-completion-runtime
 npm run test:content-completion-pools
 npm run test:stage2-retry
 npm run test:pipeline-env
+npm run test:discovery-phase1
+npm run test:discovery-phase2
+npm run test:discovery-phase3
 ```
 
 ## 7. Reusable Diagnostics and Smoke Tests
@@ -210,8 +221,17 @@ npm run test:pipeline-env
 | `npm run test:deepseek` | 无额外参数 | DeepSeek structured response smoke test |
 | `npm run test:kimi` | 无额外参数 | Kimi structured response smoke test |
 | `npm run test:firecrawl-content -- --date=YYYY-MM-DD [--limit=N] [--per-source=N] [--concurrency=N]` | `DATABASE_URL`、`FIRECRAWL_API_KEY` | 独立 Firecrawl diagnostic；会写 local runtime artifact，不写业务数据库 |
+| `npm run test:discovery-provider -- --confirm-paid [--dates=YYYY-MM-DD,YYYY-MM-DD]` | `DATABASE_URL` 及当前 LLM Provider 配置；需显式确认付费调用 | 手动执行真实 D2 → D4 集成验证；默认选择最近两期有 `daily/success` 或 `stage4/success` 的 Daily，创建新的 Regular Discovery Run，并写入 Discovery 表 |
+| `npm run test:discovery-provider -- --confirm-paid --run-id=UUID` | D2 完成以已有 `selection_output` 为准；当前命令同时要求 Run 为 `partial` / `failed` | 只恢复该 Run 的 D4；复用原 Run ID、持久化 Leads 与 Candidate，不重新调用 D2，不覆盖已完成评价 |
+| `npm run test:discovery-d3 -- --confirm-paid --run-id=UUID` | 已有持久化 D2 Topic Leads；需要 `DATABASE_URL`、Codex 与 Firecrawl 配置 | 对指定 Run 执行或恢复 D3；一个 Agent Run 接收全部 Topic Leads。真实付费调用，必须显式确认 |
 
 `scripts/test-openai-call.ts` 的 positional API mode 支持 `responses`（默认）、`chat-completions`、`chat-completions-structured`。`test:openai*` wrapper 已固定 provider；调用其它 provider 时使用 `npx tsx scripts/test-openai-call.ts PROVIDER [MODE]`。
+
+Discovery Provider 集成验证不会由 regression tests 自动执行。命令复用 Phase 1 Run Service 以及正式 D2 / D4 函数；输出 Run ID、全部 Direct / Topic Leads（含来源内容与 Direct URL）、逐篇 D4 评价、审核队列状态、Token Usage 与耗时。D4 每篇 Direct Candidate 串行发起一次 LLM 请求；每篇成功后立即持久化，单篇失败会记录诊断并继续后续 Candidate。输出会单列成功/失败请求数、各自累计耗时、已知 Token Usage 和 Usage 是否完整。`selection_output` 和 Candidate 均保留在数据库中，后续阶段可直接使用输出的 Run ID。失败时保留 Run、已创建 Candidate 和 diagnostics。指定 `--dates` 时日期必须升序，且每一期都必须存在同一 `daily_date` 的 `pipeline_runs.step IN ('daily', 'stage4') AND status = 'success'`；`--dates` 与 `--run-id` 不可同时使用。
+
+Discovery D2 / D4 的 Structured Output 通过共享 LLM Client 走 Chat Completions；测试输出会显示实际 Provider、model、timeout、API mode 与 LLM request 耗时。`DISCOVERY_D2_PROVIDER` / `DISCOVERY_D4_PROVIDER` 优先于 `DISCOVERY_LLM_PROVIDER`，随后才使用既有 `LLM_PROVIDER`；模型、Base URL 与 API Key 始终由选定 Provider 的既有配置解析，其中模型使用该 Provider 的专属 `*_MODEL` 配置。`DISCOVERY_D2_TIMEOUT_MS` / `DISCOVERY_D4_TIMEOUT_MS` 优先于 `DISCOVERY_LLM_TIMEOUT_MS`；全部未设置时请求选项会省略 timeout，使用 SDK 默认值，并输出 `SDK default`。
+
+Discovery Run 的正式恢复边界见 `06a-discovery-workflow.md` §8.3。操作时：没有持久化 `selection_output` 的失败 Run 不使用 `--run-id`，而是创建 New Run 并从 D2 开始；已有 `selection_output` 时，D3 / D4 Resume 复用原 Run。D3 读取 `execution_state.d3`：`completed` 直接跳过，失败、缺失或遗留 `running` 会重新执行整个 Agent Run；D4 复用同一 Candidate ID，仅评价仍为 `discovered` 的 Candidate。主动重新生成应创建 New Run。
 
 ## 8. `scripts/` 文件分类
 
@@ -223,6 +243,9 @@ npm run test:pipeline-env
 | `test-content-completion-runtime.ts` | Regression test | `test:content-completion-runtime` |
 | `test-daily-scope.ts` | Regression test | `test:daily-scope` |
 | `test-daily-workflow-retry.ts` | Regression test | `test:daily-workflow-retry` |
+| `test-discovery-provider.ts` | Reusable diagnostic | `test:discovery-provider`；真实 DB/LLM 调用并写 Discovery 表 |
+| `test-discovery-d3.ts` | Reusable diagnostic | `test:discovery-d3`；按已有 Run ID 真实执行 D3，需显式确认付费调用 |
+| `test-discovery-phase3.ts` | Regression test | `test:discovery-phase3`；D3 Mock Agent、验证、持久化、Resume 与 Trace |
 | `test-dashboard-daily-scope.ts` | Regression test | `test:dashboard-daily-scope` |
 | `test-dashboard-step-retry.ts` | Regression test | `test:dashboard-step-retry` |
 | `test-event-review-finalization.ts` | Regression test | `test:event-review-finalization` |

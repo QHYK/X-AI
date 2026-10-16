@@ -8,6 +8,8 @@ import type { ShanghaiDayRange } from "./brief-date.js";
 import { resolveDailyScope, type DailyScope } from "./daily-scope.js";
 import { LONG_FORM_DISPLAY_CUTOFF } from "./ranking-config.js";
 
+export type DailyBriefQueryable = Pick<Pool, "query">;
+
 export const DIGEST_CATEGORY_KEYS = [
   "Finance & Economy",
   "Technology",
@@ -129,7 +131,7 @@ type InspirationRow = Omit<ContentRow, "rank" | "category" | "hasFullContent"> &
  * 读取一个 Brief 的 Events、Digest、Long-form 与 Inspiration。
  */
 export async function getDailyBrief(
-  pool: Pool,
+  pool: DailyBriefQueryable,
   range: ShanghaiDayRange,
 ): Promise<DailyBriefResponse> {
   const [eventResult, digests, longForm, inspiration] = await Promise.all([
@@ -162,7 +164,7 @@ export async function getDailyBrief(
 
 /** 以固定 Daily scope 读取 Brief，是正式 Daily attribution 的首选入口。 */
 export function getDailyBriefForDailyScope(
-  pool: Pool,
+  pool: DailyBriefQueryable,
   scope: DailyScope,
 ): Promise<DailyBriefResponse> {
   return getDailyBrief(pool, {
@@ -173,14 +175,14 @@ export function getDailyBriefForDailyScope(
 }
 
 export function getDailyBriefForDailyDate(
-  pool: Pool,
+  pool: DailyBriefQueryable,
   dailyDate: string,
 ): Promise<DailyBriefResponse> {
   return getDailyBriefForDailyScope(pool, resolveDailyScope(dailyDate));
 }
 
 async function loadEvents(
-  pool: Pool,
+  pool: DailyBriefQueryable,
   range: ShanghaiDayRange,
 ): Promise<{ events: BriefEvent[]; status: DailyBriefResponse["events_status"] }> {
   // Daily ownership comes from the published Stage 4 run, not the event's own date.
@@ -240,7 +242,7 @@ async function loadEvents(
   return { events: await attachEventSources(pool, draftResult.rows), status: "partial" };
 }
 
-async function attachEventSources(pool: Pool, rows: EventRow[]): Promise<BriefEvent[]> {
+async function attachEventSources(pool: DailyBriefQueryable, rows: EventRow[]): Promise<BriefEvent[]> {
   const eventIds = rows.map((row) => row.id);
   const sourcesByEventId = await loadEventSources(pool, eventIds);
 
@@ -264,7 +266,7 @@ async function attachEventSources(pool: Pool, rows: EventRow[]): Promise<BriefEv
 }
 
 async function loadEventSources(
-  pool: Pool,
+  pool: DailyBriefQueryable,
   eventIds: string[],
 ): Promise<Map<string, BriefEventSource[]>> {
   const sourcesByEventId = new Map<string, BriefEventSource[]>();
@@ -305,7 +307,7 @@ async function loadEventSources(
 }
 
 async function loadDigestItems(
-  pool: Pool,
+  pool: DailyBriefQueryable,
   range: ShanghaiDayRange,
 ): Promise<Record<string, BriefContentItem[]>> {
   const result = await pool.query<ContentRow>(
@@ -349,7 +351,7 @@ async function loadDigestItems(
 }
 
 async function loadLongFormItems(
-  pool: Pool,
+  pool: DailyBriefQueryable,
   range: ShanghaiDayRange,
 ): Promise<BriefContentItem[]> {
   const result = await pool.query<ContentRow>(
@@ -388,7 +390,7 @@ async function loadLongFormItems(
 }
 
 async function loadInspirationItems(
-  pool: Pool,
+  pool: DailyBriefQueryable,
   range: ShanghaiDayRange,
 ): Promise<BriefInspirationItem[]> {
   const result = await pool.query<InspirationRow>(

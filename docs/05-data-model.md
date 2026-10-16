@@ -328,14 +328,14 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 
 ### 11.1 `discovery_runs`
 
-每次执行单独创建 Run；人工触发 Open Discovery 创建新的 Run，并通过 `parent_run_id` 关联原常规 Run。相同输入允许不同输出。
+每次独立执行创建 Run；人工补充执行的 Open Discovery 与单条 Lead 执行创建子 Run，并通过 `parent_run_id` 关联原 Regular Run。自动 Fallback Open 若属于 Regular Run 的内部执行阶段，不额外创建子 Run。相同输入允许不同输出。
 
 | Field | Type | Constraint / Notes |
 |---|---|---|
 | `id` | uuid | Primary Key |
-| `parent_run_id` | uuid | nullable, FK → `discovery_runs.id`；人工 Open 或单条 Lead 执行时指向原常规 Run |
-| `source_lead_id` | text | nullable；`single_lead` 必填，引用原 Run 的 `selection_output.leads[].leadId`（应用层校验） |
-| `run_type` | text | NOT NULL；`regular` / `open` / `single_lead` |
+| `parent_run_id` | uuid | nullable, FK → `discovery_runs.id`；`single_lead` 或人工补充 `open` 时指向原 `regular` Run；不得等于自身 `id` |
+| `source_lead_id` | text | nullable；仅 `single_lead` 填写，引用父 Run 的 `selection_output.leads[].leadId`（应用层校验） |
+| `run_type` | text | NOT NULL；`regular` / `single_lead` / `open` |
 | `trigger_source` | text | NOT NULL；`schedule` / `manual` |
 | `status` | text | NOT NULL；`pending` / `running` / `completed` / `partial` / `failed` / `blocked` |
 | `end_reason` | text | 运行中为 NULL；`completed` 对应 `candidates_found`（有候选）或 `no_candidates`（无合格候选）；异常情况如 `timeout` / `budget_exhausted` / `upstream_not_ready` / `error` |
@@ -344,18 +344,26 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 | `input_content_ids` | jsonb | nullable；实际送入 Topic Selection 的 Daily 内容 ID 列表（按 Event / Digest / Long-form 分类），不复制正文 |
 | `selection_output` | jsonb | nullable；Topic Selection 的结构化输出（Direct + Topic 总数最多 8）；Code 为每条 Lead 分配稳定 `leadId`，保留 D2 顺序和类型 |
 | `config_snapshot` | jsonb | nullable；模型、Prompt 版本、输入规则版本、资源限制、当次适用的 Memory，以及人工 Open 的补充说明 / 审核上下文等必要配置 |
+| `execution_state` | jsonb | NOT NULL，默认 `{}`；保存 D3 / D4 独立分支的最小动态执行状态，不属于不可变配置快照 |
 | `started_at` | timestamptz | nullable |
 | `finished_at` | timestamptz | nullable |
 | `error_summary` | text | nullable |
 | `created_at` | timestamptz | NOT NULL |
 | `updated_at` | timestamptz | NOT NULL |
 
-- 日期字段记录**计划输入窗口**，不从实际执行时间推导；`input_content_ids` 记录当次选入的内容 ID，避免复制 Daily 正文。仅凭 ID 无法精确复原后来被修改的内容，首版接受此限制。
+- `run_type` 使用 CHECK 限定为 `regular` / `single_lead` / `open`，并遵守以下父子关系：
+  - `regular`：`parent_run_id` 与 `source_lead_id` 均为 NULL；独立重新执行即使输入窗口相同也创建新的无父 Run，不自动建立父子关系。
+  - `single_lead`：`parent_run_id` 与 `source_lead_id` 均为 NOT NULL；父 Run 必须是原 `regular` Run，Lead 必须来自父 Run 的 `selection_output`。
+  - `open`：`source_lead_id` 为 NULL；人工补充执行时 `parent_run_id` 为 NOT NULL 并指向原 `regular` Run。自动 Fallback Open 作为 `regular` Run 的内部阶段执行，不创建 `run_type = 'open'` 的子 Run。
+- 使用 CHECK 约束上述空值组合：`regular` 只能是无父 Run，`single_lead` 必须同时提供父 Run 和 Lead，独立的 `open` Run 必须提供父 Run 且不能提供 Lead。
+- `CHECK(parent_run_id IS NULL OR parent_run_id <> id)` 防止 Run 自引用；父 Run 的类型与 Lead 归属由应用层验证。
+- 日期字段记录**计划输入窗口**，不从实际执行时间推导；`input_content_ids` 记录当次选入的 Event / Digest / Long-form 内容成员 ID，避免复制 Daily 正文。它不保证当时的完整模型输入文本可复现；本版不增加 `input_snapshot`，D2 实现时再决定模型输入文本的持久化方式。
 - 上游 Daily 未就绪可记录 `blocked` 和 `upstream_not_ready`，不冒充已完成 Discovery。
-- 人工 Open 或 `single_lead` 均不重新执行 Topic Selection；单条执行通过 `parent_run_id + source_lead_id` 定位原线索，Direct 复用 D4、Topic 复用 D3；原运行结果不覆盖。
+- 人工 Open 或 `single_lead` 均不重新执行 Topic Selection；单条执行通过 `parent_run_id + source_lead_id` 定位原线索，Direct 复用 D4、Topic 复用 D3；原运行结果不覆盖。Lead ID 由应用代码在 D2 输出校验后生成，不能由 LLM 自由生成。
 - 各 Lead 的执行状态及关联结果首版通过 Run 的 `selection_output`、关联的 `single_lead` Run 和候选记录查询计算，不新增 Lead 表或冗余状态字段。
 - 自动 Open 仅在常规 Direct / Topic 均正常完成且合计 0 篇合格作品时触发；分支失败不自动重跑、不自动 Open。
 - `status` 与 `end_reason` 分开：例如 `partial + timeout`、`completed + candidates_found` 与 `completed + no_candidates` 的业务含义不同；`end_reason` 只在运行结束时填写。
+- `execution_state` 仅接受 JSON 对象。首版按 `d3` / `d4` 分支保存 `status`、`endReason`、`completedAt` 和必要错误摘要；更新单个分支时不得覆盖另一个分支。`running` 或字段缺失均不表示完成，历史 Run 不从缺失状态推断成功。D3 正常空结果也写入 `d3.status = 'completed'` 与 `endReason = 'no_candidates'`，供 Resume 作确定性判断。
 
 ### 11.2 `discovery_trace_spans`
 
@@ -390,15 +398,22 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 | `id` | uuid | Primary Key |
 | `run_id` | uuid | NOT NULL, FK → `discovery_runs.id` |
 | `discovery_path` | text | NOT NULL；`direct` / `topic` / `open` |
-| `source_content_id` | uuid | nullable；Direct 路径关联原 Daily 内容时使用；实际目标表在实现前核实 |
+| `source_content_type` | text | nullable；明确 Daily 来源存在时为 `event` / `processed_content` |
+| `source_content_id` | uuid | nullable；来源内容 ID；按 `source_content_type` 解释为 `events.id` 或 `processed_contents.id` |
+| `source_lead_id` | text | nullable；候选所来自的 D2 Lead；由应用代码生成并校验，不由 LLM 生成 |
 | `topic_context` | jsonb | nullable；知识探索问题、来源 Daily IDs、News Context 等 |
 | `url` | text | NOT NULL；作品原始 URL |
 | `normalized_url` | text | nullable；去重用规范化 URL |
-| `title` | text | nullable |
+| `title` | text | nullable；作品原始标题 |
+| `title_zh` | text | nullable；中文标题，来自 D3 / D5 输出或后续编辑补充 |
 | `author` | text | nullable |
+| `publication` | text | nullable；作品发布来源，D5 明确输出；其他路径有可靠元数据时填写 |
 | `content_type` | text | nullable；`article` / `video` / `podcast` |
 | `published_at` | timestamptz | nullable |
 | `estimated_duration_minutes` | integer | nullable |
+| `summary` | text | nullable；中文内容概要，来自 D3 / D5 或后续编辑补充 |
+| `why_worth_reading` | text | nullable；中文推荐理由，来自 D3 / D5 或后续编辑补充 |
+| `extra_info` | jsonb | NOT NULL，默认 `{}`；D3 / D4 / D5 的非固定结构补充信息，仅接受 JSON 对象 |
 | `evidence` | jsonb | nullable；实际阅读来源、正文获取程度、引用证据、局限 |
 | `evaluation` | jsonb | nullable；编辑判断、入选或淘汰理由 |
 | `status` | text | NOT NULL；`discovered` / `evaluated` / `selected` / `rejected` / `unverifiable` |
@@ -406,7 +421,20 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 | `updated_at` | timestamptz | NOT NULL |
 
 - 一篇作品可在不同 Run 或不同路径中再次发现，不设置全局 URL UNIQUE；在**同一次审核汇总**时由 Code 进行去重。
-- `source_content_id` 只适用于确有单条 Daily 内容来源的情况；Event 与其他来源 ID 的具体映射须在实现时核实，不强制复用 `raw_articles`。
+- `source_content_type` 与 `source_content_id` 使用组合 CHECK：`(source_content_type IS NULL AND source_content_id IS NULL) OR (source_content_type IN ('event', 'processed_content') AND source_content_id IS NOT NULL)`，因此二者必须同时为 NULL 或同时非 NULL：
+  - Daily Event 来源：`source_content_type = 'event'`，`source_content_id = events.id`。
+  - Digest / Long-form 来源：`source_content_type = 'processed_content'`，`source_content_id = processed_contents.id`。
+  - 无明确单条 Daily 来源（例如 Open Discovery，或由多个 Event 共同启发且不应任选一个作为唯一来源的 Topic Lead）：两个字段均为 NULL。
+- `source_content_id` 表示候选的**来源内容**，不是候选作品本身的 ID。由于它按类型分别引用两张表，不建立单一 FK；应用层负责验证来源存在性以及 ID 与类型匹配。多个来源的完整关系通过 D2 Lead 的输入与 `topic_context` 追溯，首版不增加多对多关系表。
+- `source_lead_id` 的语义取决于执行 Run：
+  - `regular` Run 的 Direct / Topic 候选：引用当前 Run 的 `selection_output.leads[].leadId`。
+  - `single_lead` Run 的候选：引用父 Run 的 `selection_output.leads[].leadId`，并且必须等于子 Run 的 `discovery_runs.source_lead_id`。
+  - `open` 路径候选：为 NULL。
+  Lead 存在 JSONB 中，因此不建立数据库 FK，由应用层校验归属。Lead ID 由应用代码稳定生成，不能由 LLM 自由生成。
+- D3 Final Output 的每篇 Candidate 必须显式提供一个 `sourceLeadId`，且必须属于本次输入的 Topic Leads。Agent 选择作品的主要归属 Lead，Code 严格校验并映射到 `source_lead_id`；首版不猜测默认 Lead，也不建立多对多来源关系。
+- Candidate 使用 CHECK 将 `discovery_path` 限定为 `direct` / `topic` / `open`，并约束 `direct` / `topic` 必须提供 `source_lead_id`、`open` 必须保持 `source_lead_id` 为 NULL。
+- D3 / D5 的 `title_zh`、`summary`、`whyWorthReading` 分别映射为 `title_zh`、`summary`、`why_worth_reading`；D5 的 `publication` 映射为同名字段。D4 的 `decision`、`reason`、`limitations` 等评价结果保存于 `evaluation` / `evidence` JSONB，不要求为每个评价属性建立独立列。Direct 来源的标题译名、概要和推荐理由如尚未生成，可以暂时为 NULL；不得用模型未输出的内容伪造填充。
+- D3 / D4 / D5 的 `extra_info` 统一保存于 `extra_info` JSONB；缺失时规范化为 `{}`，只允许 JSON 对象，禁止数组、字符串等非对象值。应用层应限制序列化大小并过滤敏感、重复、无关内容；`extra_info` 不得替代固定字段、证据或业务校验。
 - `evidence` 保存实际获取的内容证据及其来源，不把 Agent 的自然语言声明当成已阅读证据。
 - 若某篇作品由多个路径发现，可在 `topic_context` / `evidence` 中保留额外来源关联；首版不增加候选来源关系表。
 
@@ -439,6 +467,7 @@ discovery_runs(status, started_at DESC)
 discovery_trace_spans(run_id, started_at)
 discovery_trace_spans(trace_id, span_id) UNIQUE
 discovery_candidates(run_id, discovery_path)
+discovery_candidates(run_id, source_lead_id)
 discovery_candidates(normalized_url)
 in_depth_candidates(discovery_candidate_id) UNIQUE
 in_depth_candidates(review_status, created_at DESC)

@@ -58,18 +58,26 @@
     "test:content-completion-pools": "tsx scripts/test-content-completion-pools.ts",
     "test:pipeline-env": "tsx scripts/test-pipeline-env.ts",
     "test:pipeline-run-log": "tsx scripts/test-pipeline-run-log.ts",
+    "test:discovery-phase1": "tsx scripts/test-discovery-phase1.ts",
+    "test:discovery-phase2": "tsx scripts/test-discovery-phase2.ts",
+    "test:discovery-phase3": "tsx scripts/test-discovery-phase3.ts",
+    "test:discovery-provider": "tsx scripts/test-discovery-provider.ts",
+    "test:discovery-d3": "tsx scripts/test-discovery-d3.ts",
     "test:openai": "tsx scripts/test-openai-call.ts openai",
     "test:openai:chat": "tsx scripts/test-openai-call.ts openai chat-completions",
     "test:openai:chat:structured": "tsx scripts/test-openai-call.ts openai chat-completions-structured",
     "test:stage1:chat": "tsx scripts/test-stage1-chat-structured.ts",
     "test:deepseek": "tsx scripts/test-openai-call.ts deepseek",
-    "test:kimi": "tsx scripts/test-openai-call.ts kimi"
+    "test:kimi": "tsx scripts/test-openai-call.ts kimi",
+    "spike:discovery-agent": "tsx spikes/discovery-agent/index.ts",
+    "test:discovery-agent-spike": "tsx spikes/discovery-agent/test.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@mozilla/readability": "^0.6.0",
+    "@openai/agents": "0.20.0",
     "csv-parse": "^7.0.2",
     "drizzle-orm": "^0.45.2",
     "jsdom": "^29.1.1",
@@ -79,7 +87,8 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "rss-parser": "^3.13.0",
-    "undici": "7.29.1"
+    "undici": "7.29.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/jsdom": "^30.0.0",

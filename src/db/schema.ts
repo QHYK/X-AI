@@ -5,6 +5,7 @@
  */
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   boolean,
   check,
   date,
@@ -22,6 +23,29 @@ const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 };
+
+export type DiscoveryInputContentIds = {
+  event: Array<{ dailyDate: string; id: string }>;
+  digest: Array<{ dailyDate: string; id: string }>;
+  longForm: Array<{ dailyDate: string; id: string }>;
+};
+
+export type DiscoveryBranchExecutionState = {
+  status: 'running' | 'completed' | 'failed';
+  endReason:
+    | 'candidates_found'
+    | 'no_candidates'
+    | 'timeout'
+    | 'budget_exhausted'
+    | 'tool_failure'
+    | 'error'
+    | null;
+  completedAt: string | null;
+  errorSummary?: string | null;
+};
+
+export type DiscoveryExecutionState = Partial<Record<'d3' | 'd4', DiscoveryBranchExecutionState>>;
+
 
 export const sources = pgTable("sources", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -239,6 +263,183 @@ export const pipelineRuns = pgTable("pipeline_runs", {
   index("pipeline_runs_daily_step_started_idx").on(table.dailyDate, table.step, table.startedAt),
 ]);
 
+/** Discovery execution and its fixed two-Daily input membership. */
+export const discoveryRuns = pgTable(
+  'discovery_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    parentRunId: uuid('parent_run_id').references((): AnyPgColumn => discoveryRuns.id),
+    sourceLeadId: text('source_lead_id'),
+    runType: text('run_type').notNull(),
+    triggerSource: text('trigger_source').notNull(),
+    status: text('status').notNull(),
+    endReason: text('end_reason'),
+    windowStartDate: date('window_start_date'),
+    windowEndDate: date('window_end_date'),
+    inputContentIds: jsonb('input_content_ids').$type<DiscoveryInputContentIds>(),
+    selectionOutput: jsonb('selection_output').$type<Record<string, unknown>>(),
+    configSnapshot: jsonb('config_snapshot').$type<Record<string, unknown>>(),
+    executionState: jsonb('execution_state').$type<DiscoveryExecutionState>().notNull().default({}),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    errorSummary: text('error_summary'),
+    ...timestamps,
+  },
+  (table) => [
+    index('discovery_runs_parent_run_id_idx').on(table.parentRunId),
+    index('discovery_runs_status_started_at_idx').on(table.status, table.startedAt),
+    check('discovery_runs_type_check', sql`${table.runType} in ('regular', 'single_lead', 'open')`),
+    check(
+      'discovery_runs_trigger_source_check',
+      sql`${table.triggerSource} in ('schedule', 'manual')`,
+    ),
+    check(
+      'discovery_runs_status_check',
+      sql`${table.status} in ('pending', 'running', 'completed', 'partial', 'failed', 'blocked')`,
+    ),
+    check(
+      'discovery_runs_end_reason_check',
+      sql`${table.endReason} is null or ${table.endReason} in ('candidates_found', 'no_candidates', 'timeout', 'budget_exhausted', 'upstream_not_ready', 'error')`,
+    ),
+    check(
+      'discovery_runs_relationship_check',
+      sql`(
+        (${table.runType} = 'regular' and ${table.parentRunId} is null and ${table.sourceLeadId} is null)
+        or (${table.runType} = 'single_lead' and ${table.parentRunId} is not null and ${table.sourceLeadId} is not null)
+        or (${table.runType} = 'open' and ${table.parentRunId} is not null and ${table.sourceLeadId} is null)
+      )`,
+    ),
+    check(
+      'discovery_runs_parent_not_self_check',
+      sql`${table.parentRunId} is null or ${table.parentRunId} <> ${table.id}`,
+    ),
+    check(
+      'discovery_runs_window_check',
+      sql`(${table.windowStartDate} is null and ${table.windowEndDate} is null) or (${table.windowStartDate} is not null and ${table.windowEndDate} is not null and ${table.windowStartDate} <= ${table.windowEndDate})`,
+    ),
+    check(
+      'discovery_runs_execution_state_object_check',
+      sql`jsonb_typeof(${table.executionState}) = 'object'`,
+    ),
+  ],
+);
+
+/** Sanitized SDK trace data; never a source of business state. */
+export const discoveryTraceSpans = pgTable(
+  'discovery_trace_spans',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => discoveryRuns.id, { onDelete: 'cascade' }),
+    traceId: text('trace_id').notNull(),
+    spanId: text('span_id').notNull(),
+    parentSpanId: text('parent_span_id'),
+    spanType: text('span_type').notNull(),
+    name: text('name'),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    status: text('status'),
+    payload: jsonb('payload').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('discovery_trace_spans_run_started_idx').on(table.runId, table.startedAt),
+    uniqueIndex('discovery_trace_spans_trace_span_unique').on(table.traceId, table.spanId),
+  ],
+);
+
+/** Works inspected by Discovery, including candidates that are later rejected. */
+export const discoveryCandidates = pgTable(
+  'discovery_candidates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => discoveryRuns.id, { onDelete: 'cascade' }),
+    discoveryPath: text('discovery_path').notNull(),
+    sourceContentType: text('source_content_type'),
+    sourceContentId: uuid('source_content_id'),
+    sourceLeadId: text('source_lead_id'),
+    topicContext: jsonb('topic_context').$type<Record<string, unknown>>(),
+    url: text('url').notNull(),
+    normalizedUrl: text('normalized_url'),
+    title: text('title'),
+    titleZh: text('title_zh'),
+    author: text('author'),
+    publication: text('publication'),
+    contentType: text('content_type'),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    estimatedDurationMinutes: integer('estimated_duration_minutes'),
+    summary: text('summary'),
+    whyWorthReading: text('why_worth_reading'),
+    extraInfo: jsonb('extra_info').$type<Record<string, unknown>>().notNull().default({}),
+    evidence: jsonb('evidence').$type<Record<string, unknown>>(),
+    evaluation: jsonb('evaluation').$type<Record<string, unknown>>(),
+    status: text('status').notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    index('discovery_candidates_run_path_idx').on(table.runId, table.discoveryPath),
+    index('discovery_candidates_run_lead_idx').on(table.runId, table.sourceLeadId),
+    index('discovery_candidates_normalized_url_idx').on(table.normalizedUrl),
+    check(
+      'discovery_candidates_path_check',
+      sql`${table.discoveryPath} in ('direct', 'topic', 'open')`,
+    ),
+    check(
+      'discovery_candidates_source_check',
+      sql`(
+        (${table.sourceContentType} is null and ${table.sourceContentId} is null)
+        or (${table.sourceContentType} in ('event', 'processed_content') and ${table.sourceContentId} is not null)
+      )`,
+    ),
+    check(
+      'discovery_candidates_lead_check',
+      sql`(
+        (${table.discoveryPath} in ('direct', 'topic') and ${table.sourceLeadId} is not null)
+        or (${table.discoveryPath} = 'open' and ${table.sourceLeadId} is null)
+      )`,
+    ),
+    check(
+      'discovery_candidates_content_type_check',
+      sql`${table.contentType} is null or ${table.contentType} in ('article', 'video', 'podcast')`,
+    ),
+    check(
+      'discovery_candidates_status_check',
+      sql`${table.status} in ('discovered', 'evaluated', 'selected', 'rejected', 'unverifiable')`,
+    ),
+    check(
+      'discovery_candidates_extra_info_object_check',
+      sql`jsonb_typeof(${table.extraInfo}) = 'object'`,
+    ),
+  ],
+);
+
+/** Candidates promoted into the human-review queue. */
+export const inDepthCandidates = pgTable(
+  'in_depth_candidates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    discoveryCandidateId: uuid('discovery_candidate_id')
+      .notNull()
+      .references(() => discoveryCandidates.id, { onDelete: 'cascade' }),
+    reviewStatus: text('review_status').notNull(),
+    editorialNotes: text('editorial_notes'),
+    editorialOverrides: jsonb('editorial_overrides').$type<Record<string, unknown>>(),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('in_depth_candidates_candidate_unique').on(table.discoveryCandidateId),
+    index('in_depth_candidates_review_created_idx').on(table.reviewStatus, table.createdAt),
+    check(
+      'in_depth_candidates_review_status_check',
+      sql`${table.reviewStatus} in ('pending', 'approved', 'rejected')`,
+    ),
+  ],
+);
+
 /** 人工触发的模型评测所冻结的 Stage 输入；与正式业务表完全隔离。 */
 export const evaluationInputs = pgTable(
   "evaluation_inputs",
@@ -315,3 +516,11 @@ export type EvaluationRun = typeof evaluationRuns.$inferSelect;
 export type NewEvaluationRun = typeof evaluationRuns.$inferInsert;
 export type EvaluationOutput = typeof evaluationOutputs.$inferSelect;
 export type NewEvaluationOutput = typeof evaluationOutputs.$inferInsert;
+export type DiscoveryRun = typeof discoveryRuns.$inferSelect;
+export type NewDiscoveryRun = typeof discoveryRuns.$inferInsert;
+export type DiscoveryTraceSpan = typeof discoveryTraceSpans.$inferSelect;
+export type NewDiscoveryTraceSpan = typeof discoveryTraceSpans.$inferInsert;
+export type DiscoveryCandidate = typeof discoveryCandidates.$inferSelect;
+export type NewDiscoveryCandidate = typeof discoveryCandidates.$inferInsert;
+export type InDepthCandidate = typeof inDepthCandidates.$inferSelect;
+export type NewInDepthCandidate = typeof inDepthCandidates.$inferInsert;

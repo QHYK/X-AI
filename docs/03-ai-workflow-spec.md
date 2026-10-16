@@ -56,10 +56,10 @@ flowchart LR
 | Stage 3 | 在各自 Channel 中，哪些内容更重要或更值得投入注意力？ |
 | Stage 4 | 如何把入选 Event 准确整理成可直接阅读的最终内容？ |
 | Read More | 如何基于完整正文，为用户提供更深入的中文阅读导读？ |
-| Topic Selection（拟新增） | 哪些现有作品值得全文验证？哪些新闻能引出值得探索的知识问题？ |
-| Direct Candidate Evaluation（拟新增） | Daily 已有作品经过实际内容阅读后，是否达到 X-field 的推荐标准？ |
-| Topic Discovery Agent（拟新增） | 围绕知识问题，下一步搜索、阅读和追踪，是否有值得人工审核的作品？ |
-| Open Discovery（拟新增） | 不受当期新闻限制，能自主找到并评价哪些值得人工审核的优秀作品？ |
+| D2 Topic Selection（拟新增） | 哪些现有作品值得全文验证？哪些新闻能引出值得探索的知识问题？ |
+| D4 Direct Candidate Evaluation（拟新增） | Daily 已有作品经过实际内容阅读后，是否达到 X-field 的推荐标准？ |
+| D3 Topic Discovery Agent（拟新增） | 围绕知识问题，下一步搜索、阅读和追踪，是否有值得人工审核的作品？ |
+| D5 Open Discovery（拟新增） | 不受当期新闻限制，能自主找到并评价哪些值得人工审核的优秀作品？ |
 
 ---
 

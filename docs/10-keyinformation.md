@@ -15,3 +15,15 @@ Long-form| 直接剔除    | 去重	 | 按输入顺序追加到末尾
 2. 分支失败：保留另一分支的有效结果，记录错误，不自动重跑，也不自动触发 Open。
 3. 人工审核：除了最终推荐作品，还展示 D2 Topic Selection 的全部线索及其执行结果。
 4. 人工补充执行：审核者可以选择某条 Direct 或 Topic 线索，按对应 ID 单独执行；也可以直接触发 Open Discovery。
+- **D3** ：一次 Agent Run 接收全部 Topic Leads，自主决定搜索顺序、是否切换方向、是否继续探索
+- **D4** 串行调用llm，每完成一篇 立刻更新数据库
+
+Candidate 创建后，LLM 成功或失败分别是什么状态：
+阶段	Candidate 状态
+创建 Candidate，等待 LLM 评价	discovered
+LLM 调用失败	仍为 discovered
+LLM 返回 qualified	evaluated
+qualified 且进入人工审核队列	selected
+LLM 返回 rejected	rejected
+LLM 返回 unverifiable	unverifiable
+

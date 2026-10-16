@@ -48,7 +48,8 @@
 
 Discovery 每两天 12:00（Asia/Shanghai）由独立入口触发。Code 固定本次依赖的两期 Daily 日期和实际输入内容 ID，不因补跑而滑动窗口。
 
-- 两期 Daily 均成功完成后，才启动 Discovery。
+- 两期 Daily 均成功完成后，才启动 Discovery。每一期的就绪判断为：该 `daily_date` 至少存在一条 `pipeline_runs.step IN ('daily', 'stage4') AND status = 'success'` 的记录。
+- `stage4/success` 可独立证明该期 Daily 已完成；手动重跑 Stage4 成功后，不要求原 Daily Run 的状态同步更新，也不增加额外发布状态校验。
 - 任一期未完成，则阻塞；人工修复 Daily 后，按原定两期日期补跑 Discovery。上游失败不等于正常空结果。
 
 ### 2.2 Daily 输入
@@ -102,15 +103,15 @@ Topic Selection 是**潜力筛选**，不是最终质量验证：
 
 Selection 完成后，两条路径可以并发：
 
-1. **Direct Candidate Verification（D4）**：优先读取 Daily 已入库的 `raw_articles.full_content_text`，为空时使用 `raw_articles.content_text`，标注 `content_source`；Code 检查 URL、历史重复及可核查的时长信息；普通 LLM **批量逐篇评价，不负责排名或控制最终提交数量**。默认不重新抓取；正文不足返回 `unverifiable` 并说明缺失证据。
-2. **Topic Discovery（D3）**：将 Knowledge Question + News Context 交给 Discovery Agent，通过 Agents SDK 的 Web Search 和自定义 `fetch_content` 搜索、读取 Daily 之外的作品。
+1. **Direct Candidate Verification（D4）**：优先读取 Daily 已入库的 `raw_articles.full_content_text`，为空时使用 `raw_articles.content_text`，标注 `content_source`；Code 检查 URL、历史重复及可核查的时长信息；普通 LLM 按 D2 优先级逐篇串行评价，每篇独立请求，不负责排名或控制最终提交数量。默认不重新抓取；正文不足返回 `unverifiable` 并说明缺失证据。
+2. **Topic Discovery（D3）**：一个 Agent Run 接收全部 Topic Leads，通过 Agents SDK 的 Web Search 和自定义 `fetch_content` 自主搜索、读取 Daily 之外的作品；整个 D3 最多输出 3 篇，不要求覆盖全部 Topic。
 
 并发只是执行组织方式，不意味着必须使用多个 Agent 或复杂协调器。两条路径独立报告成功、空结果或失败；其中一条失败不应自动抹去另一条已经得到的有效候选。
 
 ### 4.2 Discovery Agent Loop
 
 ```text
-Input: Knowledge Question + News Context + Content Criteria + Memory
+Input: All Topic Leads + Content Criteria + Memory
                          │
                          ▼
                    LLM Decision
@@ -240,9 +241,21 @@ Agent 可发现多个可比较候选；**Open Discovery 最多提交 3 篇 / 个
 
 运行 Trace 与正式业务数据应区分。Agents SDK 的 Trace / Span 通过自定义 TracingProcessor 持久化到 PostgreSQL；普通 LLM Client 和 Code 检查首版保留必要业务记录，不强制包装为 SDK Span。Agent 自述的搜索 / 阅读过程不能代替真实工具调用记录。
 
-### 8.3 人工补充执行
+### 8.3 Run 恢复与重新生成
 
-分支失败不自动重跑。人工可在审核页面选择原 D2 的 `leadId` 单独执行，或启动 Open；每次创建新 Run、关联原 Run 与所选 Lead，独立保存执行结果和 Trace。Discovery 不要求相同输入产生相同输出。
+Discovery 分支失败后不自动重跑。是否复用原 Run，以 D2 的持久化结果为边界：
+
+- `discovery_runs.selection_output` 尚未成功持久化时，D2 不视为完成。不得恢复该 Run；应创建新的 Regular Run ID，并从 D2 重新执行。
+- `selection_output` 已成功持久化时，D2 即视为完成，不能仅凭整体 Run status 判断。后续 D3 或 D4 失败时，Resume 复用原 Run ID、固定输入成员和 D2 结果，只执行尚未完成的任务。
+- Resume 不覆盖或重复执行已经完成并持久化的评价结果；各分支根据已有持久化结果跳过完成项，只继续 missing / failed 项。
+- D3 / D4 的完成判断读取 `discovery_runs.execution_state` 中各自分支状态。D3 正常返回 0 篇仍写入 `completed + no_candidates`；缺失状态或进程异常遗留的 `running` 不视为完成。分支状态独立更新，任何一条分支失败都不得覆盖另一条分支的完成记录或候选。
+- Resume 用于继续未完成的同一次执行。若操作目的为主动重新生成内容，而不是完成失败任务，则创建 New Run，不覆盖原 Run 的 Selection、Candidate、评价或 Trace。
+
+当前 D3 Resume 以完整 Agent Run 为恢复边界：已完成则跳过；未完成、失败或遗留 `running` 时重新执行整个 D3，不实现 Agent 内部 Checkpoint。D4 继续复用 Candidate 级 Resume。
+
+### 8.4 人工补充执行
+
+人工可在审核页面选择原 D2 的 `leadId` 单独执行，或启动 Open；这属于新的人工补充执行，不是原 Run Resume。每次创建新 Run、关联原 Run 与所选 Lead，独立保存执行结果和 Trace。Discovery 不要求相同输入产生相同输出。
 
 ---
 
