@@ -222,7 +222,7 @@ started_at, finished_at, metrics, error_summary, created_at, updated_at
 - `status`: `running`、`success`、`partial`、`failed`；Stage 4 的 `partial` 与其 business table
   `stage4_runs.status` 保持同一 canonical 值。
 - `trigger_source`: `daily_orchestrator`、`standalone`、`dashboard`。
-- `metrics` 为小型 JSONB 摘要（调用数、重试、耗时、Stage 特有计数等），不机械复制 runtime JSON。
+- `metrics` 为小型 JSONB 摘要（调用数、重试、耗时、Stage 特有计数及 Provider usage）；LLM Stage 可记录 `input_tokens`、`output_tokens`、`total_tokens`、`cached_input_tokens` 与 `token_usage_complete`。缓存命中率是由完整统计派生的 `cached_input_tokens / input_tokens`，不持久化，也不机械复制 runtime JSON。
 - Dashboard 对指定 `daily_date + step` 选择 `started_at` 最新的一条，即 Latest Attempt。
 - 索引：`(daily_date, step, started_at DESC)`。
 
@@ -344,7 +344,7 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 | `input_content_ids` | jsonb | nullable；实际送入 Topic Selection 的 Daily 内容 ID 列表（按 Event / Digest / Long-form 分类），不复制正文 |
 | `selection_output` | jsonb | nullable；Topic Selection 的结构化输出（Direct + Topic 总数最多 8）；Code 为每条 Lead 分配稳定 `leadId`，保留 D2 顺序和类型 |
 | `config_snapshot` | jsonb | nullable；模型、Prompt 版本、输入规则版本、资源限制、当次适用的 Memory，以及人工 Open 的补充说明 / 审核上下文等必要配置 |
-| `execution_state` | jsonb | NOT NULL，默认 `{}`；保存 D3 / D4 独立分支的最小动态执行状态，不属于不可变配置快照 |
+| `execution_state` | jsonb | NOT NULL，默认 `{}`；保存 D2–D5 的阶段级动态执行状态与诊断，不属于不可变配置快照 |
 | `started_at` | timestamptz | nullable |
 | `finished_at` | timestamptz | nullable |
 | `error_summary` | text | nullable |
@@ -363,7 +363,8 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 - 各 Lead 的执行状态及关联结果首版通过 Run 的 `selection_output`、关联的 `single_lead` Run 和候选记录查询计算，不新增 Lead 表或冗余状态字段。
 - 自动 Open 仅在常规 Direct / Topic 均正常完成且合计 0 篇合格作品时触发；分支失败不自动重跑、不自动 Open。
 - `status` 与 `end_reason` 分开：例如 `partial + timeout`、`completed + candidates_found` 与 `completed + no_candidates` 的业务含义不同；`end_reason` 只在运行结束时填写。
-- `execution_state` 仅接受 JSON 对象。首版按 `d3` / `d4` 分支保存 `status`、`endReason`、`completedAt` 和必要错误摘要；更新单个分支时不得覆盖另一个分支。`running` 或字段缺失均不表示完成，历史 Run 不从缺失状态推断成功。D3 正常空结果也写入 `d3.status = 'completed'` 与 `endReason = 'no_candidates'`，供 Resume 作确定性判断。
+- `execution_state` 仅接受 JSON 对象。已执行阶段以 `d2` / `d3` / `d4` 键保存 `status`、`endReason`、`completedAt`、错误摘要、Provider / Model / API mode、累计 `elapsedMs` 与 `usage`；D5 未实现时不创建虚假 `d5` 记录。更新单个阶段时不得覆盖其他阶段。`running` 或字段缺失均不表示完成，历史 Run 不从缺失状态推断成功。D3 正常空结果也写入 `d3.status = 'completed'` 与 `endReason = 'no_candidates'`，供 Resume 作确定性判断。
+- `usage` 包含 `requests`、`inputTokens`、`outputTokens`、`cachedInputTokens` 与 `usageComplete`。缓存输入已包含在输入 Token 内，不得再次加到总 Token；Provider 未返回某字段使用 `null`，任一请求缺失完整 Usage 时 `usageComplete = false`。缓存命中率是读取端派生指标（`cachedInputTokens / inputTokens`），不持久化；统计不完整时不得展示为完整命中率。
 
 ### 11.2 `discovery_trace_spans`
 

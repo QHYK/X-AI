@@ -15,6 +15,10 @@ import {
 } from '../src/discovery/run-service.js';
 import { runDiscoveryD2, type DiscoverySelectionOutput } from '../src/discovery/topic-selection.js';
 import type { DiscoveryInputContentIds } from '../src/db/schema.js';
+import {
+  discoveryCacheHitRate,
+  normalizeDiscoveryStageUsage,
+} from '../src/discovery/execution-diagnostics.js';
 import { loadPipelineEnvironment } from '../src/lib/pipeline-env.js';
 import type { LlmResponse } from '../src/processing/llm-client.js';
 
@@ -184,6 +188,7 @@ async function main(): Promise<void> {
         : { status: 'completed', hasCandidates: d4.submittedForReview > 0 },
     );
     const candidates = await loadCandidateReviews(pool, runId);
+    const finalRun = await getDiscoveryRun(pool, runId);
     const combinedUsage = sumTokenUsage(d2TokenUsage, d4.tokenUsage);
 
     console.log(
@@ -216,6 +221,10 @@ async function main(): Promise<void> {
             d4: d4TokenUsage,
             d4Complete: d4TokenUsageComplete,
             total: combinedUsage,
+          },
+          executionDiagnostics: {
+            d2: formatStageExecution(finalRun?.executionState.d2),
+            d4: formatStageExecution(finalRun?.executionState.d4),
           },
           elapsedMs: {
             d2: d2ElapsedMs,
@@ -578,6 +587,40 @@ function sumTokenUsage(
     input_tokens: (d2?.input_tokens ?? 0) + (d4?.input_tokens ?? 0),
     output_tokens: (d2?.output_tokens ?? 0) + (d4?.output_tokens ?? 0),
     total_tokens: (d2?.total_tokens ?? 0) + (d4?.total_tokens ?? 0),
+    ...(typeof d2?.cached_input_tokens === 'number' && typeof d4?.cached_input_tokens === 'number'
+      ? { cached_input_tokens: d2.cached_input_tokens + d4.cached_input_tokens }
+      : typeof d2?.cached_input_tokens === 'number'
+        ? { cached_input_tokens: d2.cached_input_tokens }
+        : typeof d4?.cached_input_tokens === 'number'
+          ? { cached_input_tokens: d4.cached_input_tokens }
+          : {}),
+  };
+}
+
+function formatStageExecution(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const state = value as Record<string, unknown>;
+  const usage = normalizeDiscoveryStageUsage(state.usage);
+  return {
+    status: state.status ?? null,
+    endReason: state.endReason ?? null,
+    provider: state.provider ?? null,
+    model: state.model ?? null,
+    apiMode: state.apiMode ?? null,
+    elapsedMs: state.elapsedMs ?? null,
+    errorSummary: state.errorSummary ?? null,
+    usage: {
+      requests: usage.requests,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      totalTokens:
+        usage.inputTokens === null || usage.outputTokens === null
+          ? null
+          : usage.inputTokens + usage.outputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      cacheHitRate: discoveryCacheHitRate(usage),
+      usageComplete: usage.usageComplete,
+    },
   };
 }
 

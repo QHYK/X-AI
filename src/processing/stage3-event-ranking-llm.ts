@@ -8,7 +8,7 @@ import {
   resolveStageLlmModel,
   resolveStageLlmProvider,
   type LlmProvider,
-} from "./llm-client.js";
+} from './llm-client.js';
 import {
   deriveStage3EventRankings,
   normalizeStage3EventRankingOutput,
@@ -19,13 +19,20 @@ import {
   type Stage3EventRankingInput,
   type Stage3EventRankingIntegrity,
   type Stage3EventRankingOutput,
-} from "./stage3-contract.js";
+} from './stage3-contract.js';
 import {
   buildStage3EventRankingInstructions,
   buildStage3EventRankingUserPrompt,
   STAGE3_EVENT_RANKING_PROMPT_VERSION,
-} from "../prompts/stage3-event-ranking.js";
-import { resolveStageLlmRuntimeConfig } from "./stage-llm-runtime-config.js";
+} from '../prompts/stage3-event-ranking.js';
+import { resolveStageLlmRuntimeConfig } from './stage-llm-runtime-config.js';
+import {
+  emptyLlmTokenUsage,
+  mergeLlmTokenUsage,
+  missingLlmTokenUsage,
+  usageFromProvider,
+  type LlmTokenUsage,
+} from './llm-token-usage.js';
 
 export type Stage3EventRankingLlmOptions = {
   provider?: LlmProvider;
@@ -34,11 +41,7 @@ export type Stage3EventRankingLlmOptions = {
   maxRetries?: number;
 };
 
-export type Stage3EventRankingTokenUsage = {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-};
+export type Stage3EventRankingTokenUsage = LlmTokenUsage;
 
 export type Stage3EventRankingSuccess = {
   success: true;
@@ -53,7 +56,7 @@ export type Stage3EventRankingSuccess = {
   elapsedMs: number;
   tokenUsage: Stage3EventRankingTokenUsage | null;
   rawOutputText: string;
-  warnings: import("./stage3-contract.js").Stage3RankingWarnings;
+  warnings: import('./stage3-contract.js').Stage3RankingWarnings;
 };
 
 export type Stage3EventRankingFailure = {
@@ -69,36 +72,27 @@ export type Stage3EventRankingFailure = {
   rawOutputText: string | null;
 };
 
-export type Stage3EventRankingResult =
-  | Stage3EventRankingSuccess
-  | Stage3EventRankingFailure;
+export type Stage3EventRankingResult = Stage3EventRankingSuccess | Stage3EventRankingFailure;
 
 /** 调用模型返回最多 50 个 Event Group 的排序，并保留 token 与重试观测。 */
 export async function runStage3EventRankingLlm(
   input: Stage3EventRankingInput,
   options: Stage3EventRankingLlmOptions = {},
 ): Promise<Stage3EventRankingResult> {
-  const provider = options.provider ?? resolveStageLlmProvider("stage3");
-  const model = options.model ?? (
-    options.provider
-      ? resolveLlmModel(undefined, provider)
-      : resolveStageLlmModel("stage3")
-  );
-  const runtimeConfig = resolveStageLlmRuntimeConfig("stage3");
+  const provider = options.provider ?? resolveStageLlmProvider('stage3');
+  const model =
+    options.model ??
+    (options.provider ? resolveLlmModel(undefined, provider) : resolveStageLlmModel('stage3'));
+  const runtimeConfig = resolveStageLlmRuntimeConfig('stage3');
   const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
   const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const expectedIds = input.events.map((event) => event.id);
-  const tokenUsage: Stage3EventRankingTokenUsage = {
-    inputTokens: 0,
-    outputTokens: 0,
-    totalTokens: 0,
-  };
-  let hasTokenUsage = false;
+  let tokenUsage = emptyLlmTokenUsage();
 
   let rawOutputText: string | null = null;
-  let lastError = "Unknown Stage 3 Event Ranking LLM failure.";
+  let lastError = 'Unknown Stage 3 Event Ranking LLM failure.';
   let lastAssignment: Stage3EventRankingIntegrity | null = null;
   let attemptsUsed = 0;
 
@@ -112,10 +106,10 @@ export async function runStage3EventRankingLlm(
             instructions: buildStage3EventRankingInstructions(),
             input: [
               {
-                role: "user",
+                role: 'user',
                 content: [
                   {
-                    type: "input_text",
+                    type: 'input_text',
                     text: buildStage3EventRankingUserPrompt(input),
                   },
                 ],
@@ -125,9 +119,9 @@ export async function runStage3EventRankingLlm(
             store: false,
             text: {
               format: {
-                type: "json_schema",
-                name: "stage3_event_ranking",
-                description: "Up to 50 most important Stage 3 Event IDs in ranked order.",
+                type: 'json_schema',
+                name: 'stage3_event_ranking',
+                description: 'Up to 50 most important Stage 3 Event IDs in ranked order.',
                 schema: stage3EventRankingOutputJsonSchema,
                 strict: true,
               },
@@ -138,17 +132,12 @@ export async function runStage3EventRankingLlm(
           },
         );
 
-        if (response.usage) {
-          tokenUsage.inputTokens += response.usage.input_tokens;
-          tokenUsage.outputTokens += response.usage.output_tokens;
-          tokenUsage.totalTokens += response.usage.total_tokens;
-          hasTokenUsage = true;
-        }
+        tokenUsage = mergeLlmTokenUsage(tokenUsage, usageFromProvider(response.usage));
         rawOutputText = response.output_text;
         const validation = parseAndValidateStage3EventRankingOutput(rawOutputText);
         if (!validation.success) {
           lastAssignment = null;
-          lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
+          lastError = `Structured output validation failed: ${validation.errors.join('; ')}`;
           if (attempt <= maxRetries) {
             await sleep(runtimeConfig.retryDelayMs * attempt);
             continue;
@@ -157,14 +146,11 @@ export async function runStage3EventRankingLlm(
           break;
         }
 
-        const assignment = validateStage3EventRankingIntegrity(
-          validation.output,
-          expectedIds,
-        );
+        const assignment = validateStage3EventRankingIntegrity(validation.output, expectedIds);
         lastAssignment = assignment;
         const normalized = normalizeStage3EventRankingOutput(validation.output, expectedIds);
         if (!normalized.success) {
-          lastError = `Ranking integrity validation failed: ${normalized.integrity.errors.join("; ")}`;
+          lastError = `Ranking integrity validation failed: ${normalized.integrity.errors.join('; ')}`;
           break;
         }
         return {
@@ -179,10 +165,11 @@ export async function runStage3EventRankingLlm(
           responseId: response.id,
           attempts: attempt,
           elapsedMs: Date.now() - startedAt,
-          tokenUsage: hasTokenUsage ? tokenUsage : null,
+          tokenUsage: attemptsUsed > 0 ? tokenUsage : null,
           rawOutputText,
         };
       } catch (error) {
+        tokenUsage = mergeLlmTokenUsage(tokenUsage, missingLlmTokenUsage());
         lastError = sanitizeLlmError(error instanceof Error ? error.message : String(error));
         if (isNonRetryableLlmError(lastError)) {
           break;
@@ -203,7 +190,7 @@ export async function runStage3EventRankingLlm(
       promptVersion: STAGE3_EVENT_RANKING_PROMPT_VERSION,
       attempts: attemptsUsed,
       elapsedMs: Date.now() - startedAt,
-      tokenUsage: hasTokenUsage ? tokenUsage : null,
+      tokenUsage: attemptsUsed > 0 ? tokenUsage : null,
       error: lastError,
       rawOutputText,
     };
@@ -214,14 +201,14 @@ export async function runStage3EventRankingLlm(
 
 function isNonRetryableLlmError(errorMessage: string): boolean {
   return (
-    errorMessage.includes("401") ||
-    errorMessage.includes("Incorrect API key") ||
-    errorMessage.includes("invalid_api_key")
+    errorMessage.includes('401') ||
+    errorMessage.includes('Incorrect API key') ||
+    errorMessage.includes('invalid_api_key')
   );
 }
 
 function sanitizeLlmError(errorMessage: string): string {
-  return errorMessage.replace(/sk-[A-Za-z0-9_*.-]+/g, "[redacted_api_key]");
+  return errorMessage.replace(/sk-[A-Za-z0-9_*.-]+/g, '[redacted_api_key]');
 }
 
 function sleep(ms: number): Promise<void> {

@@ -7,18 +7,20 @@ import {
   buildStage4EventEnrichmentUserPrompt,
   STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
   type Stage4EventEnrichmentInput,
-} from "../prompts/stage4-event-enrichment.js";
-import {
-  createLlmClient,
-  resolveStageLlmModel,
-  resolveStageLlmProvider,
-} from "./llm-client.js";
+} from '../prompts/stage4-event-enrichment.js';
+import { createLlmClient, resolveStageLlmModel, resolveStageLlmProvider } from './llm-client.js';
 import {
   parseAndValidateStage4EventEnrichmentOutput,
   stage4EventEnrichmentOutputJsonSchema,
   type Stage4EventEnrichmentOutput,
-} from "./stage4-contract.js";
-import { resolveStageLlmRuntimeConfig } from "./stage-llm-runtime-config.js";
+} from './stage4-contract.js';
+import { resolveStageLlmRuntimeConfig } from './stage-llm-runtime-config.js';
+import {
+  mergeLlmTokenUsage,
+  missingLlmTokenUsage,
+  usageFromProvider,
+  type LlmTokenUsage,
+} from './llm-token-usage.js';
 
 export type Stage4LlmOptions = {
   model?: string;
@@ -26,11 +28,11 @@ export type Stage4LlmOptions = {
   maxRetries?: number;
 };
 
-export type Stage4TokenUsage = { inputTokens: number; outputTokens: number; totalTokens: number };
+export type Stage4TokenUsage = LlmTokenUsage;
 
 export type Stage4WebSearchToolUsage = {
-  apiMode: "responses" | "chat_completions";
-  usage: { inputTokens: number; outputTokens: number; totalTokens: number } | null;
+  apiMode: 'responses' | 'chat_completions';
+  usage: Stage4TokenUsage | null;
   webSearchPerformed: boolean;
   webSearchCallCount: number;
   sources: string[];
@@ -76,13 +78,14 @@ export type Stage4LlmFailure = {
 };
 
 export type Stage4LlmResult = Stage4LlmSuccess | Stage4LlmFailure;
-export type Stage4LlmErrorKind = "quota_or_auth_unavailable" | "transient" | "ordinary";
+export type Stage4LlmErrorKind = 'quota_or_auth_unavailable' | 'transient' | 'ordinary';
 
 export function classifyStage4LlmError(message: string): Stage4LlmErrorKind {
   const value = message.toLowerCase();
-  if (value.includes("insufficient_quota") || value.includes("auth_unavailable")) return "quota_or_auth_unavailable";
-  if (value.includes("timeout") || /\b5\d\d\b/.test(value)) return "transient";
-  return "ordinary";
+  if (value.includes('insufficient_quota') || value.includes('auth_unavailable'))
+    return 'quota_or_auth_unavailable';
+  if (value.includes('timeout') || /\b5\d\d\b/.test(value)) return 'transient';
+  return 'ordinary';
 }
 
 /** 生成单个已选 Event 的可持久化双语内容，并校验 Structured Output。 */
@@ -90,20 +93,25 @@ export async function runStage4EventEnrichmentLlm(
   input: Stage4EventEnrichmentInput,
   options: Stage4LlmOptions = {},
 ): Promise<Stage4LlmResult> {
-  const provider = resolveStageLlmProvider("stage4");
-  const model = resolveStageLlmModel("stage4", options.model);
-  const runtimeConfig = resolveStageLlmRuntimeConfig("stage4");
+  const provider = resolveStageLlmProvider('stage4');
+  const model = resolveStageLlmModel('stage4', options.model);
+  const runtimeConfig = resolveStageLlmRuntimeConfig('stage4');
   const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
   const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
-  const contextDecision = await determineWhetherExternalContextIsNeeded(client, model, input, timeoutMs);
+  const contextDecision = await determineWhetherExternalContextIsNeeded(
+    client,
+    model,
+    input,
+    timeoutMs,
+  );
   let tokenUsage = contextDecision.tokenUsage;
   let llmDurationMs = contextDecision.llmDurationMs;
   const useWebSearch = contextDecision.needExternalContext;
 
   let rawOutputText: string | null = null;
-  let lastError = "Unknown Stage 4 LLM failure.";
+  let lastError = 'Unknown Stage 4 LLM failure.';
   let attemptsUsed = 0;
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
@@ -113,26 +121,30 @@ export async function runStage4EventEnrichmentLlm(
       const response = await (useWebSearch ? client.responses : client.structured).create(
         {
           model,
-          instructions: buildStage4EventEnrichmentInstructions({ webSearchAvailable: useWebSearch }),
+          instructions: buildStage4EventEnrichmentInstructions({
+            webSearchAvailable: useWebSearch,
+          }),
           input: [
             {
-              role: "user",
+              role: 'user',
               content: [
                 {
-                  type: "input_text",
+                  type: 'input_text',
                   text: buildStage4EventEnrichmentUserPrompt(input),
                 },
               ],
             },
           ],
           max_output_tokens: 4_000,
-          ...(useWebSearch ? { tools: [{ type: "web_search" }], tool_choice: "auto" as const } : {}),
+          ...(useWebSearch
+            ? { tools: [{ type: 'web_search' }], tool_choice: 'auto' as const }
+            : {}),
           store: false,
           text: {
             format: {
-              type: "json_schema",
-              name: "stage4_event_enrichment",
-              description: "Structured Stage 4 selected event enrichment output.",
+              type: 'json_schema',
+              name: 'stage4_event_enrichment',
+              description: 'Structured Stage 4 selected event enrichment output.',
               schema: stage4EventEnrichmentOutputJsonSchema,
               strict: true,
             },
@@ -148,7 +160,7 @@ export async function runStage4EventEnrichmentLlm(
       tokenUsage = sumStage4TokenUsage(tokenUsage, normalizeUsage(response.usage));
       const validation = parseAndValidateStage4EventEnrichmentOutput(rawOutputText);
       if (!validation.success) {
-        lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
+        lastError = `Structured output validation failed: ${validation.errors.join('; ')}`;
         if (attempt <= maxRetries) {
           await sleep(runtimeConfig.retryDelayMs * attempt);
           continue;
@@ -180,7 +192,11 @@ export async function runStage4EventEnrichmentLlm(
     } catch (error) {
       llmDurationMs += Date.now() - requestStartedAt;
       lastError = sanitizeLlmError(error instanceof Error ? error.message : String(error));
-      if (classifyStage4LlmError(lastError) === "quota_or_auth_unavailable" || isNonRetryableLlmError(lastError)) {
+      tokenUsage = sumStage4TokenUsage(tokenUsage, missingLlmTokenUsage());
+      if (
+        classifyStage4LlmError(lastError) === 'quota_or_auth_unavailable' ||
+        isNonRetryableLlmError(lastError)
+      ) {
         break;
       }
 
@@ -215,34 +231,42 @@ async function determineWhetherExternalContextIsNeeded(
   model: string,
   input: Stage4EventEnrichmentInput,
   timeoutMs: number,
-): Promise<{ needExternalContext: boolean; llmCallCount: number; llmDurationMs: number; tokenUsage: Stage4TokenUsage | null }> {
+): Promise<{
+  needExternalContext: boolean;
+  llmCallCount: number;
+  llmDurationMs: number;
+  tokenUsage: Stage4TokenUsage;
+}> {
   const requestStartedAt = Date.now();
   try {
-    const response = await client.structured.create({
-      model,
-      instructions: [
-        "Decide whether external web context is necessary before enriching this event.",
-        "Return need_external_context=true only when a critical fact is missing from the provided reports and that gap would materially impair understanding: necessary background, a latest development that cannot be determined, important factual conflict, or needed authoritative confirmation.",
-        "Do not request search merely because more facts may exist. If the reports already explain what happened, needed background, why it matters, and material source differences, return false.",
-      ].join("\n"),
-      input: buildStage4EventEnrichmentUserPrompt(input),
-      max_output_tokens: 64,
-      store: false,
-      text: {
-        format: {
-          type: "json_schema",
-          name: "stage4_external_context_decision",
-          description: "Whether Stage 4 requires external web context before enrichment.",
-          strict: true,
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            required: ["need_external_context"],
-            properties: { need_external_context: { type: "boolean" } },
+    const response = await client.structured.create(
+      {
+        model,
+        instructions: [
+          'Decide whether external web context is necessary before enriching this event.',
+          'Return need_external_context=true only when a critical fact is missing from the provided reports and that gap would materially impair understanding: necessary background, a latest development that cannot be determined, important factual conflict, or needed authoritative confirmation.',
+          'Do not request search merely because more facts may exist. If the reports already explain what happened, needed background, why it matters, and material source differences, return false.',
+        ].join('\n'),
+        input: buildStage4EventEnrichmentUserPrompt(input),
+        max_output_tokens: 64,
+        store: false,
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'stage4_external_context_decision',
+            description: 'Whether Stage 4 requires external web context before enrichment.',
+            strict: true,
+            schema: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['need_external_context'],
+              properties: { need_external_context: { type: 'boolean' } },
+            },
           },
         },
       },
-    }, { timeout: timeoutMs });
+      { timeout: timeoutMs },
+    );
     return {
       needExternalContext: parseStage4ExternalContextDecision(response.output_text),
       llmCallCount: 1,
@@ -251,11 +275,16 @@ async function determineWhetherExternalContextIsNeeded(
     };
   } catch (error) {
     console.warn(
-      "Stage 4 external-context decision failed; continuing without Web Search.",
+      'Stage 4 external-context decision failed; continuing without Web Search.',
       sanitizeLlmError(error instanceof Error ? error.message : String(error)),
     );
     // The decision request still reached the provider even if it could not be parsed or returned.
-    return { needExternalContext: false, llmCallCount: 1, llmDurationMs: Date.now() - requestStartedAt, tokenUsage: null };
+    return {
+      needExternalContext: false,
+      llmCallCount: 1,
+      llmDurationMs: Date.now() - requestStartedAt,
+      tokenUsage: missingLlmTokenUsage(),
+    };
   }
 }
 
@@ -264,16 +293,18 @@ function parseStage4ExternalContextDecision(rawText: string): boolean {
   if (
     !isRecord(parsed) ||
     Object.keys(parsed).length !== 1 ||
-    typeof parsed.need_external_context !== "boolean"
+    typeof parsed.need_external_context !== 'boolean'
   ) {
-    throw new Error("Invalid Stage 4 external-context decision structured output.");
+    throw new Error('Invalid Stage 4 external-context decision structured output.');
   }
   return parsed.need_external_context;
 }
 
-function emptyChatToolUsage(response: { usage?: { input_tokens: number; output_tokens: number; total_tokens: number } }): Stage4WebSearchToolUsage {
+function emptyChatToolUsage(response: {
+  usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
+}): Stage4WebSearchToolUsage {
   return {
-    apiMode: "chat_completions",
+    apiMode: 'chat_completions',
     usage: normalizeUsage(response.usage),
     webSearchPerformed: false,
     webSearchCallCount: 0,
@@ -292,21 +323,19 @@ function normalizeExternalContext(
     external_context: {
       performed: toolUsage.webSearchPerformed,
       sources: toolUsage.webSearchPerformed ? toolUsage.sources : [],
-      sources_summary: toolUsage.webSearchPerformed
-        ? output.external_context.sources_summary
-        : "",
+      sources_summary: toolUsage.webSearchPerformed ? output.external_context.sources_summary : '',
     },
   };
 }
 
 function extractWebSearchToolUsage(response: unknown): Stage4WebSearchToolUsage {
-  const calls: Stage4WebSearchToolUsage["calls"] = [];
+  const calls: Stage4WebSearchToolUsage['calls'] = [];
   const sources = new Set<string>();
   const outputItems = isRecord(response) && Array.isArray(response.output) ? response.output : [];
 
   for (const item of outputItems) {
     collectUrlCitations(item, sources);
-    if (!isRecord(item) || item.type !== "web_search_call") {
+    if (!isRecord(item) || item.type !== 'web_search_call') {
       continue;
     }
 
@@ -317,19 +346,22 @@ function extractWebSearchToolUsage(response: unknown): Stage4WebSearchToolUsage 
     }
 
     calls.push({
-      id: typeof item.id === "string" ? item.id : null,
-      status: typeof item.status === "string" ? item.status : null,
+      id: typeof item.id === 'string' ? item.id : null,
+      status: typeof item.status === 'string' ? item.status : null,
       actionType:
-        isRecord(item.action) && typeof item.action.type === "string" ? item.action.type : null,
+        isRecord(item.action) && typeof item.action.type === 'string' ? item.action.type : null,
       sources: [...itemSources],
     });
   }
 
   return {
-    apiMode: "responses",
-    usage: isRecord(response) && isRecord(response.usage)
-      ? normalizeUsage(response.usage as { input_tokens: number; output_tokens: number; total_tokens: number })
-      : null,
+    apiMode: 'responses',
+    usage:
+      isRecord(response) && isRecord(response.usage)
+        ? normalizeUsage(
+            response.usage as { input_tokens: number; output_tokens: number; total_tokens: number },
+          )
+        : null,
     webSearchPerformed: calls.length > 0,
     webSearchCallCount: calls.length,
     sources: [...sources].sort(),
@@ -337,21 +369,12 @@ function extractWebSearchToolUsage(response: unknown): Stage4WebSearchToolUsage 
   };
 }
 
-function normalizeUsage(
-  usage: { input_tokens: number; output_tokens: number; total_tokens: number } | undefined,
-) {
-  return usage
-    ? {
-        inputTokens: usage.input_tokens,
-        outputTokens: usage.output_tokens,
-        totalTokens: usage.total_tokens,
-      }
-    : null;
+function normalizeUsage(usage: Parameters<typeof usageFromProvider>[0]): Stage4TokenUsage {
+  return usageFromProvider(usage);
 }
 
-function sumStage4TokenUsage(left: Stage4TokenUsage | null, right: Stage4TokenUsage | null): Stage4TokenUsage | null {
-  if (left === null || right === null) return null;
-  return { inputTokens: left.inputTokens + right.inputTokens, outputTokens: left.outputTokens + right.outputTokens, totalTokens: left.totalTokens + right.totalTokens };
+function sumStage4TokenUsage(left: Stage4TokenUsage, right: Stage4TokenUsage): Stage4TokenUsage {
+  return mergeLlmTokenUsage(left, right);
 }
 
 function collectWebSearchActionSources(value: unknown, sources: Set<string>) {
@@ -359,13 +382,13 @@ function collectWebSearchActionSources(value: unknown, sources: Set<string>) {
     return;
   }
 
-  if (typeof value.url === "string") {
+  if (typeof value.url === 'string') {
     sources.add(value.url);
   }
 
   if (Array.isArray(value.sources)) {
     for (const source of value.sources) {
-      if (isRecord(source) && typeof source.url === "string") {
+      if (isRecord(source) && typeof source.url === 'string') {
         sources.add(source.url);
       }
     }
@@ -384,35 +407,35 @@ function collectUrlCitations(value: unknown, sources: Set<string>) {
     return;
   }
 
-  if (value.type === "url_citation" && typeof value.url === "string") {
+  if (value.type === 'url_citation' && typeof value.url === 'string') {
     sources.add(value.url);
   }
 
   for (const [key, nestedValue] of Object.entries(value)) {
-    if (key === "text") {
+    if (key === 'text') {
       continue;
     }
 
-    if (typeof nestedValue === "object" && nestedValue !== null) {
+    if (typeof nestedValue === 'object' && nestedValue !== null) {
       collectUrlCitations(nestedValue, sources);
     }
   }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isNonRetryableLlmError(errorMessage: string): boolean {
   return (
-    errorMessage.includes("401") ||
-    errorMessage.includes("Incorrect API key") ||
-    errorMessage.includes("invalid_api_key")
+    errorMessage.includes('401') ||
+    errorMessage.includes('Incorrect API key') ||
+    errorMessage.includes('invalid_api_key')
   );
 }
 
 function sanitizeLlmError(errorMessage: string): string {
-  return errorMessage.replace(/sk-[A-Za-z0-9_*.-]+/g, "[redacted_api_key]");
+  return errorMessage.replace(/sk-[A-Za-z0-9_*.-]+/g, '[redacted_api_key]');
 }
 
 function sleep(ms: number): Promise<void> {

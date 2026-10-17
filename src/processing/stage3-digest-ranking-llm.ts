@@ -8,7 +8,7 @@ import {
   resolveStageLlmModel,
   resolveStageLlmProvider,
   type LlmProvider,
-} from "./llm-client.js";
+} from './llm-client.js';
 import {
   parseAndValidateStage3DigestOrderedIdsOutput,
   rebuildStage3DigestRankingFromOrderedIds,
@@ -18,14 +18,14 @@ import {
   type Stage3RankingIntegrity,
   type Stage3RankingOutput,
   type Stage3RankingWarnings,
-} from "./stage3-contract.js";
+} from './stage3-contract.js';
 import {
   buildStage3DigestRankingInstructions,
   buildStage3DigestRankingUserPrompt,
   STAGE3_DIGEST_RANKING_PROMPT_VERSION,
   type Stage3DigestRankingInput,
-} from "../prompts/stage3-digest-ranking.js";
-import { resolveStageLlmRuntimeConfig } from "./stage-llm-runtime-config.js";
+} from '../prompts/stage3-digest-ranking.js';
+import { resolveStageLlmRuntimeConfig } from './stage-llm-runtime-config.js';
 
 export type Stage3DigestRankingLlmOptions = {
   provider?: LlmProvider;
@@ -38,6 +38,7 @@ export type Stage3DigestLlmUsage = {
   input_tokens: number | null;
   output_tokens: number | null;
   total_tokens: number | null;
+  cached_input_tokens: number | null;
 };
 
 export type Stage3DigestInitialCallDiagnostics = {
@@ -47,6 +48,7 @@ export type Stage3DigestInitialCallDiagnostics = {
   input_tokens: number | null;
   output_tokens: number | null;
   total_tokens: number | null;
+  cached_input_tokens: number | null;
   returned_count: number | null;
   unique_valid_ids: number | null;
   missing_count: number | null;
@@ -63,6 +65,7 @@ export type Stage3DigestRepairCallDiagnostics = {
   input_tokens: number | null;
   output_tokens: number | null;
   total_tokens: number | null;
+  cached_input_tokens: number | null;
   returned_count: number | null;
   missing_count: number | null;
   duplicate_count: number | null;
@@ -113,22 +116,18 @@ export type Stage3DigestRankingFailure = {
   diagnostics: Stage3DigestDiagnostics;
 };
 
-export type Stage3DigestRankingResult =
-  | Stage3DigestRankingSuccess
-  | Stage3DigestRankingFailure;
+export type Stage3DigestRankingResult = Stage3DigestRankingSuccess | Stage3DigestRankingFailure;
 
 /** 执行分类 Digest 排名；必要时进行一次针对遗漏或重复 ID 的轻量修复。 */
 export async function runStage3DigestRankingLlm(
   input: Stage3DigestRankingInput,
   options: Stage3DigestRankingLlmOptions = {},
 ): Promise<Stage3DigestRankingResult> {
-  const provider = options.provider ?? resolveStageLlmProvider("stage3");
-  const model = options.model ?? (
-    options.provider
-      ? resolveLlmModel(undefined, provider)
-      : resolveStageLlmModel("stage3")
-  );
-  const runtimeConfig = resolveStageLlmRuntimeConfig("stage3");
+  const provider = options.provider ?? resolveStageLlmProvider('stage3');
+  const model =
+    options.model ??
+    (options.provider ? resolveLlmModel(undefined, provider) : resolveStageLlmModel('stage3'));
+  const runtimeConfig = resolveStageLlmRuntimeConfig('stage3');
   const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
   const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
@@ -136,7 +135,7 @@ export async function runStage3DigestRankingLlm(
   const expectedIds = input.candidates.map((candidate) => candidate.id);
 
   let rawOutputText: string | null = null;
-  let lastError = "Unknown Stage 3 Digest Ranking LLM failure.";
+  let lastError = 'Unknown Stage 3 Digest Ranking LLM failure.';
   let lastAssignment: Stage3RankingIntegrity | null = null;
   let attemptsUsed = 0;
   let lastFinishReason: string | null = null;
@@ -144,6 +143,7 @@ export async function runStage3DigestRankingLlm(
     input_tokens: null,
     output_tokens: null,
     total_tokens: null,
+    cached_input_tokens: null,
   };
 
   try {
@@ -168,10 +168,10 @@ export async function runStage3DigestRankingLlm(
             instructions: buildStage3DigestRankingInstructions(input.category),
             input: [
               {
-                role: "user",
+                role: 'user',
                 content: [
                   {
-                    type: "input_text",
+                    type: 'input_text',
                     text: buildStage3DigestRankingUserPrompt(input),
                   },
                 ],
@@ -181,9 +181,9 @@ export async function runStage3DigestRankingLlm(
             store: false,
             text: {
               format: {
-                type: "json_schema",
-                name: "stage3_digest_ranking",
-                description: "Structured Stage 3 Source Digest ranking output.",
+                type: 'json_schema',
+                name: 'stage3_digest_ranking',
+                description: 'Structured Stage 3 Source Digest ranking output.',
                 schema: stage3DigestOrderedIdsOutputJsonSchema,
                 strict: true,
               },
@@ -200,12 +200,13 @@ export async function runStage3DigestRankingLlm(
           input_tokens: response.usage?.input_tokens ?? null,
           output_tokens: response.usage?.output_tokens ?? null,
           total_tokens: response.usage?.total_tokens ?? null,
+          cached_input_tokens: response.usage?.cached_input_tokens ?? null,
         };
 
         const validation = parseAndValidateStage3DigestOrderedIdsOutput(rawOutputText);
         if (!validation.success) {
           lastAssignment = null;
-          lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
+          lastError = `Structured output validation failed: ${validation.errors.join('; ')}`;
           if (attempt <= maxRetries) {
             await sleep(runtimeConfig.retryDelayMs * attempt);
             continue;
@@ -280,12 +281,18 @@ export async function runStage3DigestRankingLlm(
         promptVersion: STAGE3_DIGEST_RANKING_PROMPT_VERSION,
         attempts: attemptsUsed,
         elapsedMs: Date.now() - startedAt,
-        error: `Ranking integrity validation failed: ${normalized.integrity.errors.join("; ")}`,
+        error: `Ranking integrity validation failed: ${normalized.integrity.errors.join('; ')}`,
         rawOutputText: initial.rawOutputText,
         diagnostics: {
           initial: buildStage3DigestInitialDiagnostics(
-            input.category, expectedIds.length, startedAt, initial.finishReason,
-            initial.usage, initial.orderedIds, expectedIds, normalized.integrity,
+            input.category,
+            expectedIds.length,
+            startedAt,
+            initial.finishReason,
+            initial.usage,
+            initial.orderedIds,
+            expectedIds,
+            normalized.integrity,
           ),
           repair: null,
         },
@@ -359,6 +366,7 @@ function buildStage3DigestInitialDiagnostics(
     input_tokens: usage.input_tokens,
     output_tokens: usage.output_tokens,
     total_tokens: usage.total_tokens,
+    cached_input_tokens: usage.cached_input_tokens,
     returned_count: orderedIds === null ? null : orderedIds.length,
     unique_valid_ids: uniqueValidIds,
     missing_count: assignment === null ? null : assignment.missingIds.length,
@@ -370,14 +378,14 @@ function buildStage3DigestInitialDiagnostics(
 
 function isNonRetryableLlmError(errorMessage: string): boolean {
   return (
-    errorMessage.includes("401") ||
-    errorMessage.includes("Incorrect API key") ||
-    errorMessage.includes("invalid_api_key")
+    errorMessage.includes('401') ||
+    errorMessage.includes('Incorrect API key') ||
+    errorMessage.includes('invalid_api_key')
   );
 }
 
 function sanitizeLlmError(errorMessage: string): string {
-  return errorMessage.replace(/sk-[A-Za-z0-9_*.-]+/g, "[redacted_api_key]");
+  return errorMessage.replace(/sk-[A-Za-z0-9_*.-]+/g, '[redacted_api_key]');
 }
 
 function sleep(ms: number): Promise<void> {

@@ -203,6 +203,7 @@ npm run test:model-evaluation
 npm run test:content-completion-runtime
 npm run test:content-completion-pools
 npm run test:stage2-retry
+npm run test:daily-llm-usage
 npm run test:pipeline-env
 npm run test:discovery-phase1
 npm run test:discovery-phase2
@@ -228,6 +229,8 @@ npm run test:discovery-phase3
 `scripts/test-openai-call.ts` 的 positional API mode 支持 `responses`（默认）、`chat-completions`、`chat-completions-structured`。`test:openai*` wrapper 已固定 provider；调用其它 provider 时使用 `npx tsx scripts/test-openai-call.ts PROVIDER [MODE]`。
 
 Discovery Provider 集成验证不会由 regression tests 自动执行。命令复用 Phase 1 Run Service 以及正式 D2 / D4 函数；输出 Run ID、全部 Direct / Topic Leads（含来源内容与 Direct URL）、逐篇 D4 评价、审核队列状态、Token Usage 与耗时。D4 每篇 Direct Candidate 串行发起一次 LLM 请求；每篇成功后立即持久化，单篇失败会记录诊断并继续后续 Candidate。输出会单列成功/失败请求数、各自累计耗时、已知 Token Usage 和 Usage 是否完整。`selection_output` 和 Candidate 均保留在数据库中，后续阶段可直接使用输出的 Run ID。失败时保留 Run、已创建 Candidate 和 diagnostics。指定 `--dates` 时日期必须升序，且每一期都必须存在同一 `daily_date` 的 `pipeline_runs.step IN ('daily', 'stage4') AND status = 'success'`；`--dates` 与 `--run-id` 不可同时使用。
+
+Discovery 阶段级执行诊断保存在 `discovery_runs.execution_state`：D2、D3、D4 记录实际执行状态、结束原因、Provider / Model / API mode、累计耗时与模型 Usage；D5 尚未实现，因此没有 D5 执行记录。Usage 的 `cachedInputTokens` 已包含在 `inputTokens` 中，不能重复加入总 Token。若任一请求没有完整 Usage，`usageComplete` 为 `false`，缓存命中率不应作为完整统计显示；读取端可在完整时按 `cachedInputTokens / inputTokens` 计算。Resume 会累计该 Run 已记录的阶段 Usage；历史 Run 缺失此诊断时保持未知，不从 Candidate 或 Trace 反推。
 
 Discovery D2 / D4 的 Structured Output 通过共享 LLM Client 走 Chat Completions；测试输出会显示实际 Provider、model、timeout、API mode 与 LLM request 耗时。`DISCOVERY_D2_PROVIDER` / `DISCOVERY_D4_PROVIDER` 优先于 `DISCOVERY_LLM_PROVIDER`，随后才使用既有 `LLM_PROVIDER`；模型、Base URL 与 API Key 始终由选定 Provider 的既有配置解析，其中模型使用该 Provider 的专属 `*_MODEL` 配置。`DISCOVERY_D2_TIMEOUT_MS` / `DISCOVERY_D4_TIMEOUT_MS` 优先于 `DISCOVERY_LLM_TIMEOUT_MS`；全部未设置时请求选项会省略 timeout，使用 SDK 默认值，并输出 `SDK default`。
 

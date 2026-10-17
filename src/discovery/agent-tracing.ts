@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import type { Span, SpanData, Trace, TracingProcessor } from '@openai/agents';
+import type { DiscoveryStageUsage } from '../db/schema.js';
+import {
+  emptyDiscoveryStageUsage,
+  mergeDiscoveryStageUsage,
+  usageFromAgentResponseUsage,
+} from './execution-diagnostics.js';
 
 type PendingTraceSpan = {
   traceId: string;
@@ -18,6 +24,7 @@ export class PostgresDiscoveryTracingProcessor implements TracingProcessor {
   readonly traceIds = new Set<string>();
   private readonly pending = new Map<string, PendingTraceSpan>();
   private flushes = 0;
+  private usage: DiscoveryStageUsage = emptyDiscoveryStageUsage();
 
   constructor(
     private readonly pool: Pick<Pool, 'query'>,
@@ -26,6 +33,11 @@ export class PostgresDiscoveryTracingProcessor implements TracingProcessor {
 
   get flushCount(): number {
     return this.flushes;
+  }
+
+  /** Response spans are the one-to-one source for D3 model request accounting. */
+  getUsage(): DiscoveryStageUsage {
+    return { ...this.usage };
   }
 
   async onTraceStart(trace: Trace): Promise<void> {
@@ -63,6 +75,14 @@ export class PostgresDiscoveryTracingProcessor implements TracingProcessor {
 
   async onSpanEnd(span: Span<SpanData>): Promise<void> {
     this.traceIds.add(span.traceId);
+    if (span.spanData.type === 'response') {
+      const responseData = span.spanData as unknown as Record<string, unknown>;
+      const response = isRecord(responseData._response) ? responseData._response : null;
+      this.usage = mergeDiscoveryStageUsage(
+        this.usage,
+        usageFromAgentResponseUsage(response?.usage),
+      );
+    }
     this.pending.set(`${span.traceId}:${span.spanId}`, {
       traceId: span.traceId,
       spanId: span.spanId,

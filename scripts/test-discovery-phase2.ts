@@ -266,6 +266,21 @@ async function testD2PersistenceAndUrlEnrichment() {
         Number.isInteger(result.requestElapsedMs) &&
         result.requestElapsedMs >= 0,
     ],
+    [
+      'D2 persists complete per-stage usage including an explicit zero cached-token value',
+      (db.run.execution_state as Record<string, Record<string, unknown>>).d2?.status ===
+        'completed' &&
+        JSON.stringify(
+          (db.run.execution_state as Record<string, Record<string, unknown>>).d2?.usage,
+        ) ===
+          JSON.stringify({
+            requests: 1,
+            inputTokens: 1,
+            outputTokens: 1,
+            cachedInputTokens: 0,
+            usageComplete: true,
+          }),
+    ],
   );
 }
 
@@ -515,6 +530,31 @@ async function testD4FailureRecovery() {
       retryResult.failedRequestCount === 0 &&
       (db.run.execution_state as Record<string, Record<string, unknown>>).d4?.status ===
         'completed' &&
+      (
+        (db.run.execution_state as Record<string, Record<string, unknown>>).d4?.usage as {
+          requests?: number | null;
+          inputTokens?: number | null;
+          cachedInputTokens?: number | null;
+          usageComplete?: boolean;
+        }
+      )?.requests === 3 &&
+      (
+        (db.run.execution_state as Record<string, Record<string, unknown>>).d4?.usage as {
+          inputTokens?: number | null;
+          cachedInputTokens?: number | null;
+          usageComplete?: boolean;
+        }
+      )?.inputTokens === 2 &&
+      (
+        (db.run.execution_state as Record<string, Record<string, unknown>>).d4?.usage as {
+          cachedInputTokens?: number | null;
+        }
+      )?.cachedInputTokens === null &&
+      (
+        (db.run.execution_state as Record<string, Record<string, unknown>>).d4?.usage as {
+          usageComplete?: boolean;
+        }
+      )?.usageComplete === false &&
       failureDiagnostic?.provider === 'openai' &&
       failureDiagnostic?.model === resolveProviderLlmModel('openai') &&
       typeof failureDiagnostic?.requestElapsedMs === 'number' &&
@@ -669,7 +709,7 @@ function llmResponse(output: unknown) {
     output_text: JSON.stringify(output),
     output: [],
     api_mode: 'chat_completions' as const,
-    usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2, cached_input_tokens: 0 },
     finish_reason: 'stop',
   };
 }

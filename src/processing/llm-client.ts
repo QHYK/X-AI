@@ -3,11 +3,11 @@
  *
  * 统一模型/凭据解析、Responses 与 Chat Completions 差异，并在调试时输出已脱敏的请求诊断。
  */
-import OpenAI from "openai";
-import { Agent, fetch as undiciFetch } from "undici";
+import OpenAI from 'openai';
+import { Agent, fetch as undiciFetch } from 'undici';
 
-export type LlmProvider = "openai" | "deepseek" | "kimi" | "codex";
-export type LlmStage = "stage1" | "stage2" | "stage3" | "stage4";
+export type LlmProvider = 'openai' | 'deepseek' | 'kimi' | 'codex';
+export type LlmStage = 'stage1' | 'stage2' | 'stage3' | 'stage4';
 
 export type LlmClientOptions = {
   provider?: LlmProvider;
@@ -22,13 +22,17 @@ export type LlmConfig = {
   model: string;
 };
 
-type ResponseInput = string | Array<{
-  role: string;
-  content: string | Array<{
-    type: string;
-    text?: string;
-  }>;
-}>;
+type ResponseInput =
+  | string
+  | Array<{
+      role: string;
+      content:
+        | string
+        | Array<{
+            type: string;
+            text?: string;
+          }>;
+    }>;
 
 type ResponseRequest = {
   model: string;
@@ -36,11 +40,11 @@ type ResponseRequest = {
   input: ResponseInput;
   max_output_tokens?: number;
   store?: boolean;
-  tools?: Array<{ type: "web_search" }>;
-  tool_choice?: "auto";
+  tools?: Array<{ type: 'web_search' }>;
+  tool_choice?: 'auto';
   text?: {
     format: {
-      type: "json_schema";
+      type: 'json_schema';
       name: string;
       description?: string;
       schema: unknown;
@@ -55,26 +59,28 @@ type ResponseUsage = {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  /** Provider-reported cache reads; included in input_tokens when present. */
+  cached_input_tokens?: number;
 };
 
 export type LlmResponse = {
   id: string;
   output_text: string;
   output: unknown[];
-  api_mode: "responses" | "chat_completions";
+  api_mode: 'responses' | 'chat_completions';
   usage?: ResponseUsage;
   finish_reason?: string | null;
 };
 
 type LlmRequestDiagnostic = {
   provider: LlmProvider;
-  method: "POST";
+  method: 'POST';
   finalUrl: string;
   model: string;
-  apiMode: "Responses API" | "Chat Completions API";
+  apiMode: 'Responses API' | 'Chat Completions API';
   requestHeaders: {
-    Authorization: "Bearer ***";
-    "Content-Type": "application/json";
+    Authorization: 'Bearer ***';
+    'Content-Type': 'application/json';
   };
   body: {
     model: string;
@@ -82,33 +88,38 @@ type LlmRequestDiagnostic = {
     input: string;
     maxOutputTokens: number | null;
     responseFormat: unknown;
-    tools: Array<{ type: "web_search" }> | null;
-    toolChoice: "auto" | null;
+    tools: Array<{ type: 'web_search' }> | null;
+    toolChoice: 'auto' | null;
   };
 };
 
-const DEFAULT_OPENAI_BASE_URL = "https://128api.cn/v1";
-const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
-const DEFAULT_KIMI_BASE_URL = "https://api.moonshot.ai/v1";
-const DEFAULT_CODEX_BASE_URL = "http://127.0.0.1:8317/v1";
+const DEFAULT_OPENAI_BASE_URL = 'https://128api.cn/v1';
+const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
+const DEFAULT_KIMI_BASE_URL = 'https://api.moonshot.ai/v1';
+const DEFAULT_CODEX_BASE_URL = 'http://127.0.0.1:8317/v1';
 
 const DEFAULT_MODELS: Record<LlmProvider, string> = {
-  openai: "gpt-5.4-mini",
-  deepseek: "deepseek-v4-pro",
-  kimi: "kimi-k3",
-  codex: "gpt-5.6-terra",
+  openai: 'gpt-5.4-mini',
+  deepseek: 'deepseek-v4-pro',
+  kimi: 'kimi-k3',
+  codex: 'gpt-5.6-terra',
 };
 
 const DEFAULT_STAGE_PROVIDERS: Record<LlmStage, LlmProvider> = {
-  stage1: "openai",
-  stage2: "deepseek",
-  stage3: "openai",
-  stage4: "openai",
+  stage1: 'openai',
+  stage2: 'deepseek',
+  stage3: 'openai',
+  stage4: 'openai',
 };
 
 export function resolveLlmProvider(value = process.env.LLM_PROVIDER): LlmProvider {
-  const provider = value?.trim().toLowerCase() || "openai";
-  if (provider === "openai" || provider === "deepseek" || provider === "kimi" || provider === "codex") {
+  const provider = value?.trim().toLowerCase() || 'openai';
+  if (
+    provider === 'openai' ||
+    provider === 'deepseek' ||
+    provider === 'kimi' ||
+    provider === 'codex'
+  ) {
     return provider;
   }
   throw new Error(
@@ -116,10 +127,12 @@ export function resolveLlmProvider(value = process.env.LLM_PROVIDER): LlmProvide
   );
 }
 
-export function resolveLlmConfig(options: {
-  provider?: LlmProvider;
-  model?: string;
-} = {}): LlmConfig {
+export function resolveLlmConfig(
+  options: {
+    provider?: LlmProvider;
+    model?: string;
+  } = {},
+): LlmConfig {
   const provider = options.provider ?? resolveLlmProvider();
   const apiKey = resolveApiKey(provider);
   if (!apiKey) {
@@ -141,9 +154,7 @@ export function resolveLlmModel(model?: string, provider = resolveLlmProvider())
 /** 解析 Stage 专属 Provider，未配置时使用系统默认映射。 */
 export function resolveStageLlmProvider(stage: LlmStage): LlmProvider {
   const environmentName = `${stage.toUpperCase()}_LLM_PROVIDER`;
-  return resolveLlmProvider(
-    process.env[environmentName] ?? DEFAULT_STAGE_PROVIDERS[stage],
-  );
+  return resolveLlmProvider(process.env[environmentName] ?? DEFAULT_STAGE_PROVIDERS[stage]);
 }
 
 export function resolveStageLlmModel(stage: LlmStage, model?: string): string {
@@ -178,10 +189,10 @@ export function createLlmClient(options: LlmClientOptions = {}) {
     baseURL: config.baseUrl,
     timeout: options.timeoutMs,
     maxRetries: options.maxRetries ?? 0,
-    fetch: undiciFetch as unknown as OpenAiConstructorOptions["fetch"],
+    fetch: undiciFetch as unknown as OpenAiConstructorOptions['fetch'],
     fetchOptions: {
       dispatcher,
-    } as OpenAiConstructorOptions["fetchOptions"],
+    } as OpenAiConstructorOptions['fetchOptions'],
   });
 
   return {
@@ -193,8 +204,8 @@ export function createLlmClient(options: LlmClientOptions = {}) {
         request: ResponseRequest,
         requestOptions: { timeout?: number } = {},
       ): Promise<LlmResponse> =>
-        config.provider === "openai" || config.provider === "codex"
-          ? createOpenAiResponse(client, config.provider,request, requestOptions)
+        config.provider === 'openai' || config.provider === 'codex'
+          ? createOpenAiResponse(client, config.provider, request, requestOptions)
           : createChatCompletionResponse(client, config.provider, request, requestOptions),
     },
     /** 普通 Structured Output 默认走 Chat Completions；Web Search 保留使用 responses。 */
@@ -226,7 +237,12 @@ async function createOpenAiResponse(
       id: string;
       output_text: string;
       output: unknown[];
-      usage?: { input_tokens: number; output_tokens: number; total_tokens: number } | null;
+      usage?: {
+        input_tokens: number;
+        output_tokens: number;
+        total_tokens: number;
+        input_tokens_details?: { cached_tokens?: number } | null;
+      } | null;
       status?: string;
       incomplete_details?: { reason?: string } | null;
     };
@@ -234,9 +250,21 @@ async function createOpenAiResponse(
       id: raw.id,
       output_text: raw.output_text,
       output: raw.output,
-      api_mode: "responses",
-      usage: raw.usage ?? undefined,
-      finish_reason: resolveResponsesFinishReason(raw.status, raw.incomplete_details?.reason ?? null),
+      api_mode: 'responses',
+      usage: raw.usage
+        ? {
+            input_tokens: raw.usage.input_tokens,
+            output_tokens: raw.usage.output_tokens,
+            total_tokens: raw.usage.total_tokens,
+            ...(typeof raw.usage.input_tokens_details?.cached_tokens === 'number'
+              ? { cached_input_tokens: raw.usage.input_tokens_details.cached_tokens }
+              : {}),
+          }
+        : undefined,
+      finish_reason: resolveResponsesFinishReason(
+        raw.status,
+        raw.incomplete_details?.reason ?? null,
+      ),
     };
   } catch (error) {
     throw toDiagnosticError(error, diagnostic);
@@ -247,11 +275,11 @@ function resolveResponsesFinishReason(
   status: string | undefined,
   incompleteReason: string | null,
 ): string | null {
-  if (status === "completed") {
-    return "stop";
+  if (status === 'completed') {
+    return 'stop';
   }
-  if (status === "incomplete") {
-    return incompleteReason ?? "incomplete";
+  if (status === 'incomplete') {
+    return incompleteReason ?? 'incomplete';
   }
   return status ?? null;
 }
@@ -265,9 +293,9 @@ async function createChatCompletionResponse(
   const format = request.text?.format;
   const instructions = buildChatInstructions(provider, request.instructions, format?.schema);
   const responseFormat = format
-    ? provider === "openai" || provider === "kimi" || provider === "codex"
+    ? provider === 'openai' || provider === 'kimi' || provider === 'codex'
       ? {
-          type: "json_schema" as const,
+          type: 'json_schema' as const,
           json_schema: {
             name: format.name,
             description: format.description,
@@ -275,14 +303,14 @@ async function createChatCompletionResponse(
             schema: format.schema as Record<string, unknown>,
           },
         }
-      : { type: "json_object" as const }
+      : { type: 'json_object' as const }
     : undefined;
   const diagnostic = buildRequestDiagnostic(
     provider,
     client.baseURL,
     request,
     responseFormat,
-    "chat_completions",
+    'chat_completions',
   );
   logRequestDiagnostic(diagnostic);
   let response: OpenAI.Chat.Completions.ChatCompletion;
@@ -291,10 +319,8 @@ async function createChatCompletionResponse(
       {
         model: request.model,
         messages: [
-          ...(instructions
-            ? [{ role: "system" as const, content: instructions }]
-            : []),
-          { role: "user", content: extractInputText(request.input) },
+          ...(instructions ? [{ role: 'system' as const, content: instructions }] : []),
+          { role: 'user', content: extractInputText(request.input) },
         ],
         max_tokens: request.max_output_tokens,
         response_format: responseFormat,
@@ -309,15 +335,18 @@ async function createChatCompletionResponse(
 
   return {
     id: response.id,
-    output_text: typeof outputText === "string" ? outputText : "",
+    output_text: typeof outputText === 'string' ? outputText : '',
     output: [],
-    api_mode: "chat_completions",
+    api_mode: 'chat_completions',
     finish_reason: response.choices[0]?.finish_reason ?? null,
     usage: response.usage
       ? {
           input_tokens: response.usage.prompt_tokens,
           output_tokens: response.usage.completion_tokens,
           total_tokens: response.usage.total_tokens,
+          ...(typeof response.usage.prompt_tokens_details?.cached_tokens === 'number'
+            ? { cached_input_tokens: response.usage.prompt_tokens_details.cached_tokens }
+            : {}),
         }
       : undefined,
   };
@@ -329,30 +358,30 @@ function buildChatInstructions(
   schema: unknown,
 ): string {
   const parts = instructions ? [instructions] : [];
-  if (provider === "deepseek" && schema) {
+  if (provider === 'deepseek' && schema) {
     parts.push(
-      "Return only one valid JSON object matching this JSON Schema exactly:",
+      'Return only one valid JSON object matching this JSON Schema exactly:',
       JSON.stringify(schema),
     );
   }
-  return parts.join("\n\n");
+  return parts.join('\n\n');
 }
 
 function extractInputText(input: ResponseInput): string {
-  if (typeof input === "string") {
+  if (typeof input === 'string') {
     return input;
   }
 
   return input
-    .filter((message) => message.role === "user")
+    .filter((message) => message.role === 'user')
     .flatMap((message) =>
-      typeof message.content === "string"
+      typeof message.content === 'string'
         ? [message.content]
         : message.content
-            .filter((item) => item.type === "input_text" && typeof item.text === "string")
+            .filter((item) => item.type === 'input_text' && typeof item.text === 'string')
             .map((item) => item.text as string),
     )
-    .join("\n");
+    .join('\n');
 }
 
 function buildRequestDiagnostic(
@@ -360,26 +389,25 @@ function buildRequestDiagnostic(
   baseUrl: string,
   request: ResponseRequest,
   chatResponseFormat?: unknown,
-  apiMode: "responses" | "chat_completions" = 
-    provider === "openai" || provider === "codex"
-      ? "responses"
-      : "chat_completions",
+  apiMode: 'responses' | 'chat_completions' = provider === 'openai' || provider === 'codex'
+    ? 'responses'
+    : 'chat_completions',
 ): LlmRequestDiagnostic {
-  const isResponsesApi = apiMode === "responses";
+  const isResponsesApi = apiMode === 'responses';
   return {
     provider,
-    method: "POST",
-    finalUrl: `${baseUrl.replace(/\/+$/, "")}/${isResponsesApi ? "responses" : "chat/completions"}`,
+    method: 'POST',
+    finalUrl: `${baseUrl.replace(/\/+$/, '')}/${isResponsesApi ? 'responses' : 'chat/completions'}`,
     model: request.model,
-    apiMode: isResponsesApi ? "Responses API" : "Chat Completions API",
+    apiMode: isResponsesApi ? 'Responses API' : 'Chat Completions API',
     requestHeaders: {
-      Authorization: "Bearer ***",
-      "Content-Type": "application/json",
+      Authorization: 'Bearer ***',
+      'Content-Type': 'application/json',
     },
     body: {
       model: request.model,
       instructions: truncateDiagnosticText(request.instructions),
-      input: truncateDiagnosticText(extractInputText(request.input)) ?? "",
+      input: truncateDiagnosticText(extractInputText(request.input)) ?? '',
       maxOutputTokens: request.max_output_tokens ?? null,
       responseFormat:
         chatResponseFormat ??
@@ -399,7 +427,7 @@ function buildRequestDiagnostic(
 }
 
 function logRequestDiagnostic(diagnostic: LlmRequestDiagnostic) {
-  if (process.env.LLM_DEBUG_HTTP !== "true") {
+  if (process.env.LLM_DEBUG_HTTP !== 'true') {
     return;
   }
   console.error(`LLM HTTP request:\n${JSON.stringify(diagnostic, null, 2)}`);
@@ -418,27 +446,25 @@ function toDiagnosticError(error: unknown, request: LlmRequestDiagnostic): Error
       apiMode: request.apiMode,
     },
     response: {
-      status: typeof value.status === "number" ? value.status : null,
+      status: typeof value.status === 'number' ? value.status : null,
       headers,
       code:
-        typeof value.code === "string"
+        typeof value.code === 'string'
           ? value.code
-          : isRecord(value.error) && typeof value.error.code === "string"
+          : isRecord(value.error) && typeof value.error.code === 'string'
             ? value.error.code
             : null,
       type:
-        typeof value.type === "string"
+        typeof value.type === 'string'
           ? value.type
-          : isRecord(value.error) && typeof value.error.type === "string"
+          : isRecord(value.error) && typeof value.error.type === 'string'
             ? value.error.type
             : null,
-      message: sanitizeDiagnosticText(
-        error instanceof Error ? error.message : String(error),
-      ),
+      message: sanitizeDiagnosticText(error instanceof Error ? error.message : String(error)),
       body: responseBody,
     },
   };
-  if (process.env.LLM_DEBUG_HTTP === "true") {
+  if (process.env.LLM_DEBUG_HTTP === 'true') {
     console.error(`LLM HTTP error:\n${JSON.stringify(diagnostic, null, 2)}`);
   }
   return new Error(`LLM HTTP request failed: ${JSON.stringify(diagnostic)}`, {
@@ -447,9 +473,9 @@ function toDiagnosticError(error: unknown, request: LlmRequestDiagnostic): Error
 }
 
 function extractDiagnosticHeaders(value: unknown): Record<string, string> {
-  const headers = isRecord(value) || typeof value === "object" ? value : null;
+  const headers = isRecord(value) || typeof value === 'object' ? value : null;
   const get =
-    headers && "get" in headers && typeof headers.get === "function"
+    headers && 'get' in headers && typeof headers.get === 'function'
       ? headers.get.bind(headers)
       : null;
   if (!get) {
@@ -458,16 +484,16 @@ function extractDiagnosticHeaders(value: unknown): Record<string, string> {
 
   const output: Record<string, string> = {};
   for (const name of [
-    "content-type",
-    "x-request-id",
-    "request-id",
-    "server",
-    "date",
-    "retry-after",
-    "cf-ray",
+    'content-type',
+    'x-request-id',
+    'request-id',
+    'server',
+    'date',
+    'retry-after',
+    'cf-ray',
   ]) {
     const headerValue = get(name);
-    if (typeof headerValue === "string" && headerValue) {
+    if (typeof headerValue === 'string' && headerValue) {
       output[name] = headerValue;
     }
   }
@@ -485,13 +511,11 @@ function truncateDiagnosticText(value: string | undefined): string | null {
 }
 
 function sanitizeDiagnosticText(value: string): string {
-  return value
-    .replace(/Bearer\s+\S+/gi, "Bearer ***")
-    .replace(/sk-[A-Za-z0-9_*.-]+/g, "sk-***");
+  return value.replace(/Bearer\s+\S+/gi, 'Bearer ***').replace(/sk-[A-Za-z0-9_*.-]+/g, 'sk-***');
 }
 
 function sanitizeDiagnosticValue(value: unknown): unknown {
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     return sanitizeDiagnosticText(value);
   }
   if (Array.isArray(value)) {
@@ -501,7 +525,7 @@ function sanitizeDiagnosticValue(value: unknown): unknown {
     return Object.fromEntries(
       Object.entries(value).map(([key, nested]) => [
         key,
-        /authorization|api.?key|token/i.test(key) ? "***" : sanitizeDiagnosticValue(nested),
+        /authorization|api.?key|token/i.test(key) ? '***' : sanitizeDiagnosticValue(nested),
       ]),
     );
   }
@@ -509,30 +533,30 @@ function sanitizeDiagnosticValue(value: unknown): unknown {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function resolveApiKey(provider: LlmProvider): string | undefined {
-  if (provider === "openai") {
+  if (provider === 'openai') {
     return process.env.OPENAI_API_KEY;
   }
-  if (provider === "deepseek") {
+  if (provider === 'deepseek') {
     return process.env.DEEPSEEK_API_KEY;
   }
-  if (provider === "codex") {
+  if (provider === 'codex') {
     return process.env.CODEX_API_KEY;
   }
   return process.env.KIMI_API_KEY ?? process.env.MOONSHOT_API_KEY;
 }
 
 function resolveBaseUrl(provider: LlmProvider): string {
-  if (provider === "openai") {
+  if (provider === 'openai') {
     return process.env.OPENAI_BASE_URL ?? DEFAULT_OPENAI_BASE_URL;
   }
-  if (provider === "deepseek") {
+  if (provider === 'deepseek') {
     return process.env.DEEPSEEK_BASE_URL ?? DEFAULT_DEEPSEEK_BASE_URL;
   }
-  if (provider === "codex") {
+  if (provider === 'codex') {
     return process.env.CODEX_BASE_URL ?? DEFAULT_CODEX_BASE_URL;
   }
   return process.env.KIMI_BASE_URL ?? DEFAULT_KIMI_BASE_URL;
@@ -547,27 +571,27 @@ function resolveModel(provider: LlmProvider): string {
 
 /** 解析 Provider 专属 model，忽略仅供通用诊断使用的 LLM_MODEL。 */
 export function resolveProviderLlmModel(provider: LlmProvider): string {
-  if (provider === "openai") {
+  if (provider === 'openai') {
     return process.env.OPENAI_MODEL ?? DEFAULT_MODELS.openai;
   }
-  if (provider === "deepseek") {
+  if (provider === 'deepseek') {
     return process.env.DEEPSEEK_MODEL ?? DEFAULT_MODELS.deepseek;
   }
-  if (provider === "codex") {
+  if (provider === 'codex') {
     return process.env.CODEX_MODEL ?? DEFAULT_MODELS.codex;
   }
   return process.env.KIMI_MODEL ?? DEFAULT_MODELS.kimi;
 }
 
 function credentialDescription(provider: LlmProvider): string {
-  if (provider === "openai") {
-    return "OPENAI_API_KEY";
+  if (provider === 'openai') {
+    return 'OPENAI_API_KEY';
   }
-  if (provider === "deepseek") {
-    return "DEEPSEEK_API_KEY";
+  if (provider === 'deepseek') {
+    return 'DEEPSEEK_API_KEY';
   }
-  if (provider === "codex") {
-    return "CODEX_API_KEY";
+  if (provider === 'codex') {
+    return 'CODEX_API_KEY';
   }
-  return "KIMI_API_KEY (or MOONSHOT_API_KEY)";
+  return 'KIMI_API_KEY (or MOONSHOT_API_KEY)';
 }

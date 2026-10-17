@@ -10,20 +10,27 @@ import {
   type Stage1ArticleRow,
   type Stage1BatchInput,
   type Stage1BatchOutput,
-} from "./stage1-contract.js";
+} from './stage1-contract.js';
 import {
   buildStage1Instructions,
   buildStage1UserPrompt,
   STAGE1_PROMPT_VERSION,
-} from "../prompts/stage1-content-understanding.js";
+} from '../prompts/stage1-content-understanding.js';
 import {
   createLlmClient,
   resolveLlmModel,
   resolveStageLlmModel,
   resolveStageLlmProvider,
   type LlmProvider,
-} from "./llm-client.js";
-import { resolveStageLlmRuntimeConfig } from "./stage-llm-runtime-config.js";
+} from './llm-client.js';
+import { resolveStageLlmRuntimeConfig } from './stage-llm-runtime-config.js';
+import {
+  emptyLlmTokenUsage,
+  mergeLlmTokenUsage,
+  missingLlmTokenUsage,
+  usageFromProvider,
+  type LlmTokenUsage,
+} from './llm-token-usage.js';
 
 export type Stage1LlmOptions = {
   provider?: LlmProvider;
@@ -33,7 +40,7 @@ export type Stage1LlmOptions = {
   onAttempt?: (event: {
     attempt: number;
     provider: LlmProvider;
-    status: "success" | "failed";
+    status: 'success' | 'failed';
     errorType: string | null;
     error: string | null;
     durationMs: number;
@@ -67,11 +74,7 @@ export type Stage1LlmFailure = {
 
 export type Stage1LlmResult = Stage1LlmSuccess | Stage1LlmFailure;
 
-export type Stage1TokenUsage = {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-};
+export type Stage1TokenUsage = LlmTokenUsage;
 
 const HTTP_503_RETRY_DELAY_MS = 10_000;
 const MAX_OUTPUT_TOKENS_PER_ARTICLE = 1_200;
@@ -85,7 +88,7 @@ export async function runStage1BatchLlm(
   options: Stage1LlmOptions = {},
 ): Promise<Stage1LlmResult> {
   if (articles.length === 0) {
-    throw new Error("Stage 1 LLM batch must contain at least one article.");
+    throw new Error('Stage 1 LLM batch must contain at least one article.');
   }
 
   return runStage1BatchLlmForInput(buildStage1BatchInput(articles), options);
@@ -100,28 +103,21 @@ export async function runStage1BatchLlmForInput(
   options: Stage1LlmOptions = {},
 ): Promise<Stage1LlmResult> {
   if (input.articles.length === 0) {
-    throw new Error("Stage 1 LLM batch must contain at least one article.");
+    throw new Error('Stage 1 LLM batch must contain at least one article.');
   }
 
-  const provider = options.provider ?? resolveStageLlmProvider("stage1");
-  const model = options.model ?? (
-    options.provider
-      ? resolveLlmModel(undefined, provider)
-      : resolveStageLlmModel("stage1")
-  );
-  const runtimeConfig = resolveStageLlmRuntimeConfig("stage1");
+  const provider = options.provider ?? resolveStageLlmProvider('stage1');
+  const model =
+    options.model ??
+    (options.provider ? resolveLlmModel(undefined, provider) : resolveStageLlmModel('stage1'));
+  const runtimeConfig = resolveStageLlmRuntimeConfig('stage1');
   const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
   const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
   const startedAt = Date.now();
-  const tokenUsage: Stage1TokenUsage = {
-    inputTokens: 0,
-    outputTokens: 0,
-    totalTokens: 0,
-  };
-  let hasTokenUsage = false;
+  let tokenUsage = emptyLlmTokenUsage();
 
   let rawOutputText: string | null = null;
-  let lastError = "Unknown Stage 1 LLM failure.";
+  let lastError = 'Unknown Stage 1 LLM failure.';
   let attemptsUsed = 0;
   let client: ReturnType<typeof createLlmClient>;
   try {
@@ -129,12 +125,23 @@ export async function runStage1BatchLlmForInput(
   } catch (error) {
     lastError = sanitizeLlmError(error instanceof Error ? error.message : String(error));
     await options.onAttempt?.({
-      attempt: 0, provider, status: "failed", errorType: "configuration_error", error: lastError,
+      attempt: 0,
+      provider,
+      status: 'failed',
+      errorType: 'configuration_error',
+      error: lastError,
       durationMs: Date.now() - startedAt,
     });
     return {
-      success: false, input, model, promptVersion: STAGE1_PROMPT_VERSION, attempts: 0,
-      elapsedMs: Date.now() - startedAt, tokenUsage: null, error: lastError, rawOutputText,
+      success: false,
+      input,
+      model,
+      promptVersion: STAGE1_PROMPT_VERSION,
+      attempts: 0,
+      elapsedMs: Date.now() - startedAt,
+      tokenUsage: null,
+      error: lastError,
+      rawOutputText,
     };
   }
 
@@ -148,10 +155,10 @@ export async function runStage1BatchLlmForInput(
           instructions: buildStage1Instructions(),
           input: [
             {
-              role: "user",
+              role: 'user',
               content: [
                 {
-                  type: "input_text",
+                  type: 'input_text',
                   text: buildStage1UserPrompt(input),
                 },
               ],
@@ -161,9 +168,9 @@ export async function runStage1BatchLlmForInput(
           store: false,
           text: {
             format: {
-              type: "json_schema",
-              name: "stage1_content_understanding_batch",
-              description: "Independent Stage 1 results for a batch of articles.",
+              type: 'json_schema',
+              name: 'stage1_content_understanding_batch',
+              description: 'Independent Stage 1 results for a batch of articles.',
               schema: stage1BatchOutputJsonSchema,
               strict: true,
             },
@@ -174,17 +181,19 @@ export async function runStage1BatchLlmForInput(
         },
       );
 
-      if (response.usage) {
-        tokenUsage.inputTokens += response.usage.input_tokens;
-        tokenUsage.outputTokens += response.usage.output_tokens;
-        tokenUsage.totalTokens += response.usage.total_tokens;
-        hasTokenUsage = true;
-      }
+      tokenUsage = mergeLlmTokenUsage(tokenUsage, usageFromProvider(response.usage));
       rawOutputText = response.output_text;
       const validation = parseAndValidateStage1BatchOutput(rawOutputText);
       if (!validation.success) {
-        lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
-        await options.onAttempt?.({ attempt, provider, status: "failed", errorType: "structured_output_validation", error: lastError, durationMs: Date.now() - attemptStartedAt });
+        lastError = `Structured output validation failed: ${validation.errors.join('; ')}`;
+        await options.onAttempt?.({
+          attempt,
+          provider,
+          status: 'failed',
+          errorType: 'structured_output_validation',
+          error: lastError,
+          durationMs: Date.now() - attemptStartedAt,
+        });
         if (attempt <= maxRetries) {
           await sleep(runtimeConfig.retryDelayMs * attempt);
           continue;
@@ -195,8 +204,15 @@ export async function runStage1BatchLlmForInput(
 
       const assignment = validateStage1Assignments(validation.output, input);
       if (!assignment.passed) {
-        lastError = `Assignment integrity validation failed: ${assignment.errors.join("; ")}`;
-        await options.onAttempt?.({ attempt, provider, status: "failed", errorType: "assignment_validation", error: lastError, durationMs: Date.now() - attemptStartedAt });
+        lastError = `Assignment integrity validation failed: ${assignment.errors.join('; ')}`;
+        await options.onAttempt?.({
+          attempt,
+          provider,
+          status: 'failed',
+          errorType: 'assignment_validation',
+          error: lastError,
+          durationMs: Date.now() - attemptStartedAt,
+        });
         if (attempt <= maxRetries) {
           await sleep(runtimeConfig.retryDelayMs * attempt);
           continue;
@@ -205,7 +221,14 @@ export async function runStage1BatchLlmForInput(
         break;
       }
 
-      await options.onAttempt?.({ attempt, provider, status: "success", errorType: null, error: null, durationMs: Date.now() - attemptStartedAt });
+      await options.onAttempt?.({
+        attempt,
+        provider,
+        status: 'success',
+        errorType: null,
+        error: null,
+        durationMs: Date.now() - attemptStartedAt,
+      });
 
       return {
         success: true,
@@ -216,19 +239,27 @@ export async function runStage1BatchLlmForInput(
         responseId: response.id,
         attempts: attempt,
         elapsedMs: Date.now() - startedAt,
-        tokenUsage: hasTokenUsage ? tokenUsage : null,
+        tokenUsage,
         rawOutputText,
       };
     } catch (error) {
+      tokenUsage = mergeLlmTokenUsage(tokenUsage, missingLlmTokenUsage());
       lastError = sanitizeLlmError(error instanceof Error ? error.message : String(error));
-      await options.onAttempt?.({ attempt, provider, status: "failed", errorType: getHttpStatus(error)?.toString() ?? "request_error", error: lastError, durationMs: Date.now() - attemptStartedAt });
+      await options.onAttempt?.({
+        attempt,
+        provider,
+        status: 'failed',
+        errorType: getHttpStatus(error)?.toString() ?? 'request_error',
+        error: lastError,
+        durationMs: Date.now() - attemptStartedAt,
+      });
       if (isNonRetryableLlmError(lastError)) {
         break;
       }
 
       if (attempt <= maxRetries) {
         if (getHttpStatus(error) === 503) {
-          console.warn("Stage 1 LLM returned 503; waiting 10s before retrying...");
+          console.warn('Stage 1 LLM returned 503; waiting 10s before retrying...');
           await sleep(HTTP_503_RETRY_DELAY_MS);
         } else {
           await sleep(runtimeConfig.retryDelayMs * attempt);
@@ -245,7 +276,7 @@ export async function runStage1BatchLlmForInput(
     promptVersion: STAGE1_PROMPT_VERSION,
     attempts: attemptsUsed,
     elapsedMs: Date.now() - startedAt,
-    tokenUsage: hasTokenUsage ? tokenUsage : null,
+    tokenUsage: attemptsUsed > 0 ? tokenUsage : null,
     error: lastError,
     rawOutputText,
   };
@@ -253,22 +284,22 @@ export async function runStage1BatchLlmForInput(
 
 function isNonRetryableLlmError(errorMessage: string): boolean {
   return (
-    errorMessage.includes("401") ||
-    errorMessage.includes("Incorrect API key") ||
-    errorMessage.includes("invalid_api_key")
+    errorMessage.includes('401') ||
+    errorMessage.includes('Incorrect API key') ||
+    errorMessage.includes('invalid_api_key')
   );
 }
 
 function sanitizeLlmError(errorMessage: string): string {
-  return errorMessage.replace(/sk-[A-Za-z0-9_*.-]+/g, "[redacted_api_key]");
+  return errorMessage.replace(/sk-[A-Za-z0-9_*.-]+/g, '[redacted_api_key]');
 }
 
 function getHttpStatus(error: unknown): number | null {
   let current = error;
   for (let depth = 0; depth < 4 && current; depth += 1) {
-    if (typeof current === "object" && "status" in current) {
+    if (typeof current === 'object' && 'status' in current) {
       const status = (current as { status?: unknown }).status;
-      if (typeof status === "number") {
+      if (typeof status === 'number') {
         return status;
       }
     }

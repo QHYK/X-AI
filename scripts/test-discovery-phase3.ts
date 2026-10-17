@@ -2,6 +2,13 @@ import assert from 'node:assert/strict';
 import type { Pool } from 'pg';
 import type { Span, SpanData, Trace } from '@openai/agents';
 import { PostgresDiscoveryTracingProcessor } from '../src/discovery/agent-tracing.js';
+import {
+  discoveryCacheHitRate,
+  initialDiscoveryStageState,
+  mergeDiscoveryStageUsage,
+  missingDiscoveryStageUsage,
+  usageFromAgentResponseUsage,
+} from '../src/discovery/execution-diagnostics.js';
 import type { DiscoveryFetchResult } from '../src/discovery/fetch-content.js';
 import {
   DiscoveryD3ExecutionError,
@@ -10,6 +17,7 @@ import {
   type DiscoveryD3Runtime,
 } from '../src/discovery/topic-discovery.js';
 import type { DiscoverySelectionOutput } from '../src/discovery/topic-selection.js';
+import { buildDiscoveryD3Instructions } from '../src/prompts/discovery-topic-agent.js';
 
 const RUN_ID = '00000000-0000-4000-8000-000000000301';
 
@@ -17,6 +25,8 @@ async function main(): Promise<void> {
   await testSingleAgentRunValidationPersistenceAndResume();
   await testNormalEmptyAndFailureReasons();
   await testTracePersistenceAndSanitization();
+  testUsageNormalization();
+  testD3PromptFiltersClearlyOverlongWorks();
   testOutputContract();
   console.log('Discovery Phase 3 tests passed.');
 }
@@ -89,6 +99,13 @@ async function testNormalEmptyAndFailureReasons(): Promise<void> {
   );
   assert.equal(toolFailureDb.run.execution_state.d3?.status, 'failed');
   assert.equal(toolFailureDb.run.execution_state.d3?.endReason, 'tool_failure');
+  assert.deepEqual(toolFailureDb.run.execution_state.d3?.usage, {
+    requests: 2,
+    inputTokens: 100,
+    outputTokens: 20,
+    cachedInputTokens: 0,
+    usageComplete: true,
+  });
 
   let retryCalls = 0;
   const retry = await runDiscoveryD3(toolFailureDb as unknown as Pool, RUN_ID, {
@@ -164,6 +181,44 @@ async function testTracePersistenceAndSanitization(): Promise<void> {
       }),
     },
   } as unknown as Span<SpanData>);
+  await processor.onSpanEnd({
+    traceId: 'trace_test',
+    spanId: 'span_response_2',
+    parentId: null,
+    startedAt: '2026-10-17T00:00:02.000Z',
+    endedAt: '2026-10-17T00:00:03.000Z',
+    error: null,
+    spanData: {
+      type: 'response',
+      response_id: 'resp_test_2',
+      _response: {
+        usage: {
+          input_tokens: 40,
+          output_tokens: 10,
+          input_tokens_details: { cached_tokens: 5 },
+        },
+      },
+    },
+  } as unknown as Span<SpanData>);
+  await processor.onSpanEnd({
+    traceId: 'trace_test',
+    spanId: 'span_response',
+    parentId: null,
+    startedAt: '2026-10-17T00:00:01.000Z',
+    endedAt: '2026-10-17T00:00:02.000Z',
+    error: null,
+    spanData: {
+      type: 'response',
+      response_id: 'resp_test',
+      _response: {
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          input_tokens_details: { cached_tokens: 25 },
+        },
+      },
+    },
+  } as unknown as Span<SpanData>);
   await processor.onTraceEnd(trace);
   await processor.forceFlush();
   assert.equal(processor.flushCount, 1);
@@ -172,6 +227,57 @@ async function testTracePersistenceAndSanitization(): Promise<void> {
   assert.equal(serialized.includes('full body must not be persisted'), false);
   assert.equal(serialized.includes('https://example.test/work'), true);
   assert.equal(serialized.includes('secret'), false);
+  assert.deepEqual(processor.getUsage(), {
+    requests: 2,
+    inputTokens: 140,
+    outputTokens: 30,
+    cachedInputTokens: 30,
+    usageComplete: true,
+  });
+}
+
+function testUsageNormalization(): void {
+  const explicitZero = usageFromAgentResponseUsage({
+    input_tokens: 10,
+    output_tokens: 2,
+    input_tokens_details: { cached_tokens: 0 },
+  });
+  assert.equal(explicitZero.cachedInputTokens, 0);
+  assert.equal(explicitZero.usageComplete, true);
+  assert.equal(discoveryCacheHitRate(explicitZero), 0);
+
+  const missingCache = usageFromAgentResponseUsage({ input_tokens: 10, output_tokens: 2 });
+  assert.equal(missingCache.cachedInputTokens, null);
+  assert.equal(missingCache.usageComplete, false);
+  assert.equal(discoveryCacheHitRate(missingCache), null);
+
+  const resumed = mergeDiscoveryStageUsage(
+    mergeDiscoveryStageUsage(explicitZero, missingDiscoveryStageUsage()),
+    explicitZero,
+  );
+  assert.deepEqual(resumed, {
+    requests: 3,
+    inputTokens: 20,
+    outputTokens: 4,
+    cachedInputTokens: null,
+    usageComplete: false,
+  });
+
+  const historicMissing = initialDiscoveryStageState(undefined, true);
+  assert.deepEqual(historicMissing.usage, {
+    requests: null,
+    inputTokens: null,
+    outputTokens: null,
+    cachedInputTokens: null,
+    usageComplete: false,
+  });
+}
+
+function testD3PromptFiltersClearlyOverlongWorks(): void {
+  const prompt = buildDiscoveryD3Instructions();
+  assert.match(prompt, /明确显示某个完整作品明显超过 30 分钟/);
+  assert.match(prompt, /直接跳过，不要调用 fetch_content/);
+  assert.match(prompt, /不得仅因 PDF 格式拒绝作品/);
 }
 
 function testOutputContract(): void {
@@ -271,7 +377,13 @@ function runtimeResult(output: unknown, fetches: DiscoveryFetchResult[]) {
   return {
     output,
     fetches,
-    usage: { requests: 2, inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+    usage: {
+      requests: 2,
+      inputTokens: 100,
+      outputTokens: 20,
+      cachedInputTokens: 0,
+      usageComplete: true,
+    },
     elapsedMs: 50,
     traceIds: ['trace_test'],
     traceFlushed: true,
@@ -290,6 +402,7 @@ type FakeBranchState = {
   endReason: string | null;
   completedAt: string | null;
   errorSummary?: string | null;
+  usage?: unknown;
 };
 
 type FakeRunRow = {

@@ -2,22 +2,19 @@
  * Stage 1 Workflow job：加载可重试原始文章、分批调用模型并写入处理结果。
  * 通过 raw_articles 状态与 processed_contents 的唯一约束保证重复运行安全。
  */
-import type { Pool, PoolClient, QueryResult } from "pg";
-import {
-  runStage1BatchLlm,
-  type Stage1LlmOptions,
-  type Stage1TokenUsage,
-} from "./stage1-llm.js";
+import type { Pool, PoolClient, QueryResult } from 'pg';
+import { runStage1BatchLlm, type Stage1LlmOptions, type Stage1TokenUsage } from './stage1-llm.js';
+import { emptyLlmTokenUsage, mergeLlmTokenUsage } from './llm-token-usage.js';
 import type {
   Stage1ArticleRow,
   Stage1BatchOutputResult,
   Stage1Output,
   Stage1Routing,
-} from "./stage1-contract.js";
-import { resolveStageLlmModel, resolveStageLlmProvider, type LlmProvider } from "./llm-client.js";
-import { resolveDailyScope, type PublishedAtScope } from "../lib/daily-scope.js";
+} from './stage1-contract.js';
+import { resolveStageLlmModel, resolveStageLlmProvider, type LlmProvider } from './llm-client.js';
+import { resolveDailyScope, type PublishedAtScope } from '../lib/daily-scope.js';
 
-type Queryable = Pick<Pool | PoolClient, "query">;
+type Queryable = Pick<Pool | PoolClient, 'query'>;
 const CODEX_LOGICAL_BATCH_COUNT = 15;
 
 export type Stage1JobOptions = Stage1LlmOptions & {
@@ -39,10 +36,10 @@ export type Stage1AttemptRecord = {
   parentBatchId: string | null;
   articleCount: number;
   attempt: number;
-  type: "initial" | "retry" | "split";
+  type: 'initial' | 'retry' | 'split';
   provider: LlmProvider;
   codexFallbackToDefaultProvider: boolean;
-  status: "success" | "failed";
+  status: 'success' | 'failed';
   errorType: string | null;
   error: string | null;
   durationMs: number;
@@ -52,7 +49,7 @@ export type Stage1JobArticleResult = {
   rawArticleId: string;
   sourceName: string;
   title: string;
-  status: "selected" | "ignored" | "failed";
+  status: 'selected' | 'ignored' | 'failed';
   routing: Stage1Routing | null;
   processedContentInserted: boolean;
   attempts: number;
@@ -124,14 +121,14 @@ export async function processStage1Batch(
   const batches = createStage1MicroBatches(articles, batchConfig);
   await options.onInitialBatches?.(batches);
 
-  const defaultProvider = options.provider ?? resolveStageLlmProvider("stage1");
+  const defaultProvider = options.provider ?? resolveStageLlmProvider('stage1');
   const batchResults = await runWithConcurrency(batches, concurrency, async (batch, index) =>
     processStage1MicroBatch(
       pool,
       batch,
       { ...options, dailyDate },
       0,
-      `batch-${String(index + 1).padStart(3, "0")}`,
+      `batch-${String(index + 1).padStart(3, '0')}`,
       null,
       index + 1,
       stage1ProviderForLogicalBatch(index + 1, defaultProvider),
@@ -144,15 +141,15 @@ export async function processStage1Batch(
   return {
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
-    model: resolveStageLlmModel("stage1", options.model),
+    model: resolveStageLlmModel('stage1', options.model),
     publishedWithinHours: options.publishedAtScope ? null : publishedWithinHours,
     scopeStartAt: options.publishedAtScope?.startAt ?? null,
     scopeEndAt: options.publishedAtScope?.endAt ?? null,
     requestedLimit: options.limit ?? null,
     loadedCount: articles.length,
-    selectedCount: results.filter((result) => result.status === "selected").length,
-    ignoredCount: results.filter((result) => result.status === "ignored").length,
-    failedCount: results.filter((result) => result.status === "failed").length,
+    selectedCount: results.filter((result) => result.status === 'selected').length,
+    ignoredCount: results.filter((result) => result.status === 'ignored').length,
+    failedCount: results.filter((result) => result.status === 'failed').length,
     processedContentInsertedCount: results.filter((result) => result.processedContentInserted)
       .length,
     batchCount: batches.length,
@@ -172,7 +169,7 @@ export function stage1ProviderForLogicalBatch(
   logicalBatchNumber: number,
   defaultProvider: LlmProvider,
 ): LlmProvider {
-  return logicalBatchNumber <= CODEX_LOGICAL_BATCH_COUNT ? "codex" : defaultProvider;
+  return logicalBatchNumber <= CODEX_LOGICAL_BATCH_COUNT ? 'codex' : defaultProvider;
 }
 
 export function shouldFallbackCodexBatch(
@@ -180,14 +177,11 @@ export function shouldFallbackCodexBatch(
   provider: LlmProvider,
   success: boolean,
 ): boolean {
-  return logicalBatchNumber <= CODEX_LOGICAL_BATCH_COUNT && provider === "codex" && !success;
+  return logicalBatchNumber <= CODEX_LOGICAL_BATCH_COUNT && provider === 'codex' && !success;
 }
 
 export function resolveStage1BatchConfig(
-  options: Pick<
-    Stage1JobOptions,
-    "batchSize" | "batchMaxContentChars" | "batchMaxTotalChars"
-  > = {},
+  options: Pick<Stage1JobOptions, 'batchSize' | 'batchMaxContentChars' | 'batchMaxTotalChars'> = {},
 ): Stage1BatchConfig {
   return {
     batchSize:
@@ -195,21 +189,21 @@ export function resolveStage1BatchConfig(
       readPositiveInteger(
         process.env.STAGE1_BATCH_SIZE,
         DEFAULT_STAGE1_BATCH_SIZE,
-        "STAGE1_BATCH_SIZE",
+        'STAGE1_BATCH_SIZE',
       ),
     batchMaxContentChars:
       options.batchMaxContentChars ??
       readPositiveInteger(
         process.env.STAGE1_BATCH_MAX_CONTENT_CHARS,
         DEFAULT_STAGE1_BATCH_MAX_CONTENT_CHARS,
-        "STAGE1_BATCH_MAX_CONTENT_CHARS",
+        'STAGE1_BATCH_MAX_CONTENT_CHARS',
       ),
     batchMaxTotalChars:
       options.batchMaxTotalChars ??
       readPositiveInteger(
         process.env.STAGE1_BATCH_MAX_TOTAL_CHARS,
         DEFAULT_STAGE1_BATCH_MAX_TOTAL_CHARS,
-        "STAGE1_BATCH_MAX_TOTAL_CHARS",
+        'STAGE1_BATCH_MAX_TOTAL_CHARS',
       ),
   };
 }
@@ -237,7 +231,7 @@ export function createStage1MicroBatches(
   for (const article of articles) {
     const contentChars = stage1ArticleContentLength(article);
     const shouldProcessAlone =
-      contentChars >= config.batchMaxContentChars || article.sourceCategory === "Long-form";
+      contentChars >= config.batchMaxContentChars || article.sourceCategory === 'Long-form';
 
     if (shouldProcessAlone) {
       flushCurrentBatch();
@@ -247,8 +241,7 @@ export function createStage1MicroBatches(
 
     const wouldExceedCount = currentBatch.length >= config.batchSize;
     const wouldExceedTotal =
-      currentBatch.length > 0 &&
-      currentContentChars + contentChars > config.batchMaxTotalChars;
+      currentBatch.length > 0 && currentContentChars + contentChars > config.batchMaxTotalChars;
     if (wouldExceedCount || wouldExceedTotal) {
       flushCurrentBatch();
     }
@@ -281,10 +274,10 @@ export async function loadPendingStage1Articles(
 ): Promise<Stage1ArticleRow[]> {
   const publishedWithinHours = options.publishedWithinHours ?? DEFAULT_STAGE1_LOOKBACK_HOURS;
   const publishedAtPredicate = options.publishedAtScope
-    ? "ra.published_at >= $1::timestamptz and ra.published_at < $2::timestamptz"
+    ? 'ra.published_at >= $1::timestamptz and ra.published_at < $2::timestamptz'
     : "ra.published_at >= now() - ($1::int * interval '1 hour')";
   const limitParameter = options.publishedAtScope ? 3 : 2;
-  const limitClause = options.limit ? `limit $${limitParameter}` : "";
+  const limitClause = options.limit ? `limit $${limitParameter}` : '';
   const values: Array<number | string> = options.publishedAtScope
     ? [options.publishedAtScope.startAt, options.publishedAtScope.endAt]
     : [publishedWithinHours];
@@ -409,38 +402,41 @@ async function processStage1MicroBatch(
   articles: Stage1ArticleRow[],
   options: Stage1JobOptions = {},
   inheritedAttempts = 0,
-  batchId = "batch",
+  batchId = 'batch',
   parentBatchId: string | null = null,
   logicalBatchNumber = 1,
-  provider: LlmProvider = resolveStageLlmProvider("stage1"),
-  defaultProvider: LlmProvider = resolveStageLlmProvider("stage1"),
+  provider: LlmProvider = resolveStageLlmProvider('stage1'),
+  defaultProvider: LlmProvider = resolveStageLlmProvider('stage1'),
 ): Promise<Stage1MicroBatchResult> {
   const dailyDate = options.dailyDate ?? resolveDailyScope(undefined).dailyDate;
-  const runWithProvider = async (requestedProvider: LlmProvider, codexFallbackToDefaultProvider: boolean) =>
+  const runWithProvider = async (
+    requestedProvider: LlmProvider,
+    codexFallbackToDefaultProvider: boolean,
+  ) =>
     runStage1BatchLlm(articles, {
       ...options,
       provider: requestedProvider,
       // A Stage1 model override belongs to the configured/default provider;
       // Codex must resolve its own existing CODEX_MODEL configuration.
-      model: requestedProvider === "codex" ? undefined : options.model,
+      model: requestedProvider === 'codex' ? undefined : options.model,
       onAttempt: async (event) => {
-      await options.onAttempt?.(event);
-      await (options as Stage1JobOptions).onAttemptRecord?.({
-        batchId,
-        logicalBatchNumber,
-        parentBatchId,
-        articleCount: articles.length,
-        attempt: event.attempt,
-        type: event.attempt > 1 ? "retry" : parentBatchId ? "split" : "initial",
-        provider: event.provider,
-        codexFallbackToDefaultProvider,
-        status: event.status,
-        errorType: event.errorType,
-        error: event.error,
-        durationMs: event.durationMs,
-      });
-    },
-  });
+        await options.onAttempt?.(event);
+        await (options as Stage1JobOptions).onAttemptRecord?.({
+          batchId,
+          logicalBatchNumber,
+          parentBatchId,
+          articleCount: articles.length,
+          attempt: event.attempt,
+          type: event.attempt > 1 ? 'retry' : parentBatchId ? 'split' : 'initial',
+          provider: event.provider,
+          codexFallbackToDefaultProvider,
+          status: event.status,
+          errorType: event.errorType,
+          error: event.error,
+          durationMs: event.durationMs,
+        });
+      },
+    });
   let llmResult = await runWithProvider(provider, false);
   let metrics = createBatchMetrics(llmResult);
   let attemptsForThisBatch = llmResult.attempts;
@@ -477,7 +473,12 @@ async function processStage1MicroBatch(
       splitCount: 0,
       singletonBatchCount: 1,
       results: [
-        await persistFailedArticle(pool, articles[0], llmResult.error, inheritedAttempts + attemptsForThisBatch),
+        await persistFailedArticle(
+          pool,
+          articles[0],
+          llmResult.error,
+          inheritedAttempts + attemptsForThisBatch,
+        ),
       ],
     };
   }
@@ -524,13 +525,19 @@ async function persistSuccessfulBatch(
   const outputByTempId = new Map(outputResults.map((result) => [result.temp_id, result]));
 
   return persistStage1BatchSequentially(articles, (article, index) => {
-    const tempId = `A${String(index + 1).padStart(3, "0")}`;
+    const tempId = `A${String(index + 1).padStart(3, '0')}`;
     const outputResult = outputByTempId.get(tempId);
     if (!outputResult) {
       throw new Error(`Validated Stage 1 output is missing ${tempId}.`);
     }
 
-    return persistStage1Output(pool, article, toStage1Output(outputResult), options.attempts, options.dailyDate);
+    return persistStage1Output(
+      pool,
+      article,
+      toStage1Output(outputResult),
+      options.attempts,
+      options.dailyDate,
+    );
   });
 }
 
@@ -560,7 +567,7 @@ async function persistFailedArticle(
     rawArticleId: article.id,
     sourceName: article.sourceName,
     title: article.title,
-    status: "failed",
+    status: 'failed',
     routing: null,
     processedContentInserted: false,
     attempts,
@@ -576,13 +583,13 @@ async function persistStage1Output(
   dailyDate: string,
 ): Promise<Stage1JobArticleResult> {
   try {
-    if (output.routing === "Ignore") {
+    if (output.routing === 'Ignore') {
       await persistStage1Ignored(pool, article.id);
       return {
         rawArticleId: article.id,
         sourceName: article.sourceName,
         title: article.title,
-        status: "ignored",
+        status: 'ignored',
         routing: output.routing,
         processedContentInserted: false,
         attempts,
@@ -590,12 +597,17 @@ async function persistStage1Output(
       };
     }
 
-    const processedContentInserted = await persistStage1Selected(pool, article.id, output, dailyDate);
+    const processedContentInserted = await persistStage1Selected(
+      pool,
+      article.id,
+      output,
+      dailyDate,
+    );
     return {
       rawArticleId: article.id,
       sourceName: article.sourceName,
       title: article.title,
-      status: "selected",
+      status: 'selected',
       routing: output.routing,
       processedContentInserted,
       attempts,
@@ -608,7 +620,7 @@ async function persistStage1Output(
       rawArticleId: article.id,
       sourceName: article.sourceName,
       title: article.title,
-      status: "failed",
+      status: 'failed',
       routing: output.routing,
       processedContentInserted: false,
       attempts,
@@ -628,7 +640,10 @@ function toStage1Output(result: Stage1BatchOutputResult): Stage1Output {
   };
 }
 
-type Stage1LlmMetrics = Pick<Stage1MicroBatchResult, "llmCallCount" | "retryCount" | "llmDurationMs" | "tokenUsage">;
+type Stage1LlmMetrics = Pick<
+  Stage1MicroBatchResult,
+  'llmCallCount' | 'retryCount' | 'llmDurationMs' | 'tokenUsage'
+>;
 
 function createBatchMetrics(result: {
   attempts: number;
@@ -643,10 +658,7 @@ function createBatchMetrics(result: {
   };
 }
 
-function mergeBatchMetrics(
-  left: Stage1LlmMetrics,
-  right: Stage1LlmMetrics,
-): Stage1LlmMetrics {
+function mergeBatchMetrics(left: Stage1LlmMetrics, right: Stage1LlmMetrics): Stage1LlmMetrics {
   return {
     llmCallCount: left.llmCallCount + right.llmCallCount,
     retryCount: left.retryCount + right.retryCount,
@@ -661,21 +673,10 @@ function sumTokenUsage(usages: Array<Stage1TokenUsage | null>): Stage1TokenUsage
     return null;
   }
 
-  return available.reduce(
-    (sum, usage) => ({
-      inputTokens: sum.inputTokens + usage.inputTokens,
-      outputTokens: sum.outputTokens + usage.outputTokens,
-      totalTokens: sum.totalTokens + usage.totalTokens,
-    }),
-    { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-  );
+  return available.reduce(mergeLlmTokenUsage, emptyLlmTokenUsage());
 }
 
-function readPositiveInteger(
-  value: string | undefined,
-  fallback: number,
-  name: string,
-): number {
+function readPositiveInteger(value: string | undefined, fallback: number, name: string): number {
   if (value === undefined) {
     return fallback;
   }
@@ -732,7 +733,7 @@ export async function persistStage1Selected(
     ],
   );
 
-  await markRawArticleStage1Status(queryable, rawArticleId, "selected", null);
+  await markRawArticleStage1Status(queryable, rawArticleId, 'selected', null);
   return result.rowCount === 1;
 }
 
@@ -740,7 +741,7 @@ export async function persistStage1Ignored(
   queryable: Queryable,
   rawArticleId: string,
 ): Promise<QueryResult> {
-  return markRawArticleStage1Status(queryable, rawArticleId, "ignored", null);
+  return markRawArticleStage1Status(queryable, rawArticleId, 'ignored', null);
 }
 
 export async function persistStage1Failure(
@@ -748,13 +749,13 @@ export async function persistStage1Failure(
   rawArticleId: string,
   error: string,
 ): Promise<QueryResult> {
-  return markRawArticleStage1Status(queryable, rawArticleId, "failed", truncateError(error));
+  return markRawArticleStage1Status(queryable, rawArticleId, 'failed', truncateError(error));
 }
 
 function markRawArticleStage1Status(
   queryable: Queryable,
   rawArticleId: string,
-  status: "selected" | "ignored" | "failed",
+  status: 'selected' | 'ignored' | 'failed',
   processingError: string | null,
 ): Promise<QueryResult> {
   return queryable.query(
@@ -772,16 +773,16 @@ function markRawArticleStage1Status(
 
 function toDatabaseRouting(routing: Stage1Routing): string {
   switch (routing) {
-    case "Event":
-      return "event";
-    case "Digest":
-      return "digest";
-    case "Long-form":
-      return "long_form";
-    case "Inspiration":
-      return "inspiration";
-    case "Ignore":
-      throw new Error("Ignore routing should not be persisted to processed_contents.");
+    case 'Event':
+      return 'event';
+    case 'Digest':
+      return 'digest';
+    case 'Long-form':
+      return 'long_form';
+    case 'Inspiration':
+      return 'inspiration';
+    case 'Ignore':
+      throw new Error('Ignore routing should not be persisted to processed_contents.');
   }
 }
 
@@ -809,9 +810,7 @@ async function runWithConcurrency<T, R>(
     }
   }
 
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
-  );
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
 
   return results;
 }

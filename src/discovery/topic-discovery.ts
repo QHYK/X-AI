@@ -22,6 +22,12 @@ import {
 } from '../prompts/discovery-topic-agent.js';
 import { PostgresDiscoveryTracingProcessor } from './agent-tracing.js';
 import {
+  buildDiscoveryStageState,
+  emptyDiscoveryStageUsage,
+  initialDiscoveryStageState,
+  stageHasHistoricConfig,
+} from './execution-diagnostics.js';
+import {
   createDiscoveryFetchContentTool,
   type DiscoveryAgentContext,
   type DiscoveryFetchResult,
@@ -32,6 +38,7 @@ import {
   type DiscoveryRunRecord,
 } from './run-service.js';
 import type { DiscoverySelectionOutput, DiscoveryTopicLead } from './topic-selection.js';
+import type { DiscoveryStageUsage } from '../db/schema.js';
 
 const D3CandidateTransportSchema = z
   .object({
@@ -71,12 +78,7 @@ export type DiscoveryD3Candidate = {
   extraInfo: Record<string, unknown>;
 };
 
-export type DiscoveryD3Usage = {
-  requests: number;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-};
+export type DiscoveryD3Usage = DiscoveryStageUsage;
 
 export type DiscoveryD3RuntimeResult = {
   output: unknown;
@@ -146,28 +148,58 @@ export async function runDiscoveryD3(
   const config = readD3ConfigSnapshot(run) ?? resolveDiscoveryD3RuntimeConfig(options.environment);
   if (run.executionState.d3?.status === 'completed') {
     const counts = await loadD3Counts(pool, runId);
-    return completedResult(true, topicLeads.length, counts, config);
+    return completedResult(true, topicLeads.length, counts, config, run.executionState.d3.usage);
   }
   if (run.status !== 'running') throw new Error('D3 requires a running Discovery Run.');
 
+  const prior = initialDiscoveryStageState(
+    run.executionState.d3,
+    stageHasHistoricConfig(run.configSnapshot, 'd3'),
+  );
+  const metadata = { provider: config.provider, model: config.model, apiMode: config.apiMode };
   await persistDiscoveryD3Config(pool, runId, config);
-  await updateDiscoveryBranchExecutionState(pool, runId, 'd3', {
-    status: 'running',
-    endReason: null,
-    completedAt: null,
-    errorSummary: null,
-  });
+  const stageStartedAt = Date.now();
+  await updateDiscoveryBranchExecutionState(
+    pool,
+    runId,
+    'd3',
+    buildDiscoveryStageState({
+      status: 'running',
+      endReason: null,
+      errorSummary: null,
+      metadata,
+      prior,
+    }),
+  );
 
   if (topicLeads.length === 0) {
-    await completeEmptyD3(pool, runId);
-    return completedResult(false, 0, emptyCounts(), config);
+    const usage = emptyDiscoveryStageUsage();
+    await completeEmptyD3(
+      pool,
+      runId,
+      buildDiscoveryStageState({
+        status: 'completed',
+        endReason: 'no_candidates',
+        errorSummary: null,
+        metadata,
+        prior,
+        attemptUsage: usage,
+        attemptElapsedMs: Date.now() - stageStartedAt,
+        completedAt: new Date().toISOString(),
+      }),
+    );
+    return completedResult(false, 0, emptyCounts(), config, usage);
   }
 
+  let attemptUsage: DiscoveryD3Usage | null = null;
+  let attemptElapsedMs: number | null = null;
   try {
     const runtimeInput = { runId, topicLeads, memory: run.configSnapshot?.memory ?? null, config };
     const runtimeResult = options.runtime
       ? await options.runtime(runtimeInput)
       : await runDiscoveryD3Agent({ ...runtimeInput, pool });
+    attemptUsage = runtimeResult.usage;
+    attemptElapsedMs = runtimeResult.elapsedMs;
     const candidates = validateDiscoveryD3Output(runtimeResult.output, topicLeads);
     if (
       candidates.length === 0 &&
@@ -185,9 +217,19 @@ export async function runDiscoveryD3(
       topicLeads,
       candidates,
       runtimeResult.fetches,
+      buildDiscoveryStageState({
+        status: 'completed',
+        endReason: candidates.length > 0 ? 'candidates_found' : 'no_candidates',
+        errorSummary: null,
+        metadata,
+        prior,
+        attemptUsage: runtimeResult.usage,
+        attemptElapsedMs: runtimeResult.elapsedMs,
+        completedAt: new Date().toISOString(),
+      }),
     );
     return {
-      ...completedResult(false, topicLeads.length, counts, config),
+      ...completedResult(false, topicLeads.length, counts, config, runtimeResult.usage),
       usage: runtimeResult.usage,
       elapsedMs: runtimeResult.elapsedMs,
       traceIds: runtimeResult.traceIds,
@@ -195,12 +237,26 @@ export async function runDiscoveryD3(
     };
   } catch (error) {
     const classified = classifyD3Error(error);
-    await updateDiscoveryBranchExecutionState(pool, runId, 'd3', {
-      status: 'failed',
-      endReason: classified.endReason,
-      completedAt: new Date().toISOString(),
-      errorSummary: classified.message,
-    });
+    const diagnostics = readD3ErrorDiagnostics(error);
+    await updateDiscoveryBranchExecutionState(
+      pool,
+      runId,
+      'd3',
+      buildDiscoveryStageState({
+        status: 'failed',
+        endReason: classified.endReason,
+        errorSummary: classified.message,
+        metadata,
+        prior,
+        ...(diagnostics || attemptUsage
+          ? {
+              attemptUsage: diagnostics?.usage ?? attemptUsage!,
+              attemptElapsedMs: diagnostics?.elapsedMs ?? attemptElapsedMs!,
+            }
+          : { attemptElapsedMs: Date.now() - stageStartedAt }),
+        completedAt: new Date().toISOString(),
+      }),
+    );
     throw classified;
   }
 }
@@ -305,16 +361,20 @@ export async function runDiscoveryD3Agent(input: {
     return {
       output: result.finalOutput,
       fetches: context.fetches,
-      usage: {
-        requests: result.runContext.usage.requests,
-        inputTokens: result.runContext.usage.inputTokens,
-        outputTokens: result.runContext.usage.outputTokens,
-        totalTokens: result.runContext.usage.totalTokens,
-      },
+      usage: processor.getUsage(),
       elapsedMs: Date.now() - startedAt,
       traceIds: [...processor.traceIds],
       traceFlushed: true,
     };
+  } catch (error) {
+    const failure = error instanceof Error ? error : new Error(String(error));
+    Object.assign(failure, {
+      discoveryD3Diagnostics: {
+        usage: processor.getUsage(),
+        elapsedMs: Date.now() - startedAt,
+      },
+    });
+    throw failure;
   } finally {
     await getGlobalTraceProvider().forceFlush();
     await processor.shutdown();
@@ -334,6 +394,7 @@ async function validateAndPersistD3Candidates(
   topicLeads: DiscoveryTopicLead[],
   candidates: DiscoveryD3Candidate[],
   fetches: DiscoveryFetchResult[],
+  executionState: Parameters<typeof updateDiscoveryBranchExecutionState>[3],
 ): Promise<D3Counts> {
   const normalizedUrls = candidates.flatMap((candidate) => {
     const normalized = normalizeArticleUrl(candidate.url);
@@ -431,12 +492,7 @@ async function validateAndPersistD3Candidates(
       }
     }
     const selectedCount = rows.filter((row) => row.decision.status === 'selected').length;
-    await updateDiscoveryBranchExecutionState(client, runId, 'd3', {
-      status: 'completed',
-      endReason: selectedCount > 0 ? 'candidates_found' : 'no_candidates',
-      completedAt: new Date().toISOString(),
-      errorSummary: null,
-    });
+    await updateDiscoveryBranchExecutionState(client, runId, 'd3', executionState);
     await client.query('commit');
     return {
       discoveredCount: rows.length,
@@ -452,13 +508,12 @@ async function validateAndPersistD3Candidates(
   }
 }
 
-async function completeEmptyD3(pool: Pool, runId: string): Promise<void> {
-  await updateDiscoveryBranchExecutionState(pool, runId, 'd3', {
-    status: 'completed',
-    endReason: 'no_candidates',
-    completedAt: new Date().toISOString(),
-    errorSummary: null,
-  });
+async function completeEmptyD3(
+  pool: Pool,
+  runId: string,
+  executionState: Parameters<typeof updateDiscoveryBranchExecutionState>[3],
+): Promise<void> {
+  await updateDiscoveryBranchExecutionState(pool, runId, 'd3', executionState);
 }
 
 async function loadDuplicateUrls(pool: Pool, runId: string, urls: string[]): Promise<Set<string>> {
@@ -562,6 +617,7 @@ function completedResult(
   topicCount: number,
   counts: D3Counts,
   config: DiscoveryD3RuntimeConfig,
+  usage: DiscoveryD3Usage = emptyDiscoveryStageUsage(),
 ): RunDiscoveryD3Result {
   return {
     skipped,
@@ -569,7 +625,7 @@ function completedResult(
     ...counts,
     endReason: counts.selectedCount > 0 ? 'candidates_found' : 'no_candidates',
     config,
-    usage: { requests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    usage,
     elapsedMs: 0,
     traceIds: [],
     traceFlushed: true,
@@ -627,6 +683,24 @@ function classifyD3Error(error: unknown): DiscoveryD3ExecutionError {
     return new DiscoveryD3ExecutionError('timeout', safeError(error), { cause: error });
   }
   return new DiscoveryD3ExecutionError('error', safeError(error), { cause: error });
+}
+
+function readD3ErrorDiagnostics(
+  error: unknown,
+): { usage: DiscoveryD3Usage; elapsedMs: number } | null {
+  if (!error || typeof error !== 'object') return null;
+  const value = (error as { discoveryD3Diagnostics?: unknown }).discoveryD3Diagnostics;
+  if (!value || typeof value !== 'object') return null;
+  const diagnostics = value as { usage?: unknown; elapsedMs?: unknown };
+  if (
+    !diagnostics.usage ||
+    typeof diagnostics.usage !== 'object' ||
+    typeof diagnostics.elapsedMs !== 'number' ||
+    diagnostics.elapsedMs < 0
+  ) {
+    return null;
+  }
+  return { usage: diagnostics.usage as DiscoveryD3Usage, elapsedMs: diagnostics.elapsedMs };
 }
 
 function safeError(error: unknown): string {

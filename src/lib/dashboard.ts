@@ -3,28 +3,23 @@
  *
  * 数据库指标以 workflow daily_date 为业务归属；runtime 仅补充运行观测数据，不作为业务数据来源。
  */
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
-import type { Pool } from "pg";
-import { parseBriefDate } from "./brief-date.js";
-import {
-  getDailyBriefForDailyScope,
-  type DailyBriefResponse,
-} from "./daily-brief.js";
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { Pool } from 'pg';
+import { parseBriefDate } from './brief-date.js';
+import { getDailyBriefForDailyScope, type DailyBriefResponse } from './daily-brief.js';
 import {
   isDailyScopeCompleted,
   resolveDailyScope,
   resolveRecentCompletedDailyScopes,
   type DailyScope,
-} from "./daily-scope.js";
+} from './daily-scope.js';
 
 const DASHBOARD_DAYS = 7;
-const STAGES = ["stage1", "stage2", "stage3", "stage4"] as const;
-const CONTENT_COMPLETION_SHORT_CHARS = Number(
-  process.env.CONTENT_COMPLETION_SHORT_CHARS ?? 80,
-);
+const STAGES = ['stage1', 'stage2', 'stage3', 'stage4'] as const;
+const CONTENT_COMPLETION_SHORT_CHARS = Number(process.env.CONTENT_COMPLETION_SHORT_CHARS ?? 80);
 
-type Routing = "event" | "digest" | "long_form" | "inspiration";
+type Routing = 'event' | 'digest' | 'long_form' | 'inspiration';
 export type DashboardStage = (typeof STAGES)[number];
 
 type CountRow = {
@@ -101,6 +96,8 @@ export type DashboardStageMetrics = {
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  cachedInputTokens: number | null;
+  tokenUsageComplete: boolean | null;
   candidateCount: number | null;
   groupCount: number | null;
   selectedEventCount: number | null;
@@ -163,12 +160,12 @@ export function formatContentCompletionRatio(
   metrics: DashboardContentCompletionMetrics | null,
 ): string {
   if (metrics?.successCount === null || metrics?.successCount === undefined) {
-    return "N/A";
+    return 'N/A';
   }
   if (metrics.selectedCount === null) {
-    return "N/A";
+    return 'N/A';
   }
-  return `${metrics.successCount.toLocaleString("en-US")} / ${metrics.selectedCount.toLocaleString("en-US")}`;
+  return `${metrics.successCount.toLocaleString('en-US')} / ${metrics.selectedCount.toLocaleString('en-US')}`;
 }
 
 export type DashboardDay = {
@@ -196,7 +193,7 @@ export type DashboardDay = {
 };
 
 export type DashboardData = {
-  timezone: "Asia/Shanghai";
+  timezone: 'Asia/Shanghai';
   latestDailyDate: string;
   detailDate: string;
   totals: {
@@ -233,10 +230,10 @@ export async function getDashboardData(
   const scopes = options.overviewScopes ?? resolveRecentCompletedDailyScopes(DASHBOARD_DAYS, now);
   const latestScope = scopes[0];
   if (!latestScope) {
-    throw new Error("Dashboard Daily scope range is empty.");
+    throw new Error('Dashboard Daily scope range is empty.');
   }
 
-  const requestedDate = parseBriefDate(options.detailDate ?? "")?.date;
+  const requestedDate = parseBriefDate(options.detailDate ?? '')?.date;
   const detailScope = resolveDailyScope(requestedDate ?? latestScope.dailyDate);
   const detailScopeCompleted = isDailyScopeCompleted(detailScope, now);
 
@@ -248,23 +245,21 @@ export async function getDashboardData(
     ...(detailScopeCompleted ? [detailScope.dailyDate] : []),
   ]);
 
-  const processedCategoriesPromise: Promise<{ rows: CategoryRow[] }> =
-    detailScopeCompleted
-      ? pool.query<CategoryRow>(
-          `
+  const processedCategoriesPromise: Promise<{ rows: CategoryRow[] }> = detailScopeCompleted
+    ? pool.query<CategoryRow>(
+        `
             select category, count(*)::int as count
             from processed_contents pc
             where pc.daily_date = $1::date
             group by category
             order by count desc, category asc
           `,
-          [detailScope.dailyDate],
-        )
-      : Promise.resolve({ rows: [] });
-  const digestCategoriesPromise: Promise<{ rows: CategoryRow[] }> =
-    detailScopeCompleted
-      ? pool.query<CategoryRow>(
-          `
+        [detailScope.dailyDate],
+      )
+    : Promise.resolve({ rows: [] });
+  const digestCategoriesPromise: Promise<{ rows: CategoryRow[] }> = detailScopeCompleted
+    ? pool.query<CategoryRow>(
+        `
             select category, count(*)::int as count
             from processed_contents pc
             where pc.daily_date = $1::date
@@ -272,9 +267,9 @@ export async function getDashboardData(
             group by category
             order by count desc, category asc
           `,
-          [detailScope.dailyDate],
-        )
-      : Promise.resolve({ rows: [] });
+        [detailScope.dailyDate],
+      )
+    : Promise.resolve({ rows: [] });
   const contentFunnelPromise = detailScopeCompleted
     ? loadContentFunnel(pool, detailScope)
     : Promise.resolve(null);
@@ -335,12 +330,7 @@ export async function getDashboardData(
           and ra.published_at < scope.end_at
         group by scope.date
       `,
-      [
-        scopeDates,
-        scopeStarts,
-        scopeEnds,
-        CONTENT_COMPLETION_SHORT_CHARS,
-      ],
+      [scopeDates, scopeStarts, scopeEnds, CONTENT_COMPLETION_SHORT_CHARS],
     ),
     pool.query<CountRow>(
       `
@@ -379,13 +369,11 @@ export async function getDashboardData(
     processedCategoriesPromise,
     digestCategoriesPromise,
     loadRuntimeMetricsByDate(options.rootDir ?? process.cwd(), requestedRuntimeDates),
-    loadContentCompletionRuntimeByDate(
-      options.rootDir ?? process.cwd(),
-      requestedRuntimeDates,
-    ),
+    loadContentCompletionRuntimeByDate(options.rootDir ?? process.cwd(), requestedRuntimeDates),
     loadDuplicateFilterRuntimeByDate(options.rootDir ?? process.cwd(), requestedRuntimeDates),
     contentFunnelPromise,
-    pool.query<Stage4BusinessRow>(`
+    pool.query<Stage4BusinessRow>(
+      `
       with dates as (select unnest($1::text[]) as date),
       latest_runs as (
         select dates.date, s.id, s.status, s.success_count
@@ -403,13 +391,15 @@ export async function getDashboardData(
       left join stage4_runs all_runs on all_runs.daily_date = latest_runs.date::date
       left join events e on e.stage4_run_id = all_runs.id
       group by latest_runs.date, latest_runs.status, latest_runs.id, latest_runs.success_count
-    `, [[...requestedRuntimeDates]]),
+    `,
+      [[...requestedRuntimeDates]],
+    ),
     loadPipelineRunsByDate(pool, requestedRuntimeDates),
   ]);
 
   const totals = totalsResult.rows[0];
   if (!totals) {
-    throw new Error("Dashboard totals query returned no rows.");
+    throw new Error('Dashboard totals query returned no rows.');
   }
 
   const rawByDate = rowsByDate(rawResult.rows);
@@ -427,9 +417,14 @@ export async function getDashboardData(
     const pipelineRuns = pipelineRunsByDate.get(scope.dailyDate);
 
     for (const stage of STAGES) {
-      stages[stage] = pipelineRuns?.get(stage) ? stageMetricsFromPipelineRun(stage, pipelineRuns.get(stage)!) : runtimeStages?.get(stage) ?? null;
+      stages[stage] = pipelineRuns?.get(stage)
+        ? stageMetricsFromPipelineRun(stage, pipelineRuns.get(stage)!)
+        : (runtimeStages?.get(stage) ?? null);
     }
-    stages.stage4 = mergeStage4BusinessMetrics(stages.stage4, stage4BusinessByDate.get(scope.dailyDate));
+    stages.stage4 = mergeStage4BusinessMetrics(
+      stages.stage4,
+      stage4BusinessByDate.get(scope.dailyDate),
+    );
 
     const availableStages = Object.values(stages).filter(
       (metrics): metrics is DashboardStageMetrics => metrics !== null,
@@ -454,8 +449,12 @@ export async function getDashboardData(
       events: { published: count(event?.published), draft: count(event?.draft) },
       completionBacklog: count(raw?.completion_backlog),
       runtime: {
-        contentCompletion: pipelineRuns?.get("content_completion") ? completionMetricsFromPipelineRun(pipelineRuns.get("content_completion")!) : completionByDate.get(scope.dailyDate) ?? null,
-        duplicateFilter: pipelineRuns?.get("exact_duplicate_filter") ? duplicateMetricsFromPipelineRun(pipelineRuns.get("exact_duplicate_filter")!) : duplicateFilterByDate.get(scope.dailyDate) ?? null,
+        contentCompletion: pipelineRuns?.get('content_completion')
+          ? completionMetricsFromPipelineRun(pipelineRuns.get('content_completion')!)
+          : (completionByDate.get(scope.dailyDate) ?? null),
+        duplicateFilter: pipelineRuns?.get('exact_duplicate_filter')
+          ? duplicateMetricsFromPipelineRun(pipelineRuns.get('exact_duplicate_filter')!)
+          : (duplicateFilterByDate.get(scope.dailyDate) ?? null),
         stages,
         llmCalls: sumRequired(STAGES.map((stage) => stages[stage]?.llmCalls ?? null)),
         inputTokens: sumKnown(availableStages.map((stage) => stage.inputTokens)),
@@ -472,7 +471,9 @@ export async function getDashboardData(
     : undefined;
   const detailPipelineRuns = pipelineRunsByDate.get(detailScope.dailyDate);
   for (const stage of STAGES) {
-    detailStages[stage] = detailPipelineRuns?.get(stage) ? stageMetricsFromPipelineRun(stage, detailPipelineRuns.get(stage)!) : runtimeDetailStages?.get(stage) ?? null;
+    detailStages[stage] = detailPipelineRuns?.get(stage)
+      ? stageMetricsFromPipelineRun(stage, detailPipelineRuns.get(stage)!)
+      : (runtimeDetailStages?.get(stage) ?? null);
   }
   detailStages.stage4 = mergeStage4BusinessMetrics(
     detailStages.stage4,
@@ -480,7 +481,7 @@ export async function getDashboardData(
   );
 
   return {
-    timezone: "Asia/Shanghai",
+    timezone: 'Asia/Shanghai',
     latestDailyDate: latestScope.dailyDate,
     detailDate: detailScope.dailyDate,
     totals: {
@@ -495,10 +496,14 @@ export async function getDashboardData(
       processedByCategory: categoryCounts(processedCategoriesResult.rows),
       digestByCategory: categoryCounts(digestCategoriesResult.rows),
       contentCompletion: detailScopeCompleted
-        ? detailPipelineRuns?.get("content_completion") ? completionMetricsFromPipelineRun(detailPipelineRuns.get("content_completion")!) : completionByDate.get(detailScope.dailyDate) ?? null
+        ? detailPipelineRuns?.get('content_completion')
+          ? completionMetricsFromPipelineRun(detailPipelineRuns.get('content_completion')!)
+          : (completionByDate.get(detailScope.dailyDate) ?? null)
         : null,
       duplicateFilter: detailScopeCompleted
-        ? detailPipelineRuns?.get("exact_duplicate_filter") ? duplicateMetricsFromPipelineRun(detailPipelineRuns.get("exact_duplicate_filter")!) : duplicateFilterByDate.get(detailScope.dailyDate) ?? null
+        ? detailPipelineRuns?.get('exact_duplicate_filter')
+          ? duplicateMetricsFromPipelineRun(detailPipelineRuns.get('exact_duplicate_filter')!)
+          : (duplicateFilterByDate.get(detailScope.dailyDate) ?? null)
         : null,
       stages: detailStages,
     },
@@ -508,10 +513,7 @@ export async function getDashboardData(
 /**
  * 统计同一 raw scope 在采集、选择、摘要和最终 Brief 各环节的
  * 字符量 */
-async function loadContentFunnel(
-  pool: Pool,
-  scope: DailyScope,
-): Promise<DashboardContentFunnel> {
+async function loadContentFunnel(pool: Pool, scope: DailyScope): Promise<DashboardContentFunnel> {
   const [rawResult, processedResult, brief] = await Promise.all([
     pool.query<ContentFunnelRow>(
       `
@@ -592,7 +594,7 @@ export async function loadContentCompletionRuntimeByDate(
   rootDir: string,
   requestedDates: Set<string>,
 ): Promise<Map<string, DashboardContentCompletionMetrics>> {
-  const completionDir = join(rootDir, "runtime", "content-completion");
+  const completionDir = join(rootDir, 'runtime', 'content-completion');
   let runNames: string[];
   try {
     runNames = await readdir(completionDir);
@@ -607,16 +609,14 @@ export async function loadContentCompletionRuntimeByDate(
     runNames.map(async (runName) => {
       const runDir = join(completionDir, runName);
       try {
-        const artifact = asObject(
-          JSON.parse(await readFile(join(runDir, "run.json"), "utf8")),
-        );
+        const artifact = asObject(JSON.parse(await readFile(join(runDir, 'run.json'), 'utf8')));
         if (!artifact) {
-          throw new Error("Content Completion run.json must contain a JSON object.");
+          throw new Error('Content Completion run.json must contain a JSON object.');
         }
 
         const startedAt = stringValue(artifact.started_at) ?? parseRunName(runName);
         if (!startedAt) {
-          throw new Error("Content Completion run.json has no valid started_at timestamp.");
+          throw new Error('Content Completion run.json has no valid started_at timestamp.');
         }
         const date = dailyDateForRuntime(artifact, startedAt);
         if (!requestedDates.has(date)) {
@@ -660,16 +660,15 @@ function contentCompletionMetricsFromArtifact(
   return {
     status: stringValue(artifact.status),
     startedAt,
-    durationMs:
-      numberFrom(artifact, "duration_ms") ?? durationBetween(startedAt, finishedAt),
-    candidateCount: numberFrom(artifact, "candidate_count"),
-    selectedCount: numberFrom(artifact, "selected_count"),
-    successCount: numberFrom(artifact, "success_count"),
-    failedCount: numberFrom(artifact, "failed_count"),
-    skippedCount: numberFrom(artifact, "skipped_count"),
-    remainingCount: numberFrom(artifact, "remaining_count"),
-    limit: numberFrom(artifact, "limit"),
-    perSourceLimit: numberFrom(artifact, "per_source_limit"),
+    durationMs: numberFrom(artifact, 'duration_ms') ?? durationBetween(startedAt, finishedAt),
+    candidateCount: numberFrom(artifact, 'candidate_count'),
+    selectedCount: numberFrom(artifact, 'selected_count'),
+    successCount: numberFrom(artifact, 'success_count'),
+    failedCount: numberFrom(artifact, 'failed_count'),
+    skippedCount: numberFrom(artifact, 'skipped_count'),
+    remainingCount: numberFrom(artifact, 'remaining_count'),
+    limit: numberFrom(artifact, 'limit'),
+    perSourceLimit: numberFrom(artifact, 'per_source_limit'),
   };
 }
 
@@ -678,7 +677,7 @@ function mergeStage4BusinessMetrics(
   business: Stage4BusinessRow | undefined,
 ): DashboardStageMetrics | null {
   if (!runtime && !business) return null;
-  const base = runtime ?? emptyStageMetrics("stage4");
+  const base = runtime ?? emptyStageMetrics('stage4');
   return {
     ...base,
     // Execution status belongs to the latest pipeline attempt. Business state
@@ -703,62 +702,93 @@ function groupPipelineRunsByDate(rows: PipelineRunRow[]): Map<string, Map<string
 /** The deployed schema may predate pipeline_runs; runtime remains the explicit compatibility path. */
 async function loadPipelineRunsByDate(pool: Pool, dates: Set<string>): Promise<PipelineRunRow[]> {
   try {
-    const result = await pool.query<PipelineRunRow>(`
+    const result = await pool.query<PipelineRunRow>(
+      `
       select distinct on (daily_date, step)
         daily_date::text, step, status, provider, model, started_at, finished_at, metrics, error_summary
       from pipeline_runs
       where daily_date = any($1::date[])
         and step = any($2::text[])
       order by daily_date, step, started_at desc, id desc
-    `, [[...dates], ["content_completion", "exact_duplicate_filter", ...STAGES]]);
+    `,
+      [[...dates], ['content_completion', 'exact_duplicate_filter', ...STAGES]],
+    );
     return result.rows;
   } catch (error) {
-    if (isMissingTable(error, "pipeline_runs")) return [];
+    if (isMissingTable(error, 'pipeline_runs')) return [];
     throw error;
   }
 }
 
 function isMissingTable(error: unknown, table: string): boolean {
   const code =
-    typeof error === "object" && error !== null && "code" in error
+    typeof error === 'object' && error !== null && 'code' in error
       ? (error as { code?: string }).code
       : undefined;
-  return code === "42P01" ||
-    (error instanceof Error && error.message.includes(`relation \"${table}\" does not exist`));
+  return (
+    code === '42P01' ||
+    (error instanceof Error && error.message.includes(`relation \"${table}\" does not exist`))
+  );
 }
 
-function stageMetricsFromPipelineRun(stage: DashboardStage, row: PipelineRunRow): DashboardStageMetrics {
+function stageMetricsFromPipelineRun(
+  stage: DashboardStage,
+  row: PipelineRunRow,
+): DashboardStageMetrics {
   const metrics = asObject(row.metrics) ?? {};
   const promptVersions = asObject(metrics.prompt_versions);
   const startedAt = toIsoString(row.started_at)!;
   const finishedAt = toIsoString(row.finished_at);
-  const selectedEventCount = numberFrom(metrics, "selected_count", "event_selected_count");
+  const selectedEventCount = numberFrom(metrics, 'selected_count', 'event_selected_count');
   return {
-    ...emptyStageMetrics(stage), stage, status: row.status, errorSummary: row.error_summary, startedAt, model: row.model,
+    ...emptyStageMetrics(stage),
+    stage,
+    status: row.status,
+    errorSummary: row.error_summary,
+    startedAt,
+    model: row.model,
     promptVersion: stringValue(metrics.prompt_version),
-    promptVersions: stage === "stage3" ? {
-      event: stringValue(promptVersions?.event), digest: stringValue(promptVersions?.digest),
-      longForm: stringValue(promptVersions?.long_form),
-    } : null,
-    durationMs: numberFrom(metrics, "duration_ms") ?? durationBetween(startedAt, finishedAt),
-    llmDurationMs: numberFrom(metrics, "llm_duration_ms"),
-    llmCalls: numberFrom(metrics, "llm_calls"), retryCount: numberFrom(metrics, "retry_count"),
-    inputTokens: numberFrom(metrics, "input_tokens"), outputTokens: numberFrom(metrics, "output_tokens"),
-    totalTokens: numberFrom(metrics, "total_tokens"), candidateCount: numberFrom(metrics, "candidate_count"),
-    groupCount: numberFrom(metrics, "group_count", "event_group_count"), selectedEventCount,
-    digestBeforeDedup: numberFrom(metrics, "digest_before_dedup"), digestAfterDedup: numberFrom(metrics, "digest_after_dedup"),
-    longFormCount: numberFrom(metrics, "long_form_count"), enrichmentSuccessCount: numberFrom(metrics, "ready_count"),
-    enrichmentFailureCount: numberFrom(metrics, "failed_count"), eventsCreated: numberFrom(metrics, "published_count"),
-    webSearchEventCount: numberFrom(metrics, "web_search_event_count"), totalWebSearchCalls: numberFrom(metrics, "total_web_search_calls"),
-    batchCount: numberFrom(metrics, "batch_count"), fallbackBatchCount: numberFrom(metrics, "fallback_batch_count"),
-    splitCount: numberFrom(metrics, "split_count"), singletonBatchCount: numberFrom(metrics, "singleton_batch_count"),
-    readyCount: numberFrom(metrics, "ready_count"), draftCount: numberFrom(metrics, "draft_count"), publishedCount: numberFrom(metrics, "published_count"),
-    warningCount: numberFrom(metrics, "warning_count"),
-    crossGroupMembershipCount: numberFrom(metrics, "cross_group_membership_count"),
-    sameGroupDuplicateCount: numberFrom(metrics, "same_group_duplicate_count"),
-    missingAssignmentCount: numberFrom(metrics, "missing_assignment_count"),
-    duplicateRankingCount: numberFrom(metrics, "duplicate_ranking_count"),
-    missingRankingCount: numberFrom(metrics, "missing_ranking_count"),
+    promptVersions:
+      stage === 'stage3'
+        ? {
+            event: stringValue(promptVersions?.event),
+            digest: stringValue(promptVersions?.digest),
+            longForm: stringValue(promptVersions?.long_form),
+          }
+        : null,
+    durationMs: numberFrom(metrics, 'duration_ms') ?? durationBetween(startedAt, finishedAt),
+    llmDurationMs: numberFrom(metrics, 'llm_duration_ms'),
+    llmCalls: numberFrom(metrics, 'llm_calls'),
+    retryCount: numberFrom(metrics, 'retry_count'),
+    inputTokens: numberFrom(metrics, 'input_tokens'),
+    outputTokens: numberFrom(metrics, 'output_tokens'),
+    totalTokens: numberFrom(metrics, 'total_tokens'),
+    candidateCount: numberFrom(metrics, 'candidate_count'),
+    cachedInputTokens: numberFrom(metrics, 'cached_input_tokens'),
+    tokenUsageComplete: booleanFrom(metrics, 'token_usage_complete'),
+    groupCount: numberFrom(metrics, 'group_count', 'event_group_count'),
+    selectedEventCount,
+    digestBeforeDedup: numberFrom(metrics, 'digest_before_dedup'),
+    digestAfterDedup: numberFrom(metrics, 'digest_after_dedup'),
+    longFormCount: numberFrom(metrics, 'long_form_count'),
+    enrichmentSuccessCount: numberFrom(metrics, 'ready_count'),
+    enrichmentFailureCount: numberFrom(metrics, 'failed_count'),
+    eventsCreated: numberFrom(metrics, 'published_count'),
+    webSearchEventCount: numberFrom(metrics, 'web_search_event_count'),
+    totalWebSearchCalls: numberFrom(metrics, 'total_web_search_calls'),
+    batchCount: numberFrom(metrics, 'batch_count'),
+    fallbackBatchCount: numberFrom(metrics, 'fallback_batch_count'),
+    splitCount: numberFrom(metrics, 'split_count'),
+    singletonBatchCount: numberFrom(metrics, 'singleton_batch_count'),
+    readyCount: numberFrom(metrics, 'ready_count'),
+    draftCount: numberFrom(metrics, 'draft_count'),
+    publishedCount: numberFrom(metrics, 'published_count'),
+    warningCount: numberFrom(metrics, 'warning_count'),
+    crossGroupMembershipCount: numberFrom(metrics, 'cross_group_membership_count'),
+    sameGroupDuplicateCount: numberFrom(metrics, 'same_group_duplicate_count'),
+    missingAssignmentCount: numberFrom(metrics, 'missing_assignment_count'),
+    duplicateRankingCount: numberFrom(metrics, 'duplicate_ranking_count'),
+    missingRankingCount: numberFrom(metrics, 'missing_ranking_count'),
   };
 }
 
@@ -766,12 +796,19 @@ function completionMetricsFromPipelineRun(row: PipelineRunRow): DashboardContent
   const metrics = asObject(row.metrics) ?? {};
   const startedAt = toIsoString(row.started_at)!;
   return {
-    status: row.status, startedAt,
-    durationMs: numberFrom(metrics, "duration_ms") ?? durationBetween(startedAt, toIsoString(row.finished_at)),
-    candidateCount: numberFrom(metrics, "candidate_count"), selectedCount: numberFrom(metrics, "selected_count"),
-    successCount: numberFrom(metrics, "success_count"), failedCount: numberFrom(metrics, "failed_count"),
-    skippedCount: numberFrom(metrics, "skipped_count"), remainingCount: numberFrom(metrics, "remaining_count"),
-    limit: numberFrom(metrics, "limit"), perSourceLimit: numberFrom(metrics, "per_source_limit"),
+    status: row.status,
+    startedAt,
+    durationMs:
+      numberFrom(metrics, 'duration_ms') ??
+      durationBetween(startedAt, toIsoString(row.finished_at)),
+    candidateCount: numberFrom(metrics, 'candidate_count'),
+    selectedCount: numberFrom(metrics, 'selected_count'),
+    successCount: numberFrom(metrics, 'success_count'),
+    failedCount: numberFrom(metrics, 'failed_count'),
+    skippedCount: numberFrom(metrics, 'skipped_count'),
+    remainingCount: numberFrom(metrics, 'remaining_count'),
+    limit: numberFrom(metrics, 'limit'),
+    perSourceLimit: numberFrom(metrics, 'per_source_limit'),
   };
 }
 
@@ -779,10 +816,13 @@ function duplicateMetricsFromPipelineRun(row: PipelineRunRow): DashboardDuplicat
   const metrics = asObject(row.metrics) ?? {};
   return {
     status: row.status,
-    inputCount: numberFrom(metrics, "input_count") ?? 0, duplicateCount: numberFrom(metrics, "duplicate_count") ?? 0,
-    outputCount: numberFrom(metrics, "output_count") ?? 0, duplicateRate: numberFrom(metrics, "duplicate_rate") ?? 0,
-    sameUrlCount: numberFrom(metrics, "same_url_count") ?? 0, sameTitleCount: numberFrom(metrics, "same_title_count") ?? 0,
-    sameUrlAndTitleCount: numberFrom(metrics, "same_url_and_title_count") ?? 0,
+    inputCount: numberFrom(metrics, 'input_count') ?? 0,
+    duplicateCount: numberFrom(metrics, 'duplicate_count') ?? 0,
+    outputCount: numberFrom(metrics, 'output_count') ?? 0,
+    duplicateRate: numberFrom(metrics, 'duplicate_rate') ?? 0,
+    sameUrlCount: numberFrom(metrics, 'same_url_count') ?? 0,
+    sameTitleCount: numberFrom(metrics, 'same_title_count') ?? 0,
+    sameUrlAndTitleCount: numberFrom(metrics, 'same_url_and_title_count') ?? 0,
   };
 }
 
@@ -791,33 +831,36 @@ export async function loadDuplicateFilterRuntimeByDate(
   rootDir: string,
   requestedDates: Set<string>,
 ): Promise<Map<string, DashboardDuplicateFilterMetrics>> {
-  const dailyDir = join(rootDir, "runtime", "daily");
+  const dailyDir = join(rootDir, 'runtime', 'daily');
   let names: string[];
-  try { names = await readdir(dailyDir); } catch (error) {
+  try {
+    names = await readdir(dailyDir);
+  } catch (error) {
     if (isMissingFile(error)) return new Map();
     throw error;
   }
   const metrics = new Map<string, DashboardDuplicateFilterMetrics>();
   for (const name of names) {
     try {
-      const daily = asObject(JSON.parse(await readFile(join(dailyDir, name, "run.json"), "utf8")));
+      const daily = asObject(JSON.parse(await readFile(join(dailyDir, name, 'run.json'), 'utf8')));
       const date = daily && stringValue(daily.daily_date);
       const artifactPath = daily && stringValue(daily.duplicate_filter_run);
       if (!date || !artifactPath || !requestedDates.has(date)) continue;
-      const artifact = asObject(JSON.parse(await readFile(join(artifactPath, "run.json"), "utf8")));
+      const artifact = asObject(JSON.parse(await readFile(join(artifactPath, 'run.json'), 'utf8')));
       if (!artifact) continue;
       metrics.set(date, {
         status: stringValue(artifact.status),
-        inputCount: numberFrom(artifact, "inputCount") ?? 0,
-        duplicateCount: numberFrom(artifact, "duplicateCount") ?? 0,
-        outputCount: numberFrom(artifact, "outputCount") ?? 0,
-        duplicateRate: numberFrom(artifact, "duplicateRate") ?? 0,
-        sameUrlCount: numberFrom(artifact, "sameUrlCount") ?? 0,
-        sameTitleCount: numberFrom(artifact, "sameTitleCount") ?? 0,
-        sameUrlAndTitleCount: numberFrom(artifact, "sameUrlAndTitleCount") ?? 0,
+        inputCount: numberFrom(artifact, 'inputCount') ?? 0,
+        duplicateCount: numberFrom(artifact, 'duplicateCount') ?? 0,
+        outputCount: numberFrom(artifact, 'outputCount') ?? 0,
+        duplicateRate: numberFrom(artifact, 'duplicateRate') ?? 0,
+        sameUrlCount: numberFrom(artifact, 'sameUrlCount') ?? 0,
+        sameTitleCount: numberFrom(artifact, 'sameTitleCount') ?? 0,
+        sameUrlAndTitleCount: numberFrom(artifact, 'sameUrlAndTitleCount') ?? 0,
       });
     } catch (error) {
-      if (!isMissingFile(error)) console.error("Failed to read dashboard duplicate filter runtime artifact.", error);
+      if (!isMissingFile(error))
+        console.error('Failed to read dashboard duplicate filter runtime artifact.', error);
     }
   }
   return metrics;
@@ -835,7 +878,7 @@ export async function loadRuntimeMetricsByDate(
 
   await Promise.all(
     STAGES.map(async (stage) => {
-      const stageDir = join(rootDir, "runtime", stage);
+      const stageDir = join(rootDir, 'runtime', stage);
       let runNames: string[];
       try {
         runNames = await readdir(stageDir);
@@ -852,17 +895,15 @@ export async function loadRuntimeMetricsByDate(
           // dynamic segment to path.join so Turbopack does not trace runtime/** during build.
           const runDir = `${stageDir}/${runName}`;
           try {
-            const artifact = asObject(
-              JSON.parse(await readFile(join(runDir, "run.json"), "utf8")),
-            );
+            const artifact = asObject(JSON.parse(await readFile(join(runDir, 'run.json'), 'utf8')));
             if (!artifact) {
-              throw new Error("run.json must contain a JSON object.");
+              throw new Error('run.json must contain a JSON object.');
             }
 
             const normalizedArtifact = await normalizeRuntimeArtifact(stage, runDir, artifact);
             const startedAt = stringValue(normalizedArtifact.started_at) ?? parseRunName(runName);
             if (!startedAt) {
-              throw new Error("run.json has no valid started_at timestamp.");
+              throw new Error('run.json has no valid started_at timestamp.');
             }
 
             const date = dailyDateForRuntime(normalizedArtifact, startedAt);
@@ -900,9 +941,9 @@ export async function loadRuntimeMetricsByDate(
   const dailyStage1Runs = await loadDailyStage1Metrics(rootDir, requestedDates);
   for (const run of dailyStage1Runs) {
     const dateStages = byDate.get(run.date) ?? new Map();
-    const previous = dateStages.get("stage1");
+    const previous = dateStages.get('stage1');
     if (!previous || compareStartedAt(run.metrics.startedAt, previous.startedAt) > 0) {
-      dateStages.set("stage1", run.metrics);
+      dateStages.set('stage1', run.metrics);
       byDate.set(run.date, dateStages);
     }
   }
@@ -916,9 +957,9 @@ async function normalizeRuntimeArtifact(
   runDir: string,
   artifact: JsonObject,
 ): Promise<JsonObject> {
-  if (stage === "stage1") {
+  if (stage === 'stage1') {
     try {
-      const summary = asObject(JSON.parse(await readFile(join(runDir, "summary.json"), "utf8")));
+      const summary = asObject(JSON.parse(await readFile(join(runDir, 'summary.json'), 'utf8')));
       if (!summary) return artifact;
       const tokenUsage = asObject(summary.tokenUsage);
       return {
@@ -938,12 +979,13 @@ async function normalizeRuntimeArtifact(
         total_tokens: artifact.total_tokens ?? tokenUsage?.totalTokens,
       };
     } catch (error) {
-      if (!isMissingFile(error)) console.error(`Failed to read Stage1 summary artifact ${runDir}.`, error);
+      if (!isMissingFile(error))
+        console.error(`Failed to read Stage1 summary artifact ${runDir}.`, error);
       return artifact;
     }
   }
 
-  if (stage === "stage4") {
+  if (stage === 'stage4') {
     return {
       ...artifact,
       daily_date: artifact.daily_date ?? artifact.dailyDate,
@@ -951,8 +993,10 @@ async function normalizeRuntimeArtifact(
       finished_at: artifact.finished_at ?? artifact.finishedAt,
       stage4_run_id: artifact.stage4_run_id ?? artifact.stage4RunId,
       selected_event_count: artifact.selected_event_count ?? artifact.selectedEventCount,
-      enrichment_success_count: artifact.enrichment_success_count ?? artifact.enrichmentSuccessCount,
-      enrichment_failure_count: artifact.enrichment_failure_count ?? artifact.enrichmentFailureCount,
+      enrichment_success_count:
+        artifact.enrichment_success_count ?? artifact.enrichmentSuccessCount,
+      enrichment_failure_count:
+        artifact.enrichment_failure_count ?? artifact.enrichmentFailureCount,
       retry_count: artifact.retry_count ?? artifact.retryCount,
       llm_duration_ms: artifact.llm_duration_ms ?? artifact.llmDurationMs,
       web_search_event_count: artifact.web_search_event_count ?? artifact.webSearchEventCount,
@@ -967,7 +1011,7 @@ async function loadDailyStage1Metrics(
   rootDir: string,
   requestedDates: Set<string>,
 ): Promise<Array<{ date: string; metrics: DashboardStageMetrics }>> {
-  const dailyDir = join(rootDir, "runtime", "daily");
+  const dailyDir = join(rootDir, 'runtime', 'daily');
   let runNames: string[];
   try {
     runNames = await readdir(dailyDir);
@@ -982,23 +1026,21 @@ async function loadDailyStage1Metrics(
     runNames.map(async (runName) => {
       const runDir = join(dailyDir, runName);
       try {
-        const artifact = asObject(
-          JSON.parse(await readFile(join(runDir, "run.json"), "utf8")),
-        );
+        const artifact = asObject(JSON.parse(await readFile(join(runDir, 'run.json'), 'utf8')));
         if (!artifact) {
-          throw new Error("Daily run.json must contain a JSON object.");
+          throw new Error('Daily run.json must contain a JSON object.');
         }
         const steps = Array.isArray(artifact.steps) ? artifact.steps : [];
         const stage1Step = steps
           .map(asObject)
-          .find((step) => step && stringValue(step.name) === "process:stage1");
+          .find((step) => step && stringValue(step.name) === 'process:stage1');
         if (!stage1Step) {
           return null;
         }
 
         const startedAt = stringValue(stage1Step.started_at);
         if (!startedAt) {
-          throw new Error("Daily Stage 1 step has no valid started_at timestamp.");
+          throw new Error('Daily Stage 1 step has no valid started_at timestamp.');
         }
         const date = dailyDateForRuntime(artifact, startedAt);
         if (!requestedDates.has(date)) {
@@ -1031,25 +1073,24 @@ function dailyDateForRuntime(artifact: JsonObject, startedAt: string): string {
   return resolveDailyScope(undefined, new Date(startedAt)).dailyDate;
 }
 
-function stage1MetricsFromDailyStep(
-  step: JsonObject,
-  startedAt: string,
-): DashboardStageMetrics {
+function stage1MetricsFromDailyStep(step: JsonObject, startedAt: string): DashboardStageMetrics {
   return {
-    stage: "stage1",
+    stage: 'stage1',
     status: stringValue(step.status),
     errorSummary: stringValue(step.error),
     startedAt,
     model: stringValue(step.model),
     promptVersion: stringValue(step.prompt_version),
     promptVersions: null,
-    durationMs: numberFrom(step, "duration_ms"),
+    durationMs: numberFrom(step, 'duration_ms'),
     llmDurationMs: null,
     llmCalls: null,
     retryCount: null,
     inputTokens: null,
     outputTokens: null,
     totalTokens: null,
+    cachedInputTokens: null,
+    tokenUsageComplete: null,
     candidateCount: null,
     groupCount: null,
     selectedEventCount: null,
@@ -1079,17 +1120,46 @@ function stage1MetricsFromDailyStep(
 
 function emptyStageMetrics(stage: DashboardStage): DashboardStageMetrics {
   return {
-    stage, status: null, errorSummary: null, startedAt: null, model: null, promptVersion: null, promptVersions: null,
-    durationMs: null, llmDurationMs: null, llmCalls: null, retryCount: null,
-    inputTokens: null, outputTokens: null, totalTokens: null, candidateCount: null,
-    groupCount: null, selectedEventCount: null, digestBeforeDedup: null,
-    digestAfterDedup: null, longFormCount: null, enrichmentSuccessCount: null,
-    enrichmentFailureCount: null, eventsCreated: null, webSearchEventCount: null,
-    totalWebSearchCalls: null, batchCount: null, fallbackBatchCount: null, splitCount: null,
-    singletonBatchCount: null, readyCount: null, draftCount: null, publishedCount: null,
-    warningCount: null, crossGroupMembershipCount: null, sameGroupDuplicateCount: null,
+    stage,
+    status: null,
+    errorSummary: null,
+    startedAt: null,
+    model: null,
+    promptVersion: null,
+    promptVersions: null,
+    durationMs: null,
+    llmDurationMs: null,
+    llmCalls: null,
+    retryCount: null,
+    inputTokens: null,
+    outputTokens: null,
+    totalTokens: null,
+    cachedInputTokens: null,
+    tokenUsageComplete: null,
+    candidateCount: null,
+    groupCount: null,
+    selectedEventCount: null,
+    digestBeforeDedup: null,
+    digestAfterDedup: null,
+    longFormCount: null,
+    enrichmentSuccessCount: null,
+    enrichmentFailureCount: null,
+    eventsCreated: null,
+    webSearchEventCount: null,
+    totalWebSearchCalls: null,
+    batchCount: null,
+    fallbackBatchCount: null,
+    splitCount: null,
+    singletonBatchCount: null,
+    readyCount: null,
+    draftCount: null,
+    publishedCount: null,
+    warningCount: null,
+    crossGroupMembershipCount: null,
+    sameGroupDuplicateCount: null,
     missingAssignmentCount: null,
-    duplicateRankingCount: null, missingRankingCount: null,
+    duplicateRankingCount: null,
+    missingRankingCount: null,
   };
 }
 
@@ -1099,10 +1169,9 @@ async function parseStageMetrics(
   artifact: JsonObject,
   startedAt: string,
 ): Promise<DashboardStageMetrics> {
-  const selectedEventCount = numberFrom(artifact, "selected_event_count", "event_selected_count");
-  const enrichmentSuccessCount = numberFrom(artifact, "enrichment_success_count");
-  const diagnosticTokens =
-    stage === "stage3" ? await loadStage3DiagnosticTokens(runDir) : null;
+  const selectedEventCount = numberFrom(artifact, 'selected_event_count', 'event_selected_count');
+  const enrichmentSuccessCount = numberFrom(artifact, 'enrichment_success_count');
+  const diagnosticTokens = stage === 'stage3' ? await loadStage3DiagnosticTokens(runDir) : null;
   const finishedAt = stringValue(artifact.finished_at);
   const stage3PromptVersions = asObject(artifact.prompt_versions);
 
@@ -1114,7 +1183,7 @@ async function parseStageMetrics(
     model: stringValue(artifact.model),
     promptVersion: stringValue(artifact.prompt_version),
     promptVersions:
-      stage === "stage3"
+      stage === 'stage3'
         ? {
             event: stringValue(stage3PromptVersions?.event),
             digest: stringValue(stage3PromptVersions?.digest),
@@ -1122,46 +1191,46 @@ async function parseStageMetrics(
           }
         : null,
     durationMs:
-      numberFrom(artifact, "total_duration_ms", "duration_ms") ??
+      numberFrom(artifact, 'total_duration_ms', 'duration_ms') ??
       durationBetween(startedAt, finishedAt),
-    llmDurationMs: numberFrom(artifact, "llm_duration_ms"),
+    llmDurationMs: numberFrom(artifact, 'llm_duration_ms'),
     // Older Stage 4 artifacts used llm_calls / llmCalls for completed enrichments,
     // not provider requests. The current llm_call_count includes the context
     // decision and every enrichment attempt, including retries.
     llmCalls:
-      stage === "stage4"
-        ? numberFrom(artifact, "llm_call_count")
-        : numberFrom(artifact, "llm_calls", "llm_call_count"),
-    retryCount: numberFrom(artifact, "retry_count"),
-    inputTokens: numberFrom(artifact, "input_tokens") ?? diagnosticTokens?.inputTokens ?? null,
-    outputTokens:
-      numberFrom(artifact, "output_tokens") ?? diagnosticTokens?.outputTokens ?? null,
-    totalTokens: numberFrom(artifact, "total_tokens") ?? diagnosticTokens?.totalTokens ?? null,
-    candidateCount: numberFrom(artifact, "candidate_count"),
-    groupCount: numberFrom(artifact, "final_group_count", "event_group_count"),
+      stage === 'stage4'
+        ? numberFrom(artifact, 'llm_call_count')
+        : numberFrom(artifact, 'llm_calls', 'llm_call_count'),
+    retryCount: numberFrom(artifact, 'retry_count'),
+    inputTokens: numberFrom(artifact, 'input_tokens') ?? diagnosticTokens?.inputTokens ?? null,
+    outputTokens: numberFrom(artifact, 'output_tokens') ?? diagnosticTokens?.outputTokens ?? null,
+    totalTokens: numberFrom(artifact, 'total_tokens') ?? diagnosticTokens?.totalTokens ?? null,
+    cachedInputTokens: numberFrom(artifact, 'cached_input_tokens'),
+    tokenUsageComplete: booleanFrom(artifact, 'token_usage_complete'),
+    candidateCount: numberFrom(artifact, 'candidate_count'),
+    groupCount: numberFrom(artifact, 'final_group_count', 'event_group_count'),
     selectedEventCount,
-    digestBeforeDedup: numberFrom(artifact, "digest_before_dedup"),
-    digestAfterDedup: numberFrom(artifact, "digest_after_dedup"),
-    longFormCount: numberFrom(artifact, "long_form_count"),
+    digestBeforeDedup: numberFrom(artifact, 'digest_before_dedup'),
+    digestAfterDedup: numberFrom(artifact, 'digest_after_dedup'),
+    longFormCount: numberFrom(artifact, 'long_form_count'),
     enrichmentSuccessCount,
-    enrichmentFailureCount:
-      numberFrom(artifact, "enrichment_failure_count"),
-    eventsCreated: numberFrom(artifact, "events_created"),
-    webSearchEventCount: numberFrom(artifact, "web_search_event_count"),
-    totalWebSearchCalls: numberFrom(artifact, "total_web_search_calls"),
-    batchCount: numberFrom(artifact, "batch_count"),
-    fallbackBatchCount: numberFrom(artifact, "fallback_batch_count"),
-    splitCount: numberFrom(artifact, "split_count"),
-    singletonBatchCount: numberFrom(artifact, "singleton_batch_count"),
+    enrichmentFailureCount: numberFrom(artifact, 'enrichment_failure_count'),
+    eventsCreated: numberFrom(artifact, 'events_created'),
+    webSearchEventCount: numberFrom(artifact, 'web_search_event_count'),
+    totalWebSearchCalls: numberFrom(artifact, 'total_web_search_calls'),
+    batchCount: numberFrom(artifact, 'batch_count'),
+    fallbackBatchCount: numberFrom(artifact, 'fallback_batch_count'),
+    splitCount: numberFrom(artifact, 'split_count'),
+    singletonBatchCount: numberFrom(artifact, 'singleton_batch_count'),
     readyCount: enrichmentSuccessCount,
     draftCount: null,
     publishedCount: null,
-    warningCount: numberFrom(artifact, "warning_count"),
-    crossGroupMembershipCount: numberFrom(artifact, "cross_group_membership_count"),
-    sameGroupDuplicateCount: numberFrom(artifact, "same_group_duplicate_count"),
-    missingAssignmentCount: numberFrom(artifact, "missing_assignment_count"),
-    duplicateRankingCount: numberFrom(artifact, "duplicate_ranking_count"),
-    missingRankingCount: numberFrom(artifact, "missing_ranking_count"),
+    warningCount: numberFrom(artifact, 'warning_count'),
+    crossGroupMembershipCount: numberFrom(artifact, 'cross_group_membership_count'),
+    sameGroupDuplicateCount: numberFrom(artifact, 'same_group_duplicate_count'),
+    missingAssignmentCount: numberFrom(artifact, 'missing_assignment_count'),
+    duplicateRankingCount: numberFrom(artifact, 'duplicate_ranking_count'),
+    missingRankingCount: numberFrom(artifact, 'missing_ranking_count'),
   };
 }
 
@@ -1170,7 +1239,7 @@ async function loadStage3DiagnosticTokens(runDir: string): Promise<{
   outputTokens: number;
   totalTokens: number;
 } | null> {
-  const digestDir = join(runDir, "digest");
+  const digestDir = join(runDir, 'digest');
   let names: string[];
   try {
     names = await readdir(digestDir);
@@ -1183,9 +1252,9 @@ async function loadStage3DiagnosticTokens(runDir: string): Promise<{
 
   const diagnostics = await Promise.all(
     names
-      .filter((name) => name.endsWith("-ranking-diagnostics.json"))
+      .filter((name) => name.endsWith('-ranking-diagnostics.json'))
       .map(async (name) => {
-        const value = asObject(JSON.parse(await readFile(join(digestDir, name), "utf8")));
+        const value = asObject(JSON.parse(await readFile(join(digestDir, name), 'utf8')));
         if (!value) {
           throw new Error(`${name} must contain a JSON object.`);
         }
@@ -1194,20 +1263,20 @@ async function loadStage3DiagnosticTokens(runDir: string): Promise<{
   );
   const inputTokens = sumKnown(
     diagnostics.flatMap((value) => [
-      numberFrom(value, "initial_input_tokens"),
-      numberFrom(value, "repair_input_tokens"),
+      numberFrom(value, 'initial_input_tokens'),
+      numberFrom(value, 'repair_input_tokens'),
     ]),
   );
   const outputTokens = sumKnown(
     diagnostics.flatMap((value) => [
-      numberFrom(value, "initial_output_tokens"),
-      numberFrom(value, "repair_output_tokens"),
+      numberFrom(value, 'initial_output_tokens'),
+      numberFrom(value, 'repair_output_tokens'),
     ]),
   );
   const totalTokens = sumKnown(
     diagnostics.flatMap((value) => [
-      numberFrom(value, "initial_total_tokens"),
-      numberFrom(value, "repair_total_tokens"),
+      numberFrom(value, 'initial_total_tokens'),
+      numberFrom(value, 'repair_total_tokens'),
     ]),
   );
 
@@ -1247,19 +1316,26 @@ function sumRequired(values: Array<number | null>): number | null {
 function numberFrom(value: JsonObject, ...keys: string[]): number | null {
   for (const key of keys) {
     const candidate = value[key];
-    if (typeof candidate === "number" && Number.isFinite(candidate)) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
       return candidate;
     }
   }
   return null;
 }
 
+function booleanFrom(value: JsonObject, ...keys: string[]): boolean | null {
+  for (const key of keys) {
+    if (typeof value[key] === 'boolean') return value[key] as boolean;
+  }
+  return null;
+}
+
 function stringValue(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
+  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 function asObject(value: unknown): JsonObject | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as JsonObject)
     : null;
 }
@@ -1274,20 +1350,18 @@ function durationBetween(startedAt: string, finishedAt: string | null): number |
 
 function parseRunName(runName: string): string | null {
   const match = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/.exec(runName);
-  return match
-    ? `${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}Z`
-    : null;
+  return match ? `${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}Z` : null;
 }
 
 function compareStartedAt(left: string | null, right: string | null): number {
-  return Date.parse(left ?? "") - Date.parse(right ?? "");
+  return Date.parse(left ?? '') - Date.parse(right ?? '');
 }
 
 function isMissingFile(error: unknown): boolean {
   return (
-    typeof error === "object" &&
+    typeof error === 'object' &&
     error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "ENOENT"
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ENOENT'
   );
 }

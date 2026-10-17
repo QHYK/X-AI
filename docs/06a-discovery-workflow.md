@@ -248,7 +248,7 @@ Discovery 分支失败后不自动重跑。是否复用原 Run，以 D2 的持�
 - `discovery_runs.selection_output` 尚未成功持久化时，D2 不视为完成。不得恢复该 Run；应创建新的 Regular Run ID，并从 D2 重新执行。
 - `selection_output` 已成功持久化时，D2 即视为完成，不能仅凭整体 Run status 判断。后续 D3 或 D4 失败时，Resume 复用原 Run ID、固定输入成员和 D2 结果，只执行尚未完成的任务。
 - Resume 不覆盖或重复执行已经完成并持久化的评价结果；各分支根据已有持久化结果跳过完成项，只继续 missing / failed 项。
-- D3 / D4 的完成判断读取 `discovery_runs.execution_state` 中各自分支状态。D3 正常返回 0 篇仍写入 `completed + no_candidates`；缺失状态或进程异常遗留的 `running` 不视为完成。分支状态独立更新，任何一条分支失败都不得覆盖另一条分支的完成记录或候选。
+- D2 的完成以持久化 `selection_output` 为准；D3 / D4 的完成判断读取 `discovery_runs.execution_state` 中各自阶段状态。已执行阶段还在其中保存实际 Provider、模型、耗时与 Usage 诊断；字段完整性语义由 `05-data-model.md` 定义。D3 正常返回 0 篇仍写入 `completed + no_candidates`；缺失状态或进程异常遗留的 `running` 不视为完成。阶段状态独立更新，任何一条分支失败都不得覆盖另一条分支的完成记录或候选。
 - Resume 用于继续未完成的同一次执行。若操作目的为主动重新生成内容，而不是完成失败任务，则创建 New Run，不覆盖原 Run 的 Selection、Candidate、评价或 Trace。
 
 当前 D3 Resume 以完整 Agent Run 为恢复边界：已完成则跳过；未完成、失败或遗留 `running` 时重新执行整个 D3，不实现 Agent 内部 Checkpoint。D4 继续复用 Candidate 级 Resume。

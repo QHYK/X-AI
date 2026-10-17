@@ -20,7 +20,17 @@ import {
   resolveDiscoveryLlmTimeout,
   toDiscoveryRequestOptions,
 } from './llm-config.js';
+import {
+  buildDiscoveryStageState,
+  emptyDiscoveryStageUsage,
+  initialDiscoveryStageState,
+  mergeDiscoveryStageUsage,
+  missingDiscoveryStageUsage,
+  stageHasHistoricConfig,
+  usageFromLlmResponse,
+} from './execution-diagnostics.js';
 import { getDiscoveryRun, updateDiscoveryBranchExecutionState } from './run-service.js';
+import type { DiscoveryStageUsage } from '../db/schema.js';
 import type { DiscoveryDirectLead, DiscoverySelectionOutput } from './topic-selection.js';
 
 export type DiscoveryD4Decision = 'qualified' | 'rejected' | 'unverifiable';
@@ -77,6 +87,7 @@ export type RunDiscoveryD4Result = {
   failures: DiscoveryD4CandidateFailure[];
   tokenUsage: LlmResponse['usage'] | null;
   tokenUsageComplete: boolean;
+  usage: DiscoveryStageUsage;
 };
 
 export type DiscoveryD4CandidateFailure = {
@@ -150,36 +161,66 @@ export async function runDiscoveryD4(
   runId: string,
   options: RunDiscoveryD4Options = {},
 ): Promise<RunDiscoveryD4Result> {
+  const run = await getDiscoveryRun(pool, runId);
+  const prior = initialDiscoveryStageState(
+    run?.executionState.d4,
+    stageHasHistoricConfig(run?.configSnapshot, 'd4'),
+  );
+  const stageStartedAt = Date.now();
   await updateDiscoveryBranchExecutionState(pool, runId, 'd4', {
-    status: 'running',
-    endReason: null,
-    completedAt: null,
-    errorSummary: null,
+    ...buildDiscoveryStageState({
+      status: 'running',
+      endReason: null,
+      errorSummary: null,
+      metadata: { provider: null, model: null, apiMode: null },
+      prior,
+    }),
   });
   try {
     const result = await executeDiscoveryD4(pool, runId, options);
-    await updateDiscoveryBranchExecutionState(pool, runId, 'd4', {
-      status: result.failures.length > 0 ? 'failed' : 'completed',
-      endReason:
-        result.failures.length > 0
-          ? 'error'
-          : result.submittedForReview > 0
-            ? 'candidates_found'
-            : 'no_candidates',
-      completedAt: new Date().toISOString(),
-      errorSummary:
-        result.failures.length > 0
-          ? `${result.failures.length} D4 candidate evaluation request(s) failed.`
-          : null,
-    });
+    await updateDiscoveryBranchExecutionState(
+      pool,
+      runId,
+      'd4',
+      buildDiscoveryStageState({
+        status: result.failures.length > 0 ? 'failed' : 'completed',
+        endReason:
+          result.failures.length > 0
+            ? 'error'
+            : result.submittedForReview > 0
+              ? 'candidates_found'
+              : 'no_candidates',
+        errorSummary:
+          result.failures.length > 0
+            ? `${result.failures.length} D4 candidate evaluation request(s) failed.`
+            : null,
+        metadata: {
+          provider: result.provider,
+          model: result.model,
+          apiMode: result.apiModes.length === 1 ? result.apiModes[0] : 'chat_completions',
+        },
+        prior,
+        attemptUsage: result.usage,
+        attemptElapsedMs: Date.now() - stageStartedAt,
+        completedAt: new Date().toISOString(),
+      }),
+    );
     return result;
   } catch (error) {
-    await updateDiscoveryBranchExecutionState(pool, runId, 'd4', {
-      status: 'failed',
-      endReason: 'error',
-      completedAt: new Date().toISOString(),
-      errorSummary: toErrorMessage(error),
-    });
+    await updateDiscoveryBranchExecutionState(
+      pool,
+      runId,
+      'd4',
+      buildDiscoveryStageState({
+        status: 'failed',
+        endReason: 'error',
+        errorSummary: toErrorMessage(error),
+        metadata: { provider: null, model: null, apiMode: null },
+        prior,
+        attemptElapsedMs: Date.now() - stageStartedAt,
+        completedAt: new Date().toISOString(),
+      }),
+    );
     throw error;
   }
 }
@@ -309,7 +350,7 @@ async function executeDiscoveryD4(
   let successfulRequestElapsedMs = 0;
   let failedRequestElapsedMs = 0;
   let tokenUsage: LlmResponse['usage'] | null = null;
-  let tokenUsageComplete = true;
+  let usage = emptyDiscoveryStageUsage();
   let apiModes: LlmResponse['api_mode'][] = [];
   let requestElapsedMs = 0;
   const failures: DiscoveryD4CandidateFailure[] = [];
@@ -332,7 +373,7 @@ async function executeDiscoveryD4(
           responseApiMode = result.response.api_mode;
           llmRequestElapsedMs = result.requestElapsedMs;
           if (responseUsage) tokenUsage = sumTokenUsage(tokenUsage, responseUsage);
-          else tokenUsageComplete = false;
+          usage = mergeDiscoveryStageUsage(usage, usageFromLlmResponse(responseUsage));
           apiModes = [...new Set([...apiModes, result.response.api_mode])];
 
           const evaluation = parseAndValidateDiscoveryD4Output(result.response.output_text, [
@@ -359,7 +400,7 @@ async function executeDiscoveryD4(
               requestElapsedMs: result.requestElapsedMs,
               apiMode: result.response.api_mode,
               tokenUsage: responseUsage,
-              tokenUsageComplete: responseUsage !== null,
+              tokenUsageComplete: usageFromLlmResponse(responseUsage).usageComplete,
             },
           });
         } catch (error) {
@@ -370,7 +411,9 @@ async function executeDiscoveryD4(
           failedRequestCount += 1;
           failedRequestElapsedMs += elapsedMs;
           requestElapsedMs += elapsedMs;
-          if (!responseReceived || responseUsage === null) tokenUsageComplete = false;
+          if (!responseReceived) {
+            usage = mergeDiscoveryStageUsage(usage, missingDiscoveryStageUsage());
+          }
           const failure = {
             candidateId: candidate.id,
             leadId: candidate.lead.leadId,
@@ -394,7 +437,7 @@ async function executeDiscoveryD4(
                 ? 'response_received_validation_or_persistence_failed'
                 : 'failed',
               tokenUsage: responseUsage,
-              tokenUsageComplete: responseUsage !== null,
+              tokenUsageComplete: usageFromLlmResponse(responseUsage).usageComplete,
             },
           });
         }
@@ -427,7 +470,8 @@ async function executeDiscoveryD4(
     failedRequestElapsedMs,
     failures,
     tokenUsage,
-    tokenUsageComplete,
+    tokenUsageComplete: usage.usageComplete,
+    usage,
   };
 }
 
@@ -688,7 +732,28 @@ function sumTokenUsage(
     input_tokens: (left?.input_tokens ?? 0) + (right?.input_tokens ?? 0),
     output_tokens: (left?.output_tokens ?? 0) + (right?.output_tokens ?? 0),
     total_tokens: (left?.total_tokens ?? 0) + (right?.total_tokens ?? 0),
+    ...sumCachedInputTokens(left, right),
   };
+}
+
+function sumCachedInputTokens(
+  left: LlmResponse['usage'] | null,
+  right: LlmResponse['usage'] | null,
+): Pick<NonNullable<LlmResponse['usage']>, 'cached_input_tokens'> | Record<string, never> {
+  if (!left) {
+    return typeof right?.cached_input_tokens === 'number'
+      ? { cached_input_tokens: right.cached_input_tokens }
+      : {};
+  }
+  if (!right) {
+    return typeof left.cached_input_tokens === 'number'
+      ? { cached_input_tokens: left.cached_input_tokens }
+      : {};
+  }
+  return typeof left.cached_input_tokens === 'number' &&
+    typeof right.cached_input_tokens === 'number'
+    ? { cached_input_tokens: left.cached_input_tokens + right.cached_input_tokens }
+    : {};
 }
 
 async function persistD4Evaluations(

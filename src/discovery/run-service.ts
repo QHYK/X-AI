@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from 'pg';
 import type {
   DiscoveryBranchExecutionState,
   DiscoveryExecutionState,
+  DiscoveryStage,
   DiscoveryInputContentIds,
 } from '../db/schema.js';
 import {
@@ -188,7 +189,7 @@ export async function resumeDiscoveryBranchRun(
 export async function updateDiscoveryBranchExecutionState(
   queryable: Pick<Pool, 'query'> | Pick<PoolClient, 'query'>,
   runId: string,
-  branch: 'd3' | 'd4',
+  branch: DiscoveryStage,
   state: DiscoveryBranchExecutionState,
 ): Promise<void> {
   const result = await queryable.query(

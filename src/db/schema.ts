@@ -3,7 +3,7 @@
  *
  * 描述采集输入、Stage 处理结果、最终 Event 和反馈之间的持久化关系及基础索引。
  */
-import { sql } from "drizzle-orm";
+import { sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
   boolean,
@@ -17,17 +17,30 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
-} from "drizzle-orm/pg-core";
+} from 'drizzle-orm/pg-core';
 
 const timestamps = {
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 };
 
 export type DiscoveryInputContentIds = {
   event: Array<{ dailyDate: string; id: string }>;
   digest: Array<{ dailyDate: string; id: string }>;
   longForm: Array<{ dailyDate: string; id: string }>;
+};
+
+export type DiscoveryStage = 'd2' | 'd3' | 'd4' | 'd5';
+
+export type DiscoveryStageUsage = {
+  /** Null means an earlier request existed but its exact total is unavailable. */
+  requests: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  /** Included in inputTokens; never add this to a total token count. */
+  cachedInputTokens: number | null;
+  /** False whenever any request in the accumulated stage lacks complete usage data. */
+  usageComplete: boolean;
 };
 
 export type DiscoveryBranchExecutionState = {
@@ -41,227 +54,253 @@ export type DiscoveryBranchExecutionState = {
     | 'error'
     | null;
   completedAt: string | null;
-  errorSummary?: string | null;
+  errorSummary: string | null;
+  provider: string | null;
+  model: string | null;
+  apiMode: string | null;
+  /** Accumulated known elapsed time across retries; null when historic timing is unknown. */
+  elapsedMs: number | null;
+  usage: DiscoveryStageUsage;
 };
 
-export type DiscoveryExecutionState = Partial<Record<'d3' | 'd4', DiscoveryBranchExecutionState>>;
+export type DiscoveryExecutionState = Partial<
+  Record<DiscoveryStage, DiscoveryBranchExecutionState>
+>;
 
-
-export const sources = pgTable("sources", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull(),
-  category: text("category").notNull(),
-  sourceType: text("source_type"),
-  url: text("url").notNull(),
-  collectionMethod: text("collection_method").notNull(),
-  priority: text("priority").notNull(),
-  enabled: boolean("enabled").notNull(),
-  eventCandidate: boolean("event_candidate").notNull(),
-  sourceDigestCandidate: boolean("source_digest_candidate").notNull(),
-  language: text("language").notNull(),
-  availability: text("availability"),
-  notes: text("notes"),
+export const sources = pgTable('sources', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  category: text('category').notNull(),
+  sourceType: text('source_type'),
+  url: text('url').notNull(),
+  collectionMethod: text('collection_method').notNull(),
+  priority: text('priority').notNull(),
+  enabled: boolean('enabled').notNull(),
+  eventCandidate: boolean('event_candidate').notNull(),
+  sourceDigestCandidate: boolean('source_digest_candidate').notNull(),
+  language: text('language').notNull(),
+  availability: text('availability'),
+  notes: text('notes'),
   ...timestamps,
 });
 
 export const rawArticles = pgTable(
-  "raw_articles",
+  'raw_articles',
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    sourceId: uuid("source_id")
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceId: uuid('source_id')
       .notNull()
       .references(() => sources.id),
-    sourceItemOriginId: text("source_item_origin_id"),
-    title: text("title").notNull(),
-    url: text("url"),
-    author: text("author"),
-    publishedAt: timestamp("published_at", { withTimezone: true }),
-    collectedAt: timestamp("collected_at", { withTimezone: true }).notNull().defaultNow(),
-    contentText: text("content_text"),
-    fullContentText: text("full_content_text"),
-    imageUrl: text("image_url"),
-    sourceTags: text("source_tags").array(),
-    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-    stage1Status: text("stage1_status").notNull(),
-    stage1ProcessedAt: timestamp("stage1_processed_at", { withTimezone: true }),
-    processingError: text("processing_error"),
+    sourceItemOriginId: text('source_item_origin_id'),
+    title: text('title').notNull(),
+    url: text('url'),
+    author: text('author'),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    collectedAt: timestamp('collected_at', { withTimezone: true }).notNull().defaultNow(),
+    contentText: text('content_text'),
+    fullContentText: text('full_content_text'),
+    imageUrl: text('image_url'),
+    sourceTags: text('source_tags').array(),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+    stage1Status: text('stage1_status').notNull(),
+    stage1ProcessedAt: timestamp('stage1_processed_at', { withTimezone: true }),
+    processingError: text('processing_error'),
   },
   (table) => [
-    index("raw_articles_source_id_idx").on(table.sourceId),
-    index("raw_articles_published_at_idx").on(table.publishedAt),
-    index("raw_articles_collected_at_idx").on(table.collectedAt),
-    index("raw_articles_stage1_status_idx").on(table.stage1Status),
+    index('raw_articles_source_id_idx').on(table.sourceId),
+    index('raw_articles_published_at_idx').on(table.publishedAt),
+    index('raw_articles_collected_at_idx').on(table.collectedAt),
+    index('raw_articles_stage1_status_idx').on(table.stage1Status),
   ],
 );
 
 /** Stage 3 Event Ranking 的可审核 snapshot item；不复制最终 Event 内容。 */
 export const eventReviewItems = pgTable(
-  "event_review_items",
+  'event_review_items',
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    reviewRunId: uuid("review_run_id").notNull(),
-    dailyDate: date("daily_date").notNull(),
-    eventGroupId: uuid("event_group_id").references(() => eventGroups.id, { onDelete: "set null" }),
-    eventTempId: text("event_temp_id").notNull(),
-    eventHint: text("event_hint").notNull(),
-    aiRank: integer("ai_rank").notNull(),
-    displayRank: integer("display_rank").notNull(),
-    memberContentIds: uuid("member_content_ids").array().notNull(),
+    id: uuid('id').primaryKey().defaultRandom(),
+    reviewRunId: uuid('review_run_id').notNull(),
+    dailyDate: date('daily_date').notNull(),
+    eventGroupId: uuid('event_group_id').references(() => eventGroups.id, { onDelete: 'set null' }),
+    eventTempId: text('event_temp_id').notNull(),
+    eventHint: text('event_hint').notNull(),
+    aiRank: integer('ai_rank').notNull(),
+    displayRank: integer('display_rank').notNull(),
+    memberContentIds: uuid('member_content_ids').array().notNull(),
     ...timestamps,
   },
   (table) => [
-    index("event_review_items_daily_date_idx").on(table.dailyDate),
-    uniqueIndex("event_review_items_run_temp_unique").on(
-      table.reviewRunId,
-      table.eventTempId,
-    ),
-    uniqueIndex("event_review_items_run_ai_rank_unique").on(
-      table.reviewRunId,
-      table.aiRank,
-    ),
-    uniqueIndex("event_review_items_run_display_rank_unique").on(
+    index('event_review_items_daily_date_idx').on(table.dailyDate),
+    uniqueIndex('event_review_items_run_temp_unique').on(table.reviewRunId, table.eventTempId),
+    uniqueIndex('event_review_items_run_ai_rank_unique').on(table.reviewRunId, table.aiRank),
+    uniqueIndex('event_review_items_run_display_rank_unique').on(
       table.reviewRunId,
       table.displayRank,
     ),
-    uniqueIndex("event_review_items_run_group_unique").on(table.reviewRunId, table.eventGroupId),
+    uniqueIndex('event_review_items_run_group_unique').on(table.reviewRunId, table.eventGroupId),
   ],
 );
 
 /** Stage 2 对某期 Daily 的完整、可替换 Event Group snapshot。 */
-export const eventGroups = pgTable("event_groups", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  dailyDate: date("daily_date").notNull(),
-  eventHint: text("event_hint").notNull(),
-  ...timestamps,
-}, (table) => [index("event_groups_daily_date_idx").on(table.dailyDate)]);
+export const eventGroups = pgTable(
+  'event_groups',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    dailyDate: date('daily_date').notNull(),
+    eventHint: text('event_hint').notNull(),
+    ...timestamps,
+  },
+  (table) => [index('event_groups_daily_date_idx').on(table.dailyDate)],
+);
 
-export const eventGroupItems = pgTable("event_group_items", {
-  eventGroupId: uuid("event_group_id").notNull().references(() => eventGroups.id, { onDelete: "cascade" }),
-  processedContentId: uuid("processed_content_id").notNull().references(() => processedContents.id),
-}, (table) => [
-  uniqueIndex("event_group_items_group_content_unique").on(table.eventGroupId, table.processedContentId),
-]);
+export const eventGroupItems = pgTable(
+  'event_group_items',
+  {
+    eventGroupId: uuid('event_group_id')
+      .notNull()
+      .references(() => eventGroups.id, { onDelete: 'cascade' }),
+    processedContentId: uuid('processed_content_id')
+      .notNull()
+      .references(() => processedContents.id),
+  },
+  (table) => [
+    uniqueIndex('event_group_items_group_content_unique').on(
+      table.eventGroupId,
+      table.processedContentId,
+    ),
+  ],
+);
 
-export const stage4Runs = pgTable("stage4_runs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  dailyDate: date("daily_date").notNull(),
-  reviewRunId: uuid("review_run_id").notNull(),
-  status: text("status").notNull(),
-  expectedCount: integer("expected_count").notNull(),
-  successCount: integer("success_count").notNull().default(0),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-}, (table) => [
-  index("stage4_runs_daily_date_idx").on(table.dailyDate),
-  uniqueIndex("stage4_runs_review_run_unique").on(table.reviewRunId),
-]);
+export const stage4Runs = pgTable(
+  'stage4_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    dailyDate: date('daily_date').notNull(),
+    reviewRunId: uuid('review_run_id').notNull(),
+    status: text('status').notNull(),
+    expectedCount: integer('expected_count').notNull(),
+    successCount: integer('success_count').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('stage4_runs_daily_date_idx').on(table.dailyDate),
+    uniqueIndex('stage4_runs_review_run_unique').on(table.reviewRunId),
+  ],
+);
 
 export const events = pgTable(
-  "events",
+  'events',
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    eventDate: date("event_date").notNull(),
-    title: text("title").notNull(),
-    titleZh: text("title_zh").notNull(),
-    tags: text("tags").array(),
-    tagsZh: text("tags_zh").array(),
-    entities: text("entities").array(),
-    entitiesZh: text("entities_zh").array(),
-    summary: text("summary").notNull(),
-    summaryZh: text("summary_zh").notNull(),
-    sourcePerspectives: jsonb("source_perspectives").notNull(),
-    externalContext: jsonb("external_context"),
+    id: uuid('id').primaryKey().defaultRandom(),
+    eventDate: date('event_date').notNull(),
+    title: text('title').notNull(),
+    titleZh: text('title_zh').notNull(),
+    tags: text('tags').array(),
+    tagsZh: text('tags_zh').array(),
+    entities: text('entities').array(),
+    entitiesZh: text('entities_zh').array(),
+    summary: text('summary').notNull(),
+    summaryZh: text('summary_zh').notNull(),
+    sourcePerspectives: jsonb('source_perspectives').notNull(),
+    externalContext: jsonb('external_context'),
     // 新生成的最终 Event 指向其确切的 Stage 3 Review snapshot item，避免依赖成员集合猜测关联。
-    eventReviewItemId: uuid("event_review_item_id").references(() => eventReviewItems.id),
-    stage4RunId: uuid("stage4_run_id").references(() => stage4Runs.id),
-    publicationStatus: text("publication_status").notNull().default("published"),
-    aiRank: integer("ai_rank"),
-    displayRank: integer("display_rank"),
+    eventReviewItemId: uuid('event_review_item_id').references(() => eventReviewItems.id),
+    stage4RunId: uuid('stage4_run_id').references(() => stage4Runs.id),
+    publicationStatus: text('publication_status').notNull().default('published'),
+    aiRank: integer('ai_rank'),
+    displayRank: integer('display_rank'),
     ...timestamps,
   },
   (table) => [
-    index("events_event_date_idx").on(table.eventDate),
-    index("events_display_rank_idx").on(table.displayRank),
-    index("events_stage4_run_id_idx").on(table.stage4RunId),
-    index("events_publication_status_idx").on(table.publicationStatus),
-    uniqueIndex("events_run_review_item_unique").on(table.stage4RunId, table.eventReviewItemId),
+    index('events_event_date_idx').on(table.eventDate),
+    index('events_display_rank_idx').on(table.displayRank),
+    index('events_stage4_run_id_idx').on(table.stage4RunId),
+    index('events_publication_status_idx').on(table.publicationStatus),
+    uniqueIndex('events_run_review_item_unique').on(table.stage4RunId, table.eventReviewItemId),
   ],
 );
 
 export const processedContents = pgTable(
-  "processed_contents",
+  'processed_contents',
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    rawArticleId: uuid("raw_article_id")
+    id: uuid('id').primaryKey().defaultRandom(),
+    rawArticleId: uuid('raw_article_id')
       .notNull()
       .references(() => rawArticles.id),
-    dailyDate: date("daily_date").notNull(),
-    routing: text("routing").notNull(),
-    category: text("category").notNull(),
-    tags: text("tags").array(),
-    entities: text("entities").array(),
-    entitiesZh: text("entities_zh").array(),
-    titleZh: text("title_zh"),
-    summary: text("summary"),
-    summaryZh: text("summary_zh"),
-    eventId: uuid("event_id").references(() => events.id),
-    aiRank: integer("ai_rank"),
-    displayRank: integer("display_rank"),
+    dailyDate: date('daily_date').notNull(),
+    routing: text('routing').notNull(),
+    category: text('category').notNull(),
+    tags: text('tags').array(),
+    entities: text('entities').array(),
+    entitiesZh: text('entities_zh').array(),
+    titleZh: text('title_zh'),
+    summary: text('summary'),
+    summaryZh: text('summary_zh'),
+    eventId: uuid('event_id').references(() => events.id),
+    aiRank: integer('ai_rank'),
+    displayRank: integer('display_rank'),
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("processed_contents_raw_article_id_unique").on(table.rawArticleId),
-    index("processed_contents_routing_idx").on(table.routing),
-    index("processed_contents_event_id_idx").on(table.eventId),
-    index("processed_contents_display_rank_idx").on(table.displayRank),
-    index("processed_contents_daily_date_idx").on(table.dailyDate),
+    uniqueIndex('processed_contents_raw_article_id_unique').on(table.rawArticleId),
+    index('processed_contents_routing_idx').on(table.routing),
+    index('processed_contents_event_id_idx').on(table.eventId),
+    index('processed_contents_display_rank_idx').on(table.displayRank),
+    index('processed_contents_daily_date_idx').on(table.dailyDate),
     check(
-      "processed_contents_routing_check",
+      'processed_contents_routing_check',
       sql`${table.routing} in ('event', 'digest', 'long_form', 'inspiration')`,
     ),
   ],
 );
 
 /** 用户按需生成且已通过 Read More 输出校验的详细中文导读。 */
-export const contentReadMore = pgTable("content_read_more", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  contentId: uuid("content_id")
-    .notNull()
-    .references(() => processedContents.id, { onDelete: "cascade" }),
-  summaryZh: text("summary_zh").notNull(),
-  ...timestamps,
-}, (table) => [
-  uniqueIndex("content_read_more_content_id_unique").on(table.contentId),
-]);
+export const contentReadMore = pgTable(
+  'content_read_more',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    contentId: uuid('content_id')
+      .notNull()
+      .references(() => processedContents.id, { onDelete: 'cascade' }),
+    summaryZh: text('summary_zh').notNull(),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex('content_read_more_content_id_unique').on(table.contentId)],
+);
 
-export const feedback = pgTable("feedback", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  targetType: text("target_type").notNull(),
-  targetId: uuid("target_id").notNull(),
-  feedbackType: text("feedback_type").notNull(),
-  beforeValue: jsonb("before_value"),
-  afterValue: jsonb("after_value"),
-  note: text("note"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+export const feedback = pgTable('feedback', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  targetType: text('target_type').notNull(),
+  targetId: uuid('target_id').notNull(),
+  feedbackType: text('feedback_type').notNull(),
+  beforeValue: jsonb('before_value'),
+  afterValue: jsonb('after_value'),
+  note: text('note'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 /** Durable, cross-machine execution summaries. Detailed artifacts remain on the local runtime filesystem. */
-export const pipelineRuns = pgTable("pipeline_runs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  dailyDate: date("daily_date").notNull(),
-  step: text("step").notNull(),
-  status: text("status").notNull(),
-  triggerSource: text("trigger_source").notNull(),
-  provider: text("provider"),
-  model: text("model"),
-  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
-  finishedAt: timestamp("finished_at", { withTimezone: true }),
-  metrics: jsonb("metrics").$type<Record<string, unknown>>().notNull().default({}),
-  errorSummary: text("error_summary"),
-  ...timestamps,
-}, (table) => [
-  index("pipeline_runs_daily_step_started_idx").on(table.dailyDate, table.step, table.startedAt),
-]);
+export const pipelineRuns = pgTable(
+  'pipeline_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    dailyDate: date('daily_date').notNull(),
+    step: text('step').notNull(),
+    status: text('status').notNull(),
+    triggerSource: text('trigger_source').notNull(),
+    provider: text('provider'),
+    model: text('model'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    metrics: jsonb('metrics').$type<Record<string, unknown>>().notNull().default({}),
+    errorSummary: text('error_summary'),
+    ...timestamps,
+  },
+  (table) => [
+    index('pipeline_runs_daily_step_started_idx').on(table.dailyDate, table.step, table.startedAt),
+  ],
+);
 
 /** Discovery execution and its fixed two-Daily input membership. */
 export const discoveryRuns = pgTable(
@@ -442,58 +481,56 @@ export const inDepthCandidates = pgTable(
 
 /** 人工触发的模型评测所冻结的 Stage 输入；与正式业务表完全隔离。 */
 export const evaluationInputs = pgTable(
-  "evaluation_inputs",
+  'evaluation_inputs',
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    dailyDate: date("daily_date").notNull(),
-    stage: text("stage").notNull(),
-    inputJson: jsonb("input_json").notNull(),
-    inputHash: text("input_hash").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    id: uuid('id').primaryKey().defaultRandom(),
+    dailyDate: date('daily_date').notNull(),
+    stage: text('stage').notNull(),
+    inputJson: jsonb('input_json').notNull(),
+    inputHash: text('input_hash').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [
-    index("evaluation_inputs_daily_stage_idx").on(table.dailyDate, table.stage),
-  ],
+  (table) => [index('evaluation_inputs_daily_stage_idx').on(table.dailyDate, table.stage)],
 );
 
 /** 同一冻结输入可由多个 Provider / Model 独立执行，失败不会影响其他 Run。 */
 export const evaluationRuns = pgTable(
-  "evaluation_runs",
+  'evaluation_runs',
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    evaluationInputId: uuid("evaluation_input_id")
+    id: uuid('id').primaryKey().defaultRandom(),
+    evaluationInputId: uuid('evaluation_input_id')
       .notNull()
       .references(() => evaluationInputs.id),
-    provider: text("provider").notNull(),
-    model: text("model").notNull(),
-    promptVersion: text("prompt_version").notNull(),
-    status: text("status").notNull(),
-    error: text("error"),
-    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
-    durationMs: integer("duration_ms"),
-    inputTokens: integer("input_tokens"),
-    outputTokens: integer("output_tokens"),
+    provider: text('provider').notNull(),
+    model: text('model').notNull(),
+    promptVersion: text('prompt_version').notNull(),
+    status: text('status').notNull(),
+    error: text('error'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    durationMs: integer('duration_ms'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
     // detached CLI 以该 PID 作为独立 process group leader；仅内部 Cancel API 使用，前端不会接触 PID。
-    processPid: integer("process_pid"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    processPid: integer('process_pid'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("evaluation_runs_input_idx").on(table.evaluationInputId)],
+  (table) => [index('evaluation_runs_input_idx').on(table.evaluationInputId)],
 );
 
 /** 保存已通过当前 Stage Structured Output 校验的模型结果，不映射到正式内容表。 */
 export const evaluationOutputs = pgTable(
-  "evaluation_outputs",
+  'evaluation_outputs',
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    evaluationRunId: uuid("evaluation_run_id")
+    id: uuid('id').primaryKey().defaultRandom(),
+    evaluationRunId: uuid('evaluation_run_id')
       .notNull()
-      .references(() => evaluationRuns.id, { onDelete: "cascade" }),
-    itemKey: text("item_key"),
-    outputJson: jsonb("output_json").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+      .references(() => evaluationRuns.id, { onDelete: 'cascade' }),
+    itemKey: text('item_key'),
+    outputJson: jsonb('output_json').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("evaluation_outputs_run_idx").on(table.evaluationRunId)],
+  (table) => [index('evaluation_outputs_run_idx').on(table.evaluationRunId)],
 );
 
 export type Source = typeof sources.$inferSelect;

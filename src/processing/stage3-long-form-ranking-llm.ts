@@ -8,7 +8,7 @@ import {
   resolveStageLlmModel,
   resolveStageLlmProvider,
   type LlmProvider,
-} from "./llm-client.js";
+} from './llm-client.js';
 import {
   parseAndValidateStage3RankingOutput,
   normalizeStage3RankingOutput,
@@ -16,14 +16,21 @@ import {
   validateStage3RankingIntegrity,
   type Stage3RankingIntegrity,
   type Stage3RankingOutput,
-} from "./stage3-contract.js";
+} from './stage3-contract.js';
 import {
   buildStage3LongFormRankingInstructions,
   buildStage3LongFormRankingUserPrompt,
   STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
   type Stage3LongFormRankingInput,
-} from "../prompts/stage3-long-form-ranking.js";
-import { resolveStageLlmRuntimeConfig } from "./stage-llm-runtime-config.js";
+} from '../prompts/stage3-long-form-ranking.js';
+import { resolveStageLlmRuntimeConfig } from './stage-llm-runtime-config.js';
+import {
+  emptyLlmTokenUsage,
+  mergeLlmTokenUsage,
+  missingLlmTokenUsage,
+  usageFromProvider,
+  type LlmTokenUsage,
+} from './llm-token-usage.js';
 
 export type Stage3LongFormRankingLlmOptions = {
   provider?: LlmProvider;
@@ -32,11 +39,7 @@ export type Stage3LongFormRankingLlmOptions = {
   maxRetries?: number;
 };
 
-export type Stage3LongFormRankingTokenUsage = {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-};
+export type Stage3LongFormRankingTokenUsage = LlmTokenUsage;
 
 export type Stage3LongFormRankingSuccess = {
   success: true;
@@ -50,7 +53,7 @@ export type Stage3LongFormRankingSuccess = {
   elapsedMs: number;
   tokenUsage: Stage3LongFormRankingTokenUsage | null;
   rawOutputText: string;
-  warnings: import("./stage3-contract.js").Stage3RankingWarnings;
+  warnings: import('./stage3-contract.js').Stage3RankingWarnings;
 };
 
 export type Stage3LongFormRankingFailure = {
@@ -67,35 +70,27 @@ export type Stage3LongFormRankingFailure = {
 };
 
 export type Stage3LongFormRankingResult =
-  | Stage3LongFormRankingSuccess
-  | Stage3LongFormRankingFailure;
+  Stage3LongFormRankingSuccess | Stage3LongFormRankingFailure;
 
 /** 调用模型并验证 Long-form 的完整、连续排名。 */
 export async function runStage3LongFormRankingLlm(
   input: Stage3LongFormRankingInput,
   options: Stage3LongFormRankingLlmOptions = {},
 ): Promise<Stage3LongFormRankingResult> {
-  const provider = options.provider ?? resolveStageLlmProvider("stage3");
-  const model = options.model ?? (
-    options.provider
-      ? resolveLlmModel(undefined, provider)
-      : resolveStageLlmModel("stage3")
-  );
-  const runtimeConfig = resolveStageLlmRuntimeConfig("stage3");
+  const provider = options.provider ?? resolveStageLlmProvider('stage3');
+  const model =
+    options.model ??
+    (options.provider ? resolveLlmModel(undefined, provider) : resolveStageLlmModel('stage3'));
+  const runtimeConfig = resolveStageLlmRuntimeConfig('stage3');
   const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
   const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const expectedIds = input.candidates.map((candidate) => candidate.id);
-  const tokenUsage: Stage3LongFormRankingTokenUsage = {
-    inputTokens: 0,
-    outputTokens: 0,
-    totalTokens: 0,
-  };
-  let hasTokenUsage = false;
+  let tokenUsage = emptyLlmTokenUsage();
 
   let rawOutputText: string | null = null;
-  let lastError = "Unknown Stage 3 Long-form Ranking LLM failure.";
+  let lastError = 'Unknown Stage 3 Long-form Ranking LLM failure.';
   let lastAssignment: Stage3RankingIntegrity | null = null;
   let attemptsUsed = 0;
 
@@ -109,10 +104,10 @@ export async function runStage3LongFormRankingLlm(
             instructions: buildStage3LongFormRankingInstructions(),
             input: [
               {
-                role: "user",
+                role: 'user',
                 content: [
                   {
-                    type: "input_text",
+                    type: 'input_text',
                     text: buildStage3LongFormRankingUserPrompt(input),
                   },
                 ],
@@ -122,9 +117,9 @@ export async function runStage3LongFormRankingLlm(
             store: false,
             text: {
               format: {
-                type: "json_schema",
-                name: "stage3_long_form_ranking",
-                description: "Structured Stage 3 Long-form ranking output.",
+                type: 'json_schema',
+                name: 'stage3_long_form_ranking',
+                description: 'Structured Stage 3 Long-form ranking output.',
                 schema: stage3RankingOutputJsonSchema,
                 strict: true,
               },
@@ -135,17 +130,12 @@ export async function runStage3LongFormRankingLlm(
           },
         );
 
-        if (response.usage) {
-          tokenUsage.inputTokens += response.usage.input_tokens;
-          tokenUsage.outputTokens += response.usage.output_tokens;
-          tokenUsage.totalTokens += response.usage.total_tokens;
-          hasTokenUsage = true;
-        }
+        tokenUsage = mergeLlmTokenUsage(tokenUsage, usageFromProvider(response.usage));
         rawOutputText = response.output_text;
         const validation = parseAndValidateStage3RankingOutput(rawOutputText);
         if (!validation.success) {
           lastAssignment = null;
-          lastError = `Structured output validation failed: ${validation.errors.join("; ")}`;
+          lastError = `Structured output validation failed: ${validation.errors.join('; ')}`;
           if (attempt <= maxRetries) {
             await sleep(runtimeConfig.retryDelayMs * attempt);
             continue;
@@ -158,7 +148,7 @@ export async function runStage3LongFormRankingLlm(
         lastAssignment = assignment;
         const normalized = normalizeStage3RankingOutput(validation.output, expectedIds);
         if (!normalized.success) {
-          lastError = `Ranking integrity validation failed: ${normalized.integrity.errors.join("; ")}`;
+          lastError = `Ranking integrity validation failed: ${normalized.integrity.errors.join('; ')}`;
           break;
         }
 
@@ -173,10 +163,11 @@ export async function runStage3LongFormRankingLlm(
           responseId: response.id,
           attempts: attempt,
           elapsedMs: Date.now() - startedAt,
-          tokenUsage: hasTokenUsage ? tokenUsage : null,
+          tokenUsage: attemptsUsed > 0 ? tokenUsage : null,
           rawOutputText,
         };
       } catch (error) {
+        tokenUsage = mergeLlmTokenUsage(tokenUsage, missingLlmTokenUsage());
         lastError = sanitizeLlmError(error instanceof Error ? error.message : String(error));
         if (isNonRetryableLlmError(lastError)) {
           break;
@@ -197,7 +188,7 @@ export async function runStage3LongFormRankingLlm(
       promptVersion: STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
       attempts: attemptsUsed,
       elapsedMs: Date.now() - startedAt,
-      tokenUsage: hasTokenUsage ? tokenUsage : null,
+      tokenUsage: attemptsUsed > 0 ? tokenUsage : null,
       error: lastError,
       rawOutputText,
     };
@@ -208,14 +199,14 @@ export async function runStage3LongFormRankingLlm(
 
 function isNonRetryableLlmError(errorMessage: string): boolean {
   return (
-    errorMessage.includes("401") ||
-    errorMessage.includes("Incorrect API key") ||
-    errorMessage.includes("invalid_api_key")
+    errorMessage.includes('401') ||
+    errorMessage.includes('Incorrect API key') ||
+    errorMessage.includes('invalid_api_key')
   );
 }
 
 function sanitizeLlmError(errorMessage: string): string {
-  return errorMessage.replace(/sk-[A-Za-z0-9_*.-]+/g, "[redacted_api_key]");
+  return errorMessage.replace(/sk-[A-Za-z0-9_*.-]+/g, '[redacted_api_key]');
 }
 
 function sleep(ms: number): Promise<void> {

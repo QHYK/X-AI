@@ -3,7 +3,7 @@
  *
  * 作为 Server Component 加载数据库业务统计，以及 DB-first 的 Stage execution summary；日期详情不会改变顶部最近七期数据。
  */
-import { getDatabasePool } from "@/db/index.js";
+import { getDatabasePool } from '@/db/index.js';
 import {
   formatContentCompletionRatio,
   getDashboardData,
@@ -11,24 +11,21 @@ import {
   type DashboardDuplicateFilterMetrics,
   type DashboardContentFunnel,
   type DashboardStageMetrics,
-} from "@/lib/dashboard.js";
-import {
-  isCurrentDailyDate,
-  isDailyWorkflowRunning,
-} from "@/lib/daily-workflow-retry.js";
-import { DailyRetryButton } from "./daily-retry-button.js";
-import { StepRetryButton } from "./step-retry-button.js";
-import { MetricInfo } from "./metric-info.js";
-import styles from "./dashboard.module.css";
+} from '@/lib/dashboard.js';
+import { isCurrentDailyDate, isDailyWorkflowRunning } from '@/lib/daily-workflow-retry.js';
+import { DailyRetryButton } from './daily-retry-button.js';
+import { StepRetryButton } from './step-retry-button.js';
+import { MetricInfo } from './metric-info.js';
+import styles from './dashboard.module.css';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const STAGE_LABELS = {
-  stage1: "Stage 1",
-  stage2: "Stage 2",
-  stage3: "Stage 3",
-  stage4: "Stage 4",
+  stage1: 'Stage 1',
+  stage2: 'Stage 2',
+  stage3: 'Stage 3',
+  stage4: 'Stage 4',
 } as const;
 
 type DashboardPageProps = {
@@ -62,10 +59,22 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         </div>
       </header>
 
-      <section className={styles.summaryGrid} aria-label="Database totals">
-        <SummaryCard label="Raw Articles" value={data.totals.rawArticles} />
-        <SummaryCard label="Processed Contents" value={data.totals.processedContents} />
-        <SummaryCard label="Events" value={data.totals.events} />
+      <section
+        className={styles.summaryGrid}
+        aria-label="Database totals"
+      >
+        <SummaryCard
+          label="Raw Articles"
+          value={data.totals.rawArticles}
+        />
+        <SummaryCard
+          label="Processed Contents"
+          value={data.totals.processedContents}
+        />
+        <SummaryCard
+          label="Events"
+          value={data.totals.events}
+        />
       </section>
 
       <section className={styles.panel}>
@@ -74,7 +83,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             <p className={styles.kicker}>Daily volume</p>
             <h2>最近 7 个已完成 Daily</h2>
           </div>
-          <p>业务数据来自正式业务表；Stage1–4 执行摘要优先读取 pipeline_runs，缺失时才回退 runtime。</p>
+          <p>
+            业务数据来自正式业务表；Stage1–4 执行摘要优先读取 pipeline_runs，缺失时才回退 runtime。
+          </p>
         </div>
         <div className={styles.tableWrap}>
           <table className={styles.table}>
@@ -87,7 +98,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 <th>Ignored</th>
                 <th>Failed</th>
                 <th>Completion</th>
-                <th>Completion Backlog <MetricInfo text="当前 24h intake scope 中仍符合 Content Completion 条件的文章数。不同于 Content Completion 卡片中的 Remaining；Remaining 使用该次 Completion run 自己的 candidate scope。" /></th>
+                <th>
+                  Completion Backlog{' '}
+                  <MetricInfo text="当前 24h intake scope 中仍符合 Content Completion 条件的文章数。不同于 Content Completion 卡片中的 Remaining；Remaining 使用该次 Completion run 自己的 candidate scope。" />
+                </th>
                 <th>Completion Duration</th>
                 <th>Stage1 Duration</th>
                 <th>Processed Total</th>
@@ -99,7 +113,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 <th>Stage3 Events</th>
                 <th>Published Events</th>
                 <th>Draft Events</th>
-                <th>LLM Calls <MetricInfo text="各 Stage 实际发出的模型 API 请求总数，包含 retry 和 Stage4 context-decision 请求，不包含 Web Search tool calls。" /></th>
+                <th>
+                  LLM Calls{' '}
+                  <MetricInfo text="各 Stage 实际发出的模型 API 请求总数，包含 retry 和 Stage4 context-decision 请求，不包含 Web Search tool calls。" />
+                </th>
                 <th>Input Tokens</th>
                 <th>Output Tokens</th>
                 <th>Duration</th>
@@ -107,7 +124,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             </thead>
             <tbody>
               {data.days.map((day, index) => (
-                <tr key={day.date} className={index === 0 ? styles.currentRow : undefined}>
+                <tr
+                  key={day.date}
+                  className={index === 0 ? styles.currentRow : undefined}
+                >
                   <th scope="row">{day.date}</th>
                   <td>{formatNumber(day.raw.total)}</td>
                   <td>{formatNumber(day.raw.pending)}</td>
@@ -152,7 +172,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               ) : null}
             </div>
           </div>
-          <form action="./dashboard" className={styles.dateForm}>
+          <form
+            action="./dashboard"
+            className={styles.dateForm}
+          >
             <label htmlFor="dashboard-date">Select date</label>
             <input
               id="dashboard-date"
@@ -179,8 +202,14 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             </div>
 
             <div className={styles.stageGrid}>
-              <ContentCompletionCard metrics={data.details.contentCompletion} dailyDate={data.detailDate} />
-              <DuplicateFilterCard metrics={data.details.duplicateFilter} dailyDate={data.detailDate} />
+              <ContentCompletionCard
+                metrics={data.details.contentCompletion}
+                dailyDate={data.detailDate}
+              />
+              <DuplicateFilterCard
+                metrics={data.details.duplicateFilter}
+                dailyDate={data.detailDate}
+              />
               {Object.entries(data.details.stages).map(([stage, metrics]) => (
                 <StageCard
                   key={stage}
@@ -192,9 +221,12 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             </div>
           </>
         ) : (
-          <article className={styles.scopeNotice} role="status">
+          <article
+            className={styles.scopeNotice}
+            role="status"
+          >
             <strong>Daily scope has not completed yet</strong>
-          <p>Details and Content Funnel are unavailable until the 08:30 boundary.</p>
+            <p>Details and Content Funnel are unavailable until the 08:30 boundary.</p>
           </article>
         )}
       </section>
@@ -205,22 +237,22 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 function ContentFunnel({ funnel }: { funnel: DashboardContentFunnel }) {
   const rows = [
     {
-      label: "Raw Content",
+      label: 'Raw Content',
       chars: funnel.rawChars,
-      ratio: "100%",
+      ratio: '100%',
     },
     {
-      label: "Selected Content",
+      label: 'Selected Content',
       chars: funnel.selectedChars,
       ratio: `${formatPercentage(funnel.selectedChars, funnel.rawChars)} of Raw`,
     },
     {
-      label: "Processed Summary",
+      label: 'Processed Summary',
       chars: funnel.processedSummaryChars,
       ratio: `${formatPercentage(funnel.processedSummaryChars, funnel.rawChars)} of Raw`,
     },
     {
-      label: "Daily Brief",
+      label: 'Daily Brief',
       chars: funnel.dailyBriefChars,
       ratio: `${formatPercentage(funnel.dailyBriefChars, funnel.rawChars)} of Raw`,
     },
@@ -252,7 +284,10 @@ function ContentFunnel({ funnel }: { funnel: DashboardContentFunnel }) {
           <dd>{formatPercentage(funnel.processedSummaryChars, funnel.selectedChars)}</dd>
         </div>
         <div>
-          <dt>Daily Brief / Raw <MetricInfo text="Raw 使用 24h published-at scope；Daily Brief 使用 workflow daily_date。存在 late-arrival 时，该比例仅为近似值。" /></dt>
+          <dt>
+            Daily Brief / Raw{' '}
+            <MetricInfo text="Raw 使用 24h published-at scope；Daily Brief 使用 workflow daily_date。存在 late-arrival 时，该比例仅为近似值。" />
+          </dt>
           <dd>{formatPercentage(funnel.dailyBriefChars, funnel.rawChars)}</dd>
         </div>
       </dl>
@@ -272,7 +307,12 @@ function ContentCompletionCard({
       <article className={styles.stageCard}>
         <div className={styles.stageHeader}>
           <h3>Content Completion</h3>
-          <StepRetryButton dailyDate={dailyDate} step="content_completion" label="Content Completion" initiallyRunning={false} />
+          <StepRetryButton
+            dailyDate={dailyDate}
+            step="content_completion"
+            label="Content Completion"
+            initiallyRunning={false}
+          />
           <span className={styles.naBadge}>N/A</span>
         </div>
         <p className={styles.empty}>No execution summary for this date.</p>
@@ -282,40 +322,122 @@ function ContentCompletionCard({
 
   return (
     <article className={styles.stageCard}>
-        <div className={styles.stageHeader}>
-          <h3>Content Completion</h3>
-          {metrics.status !== "success" ? <StepRetryButton dailyDate={dailyDate} step="content_completion" label="Content Completion" initiallyRunning={metrics.status === "running"} /> : null}
-          <StatusBadge status={metrics.status} />
+      <div className={styles.stageHeader}>
+        <h3>Content Completion</h3>
+        {metrics.status !== 'success' ? (
+          <StepRetryButton
+            dailyDate={dailyDate}
+            step="content_completion"
+            label="Content Completion"
+            initiallyRunning={metrics.status === 'running'}
+          />
+        ) : null}
+        <StatusBadge status={metrics.status} />
       </div>
       <dl className={styles.metricList}>
-        <Metric label="Candidates" value={formatMetric(metrics.candidateCount)} info="本次 Content Completion run 开始时，在该 run 实际 candidate scope 内符合 completion eligibility 的全部文章数。正常 Daily workflow 当前通常使用约 72h catch-up window，不等于当天 24h Raw Articles。" />
-        <Metric label="Selected" value={formatMetric(metrics.selectedCount)} />
-        <Metric label="Succeeded" value={formatMetric(metrics.successCount)} />
-        <Metric label="Failed" value={formatMetric(metrics.failedCount)} />
-        <Metric label="Remaining" value={formatMetric(metrics.remainingCount)} info="本次 Completion run 结束后，按相同 eligibility 与 scope 再次查询得到的剩余候选数；包括未被 limit 选中的文章以及仍未补全成功的文章。" />
-        <Metric label="Duration" value={formatDuration(metrics.durationMs)} />
-        <Metric label="Limit" value={formatMetric(metrics.limit)} />
+        <Metric
+          label="Candidates"
+          value={formatMetric(metrics.candidateCount)}
+          info="本次 Content Completion run 开始时，在该 run 实际 candidate scope 内符合 completion eligibility 的全部文章数。正常 Daily workflow 当前通常使用约 72h catch-up window，不等于当天 24h Raw Articles。"
+        />
+        <Metric
+          label="Selected"
+          value={formatMetric(metrics.selectedCount)}
+        />
+        <Metric
+          label="Succeeded"
+          value={formatMetric(metrics.successCount)}
+        />
+        <Metric
+          label="Failed"
+          value={formatMetric(metrics.failedCount)}
+        />
+        <Metric
+          label="Remaining"
+          value={formatMetric(metrics.remainingCount)}
+          info="本次 Completion run 结束后，按相同 eligibility 与 scope 再次查询得到的剩余候选数；包括未被 limit 选中的文章以及仍未补全成功的文章。"
+        />
+        <Metric
+          label="Duration"
+          value={formatDuration(metrics.durationMs)}
+        />
+        <Metric
+          label="Limit"
+          value={formatMetric(metrics.limit)}
+        />
       </dl>
     </article>
   );
 }
 
-function DuplicateFilterCard({ metrics, dailyDate }: { metrics: DashboardDuplicateFilterMetrics | null; dailyDate: string }) {
-  if (!metrics) return <article className={styles.stageCard}><div className={styles.stageHeader}><h3>Exact Duplicate Filter</h3><StepRetryButton dailyDate={dailyDate} step="exact_duplicate_filter" label="Exact Duplicate Filter" initiallyRunning={false} /><span className={styles.naBadge}>N/A</span></div><p className={styles.empty}>No execution summary for this date.</p></article>;
-  return <article className={styles.stageCard}>
-    <div className={styles.stageHeader}><h3>Exact Duplicate Filter</h3>{metrics.status !== "success" ? <StepRetryButton dailyDate={dailyDate} step="exact_duplicate_filter" label="Exact Duplicate Filter" initiallyRunning={metrics.status === "running"} /> : null}</div>
-    <dl className={styles.metricList}>
-      <Metric label="Duplicates ignored" value={formatMetric(metrics.duplicateCount)} />
-      <Metric label="Dedup rate" value={`${(metrics.duplicateRate * 100).toFixed(1)}%`} />
-      <Metric label="Remaining unique articles" value={formatMetric(metrics.outputCount)} info="本次 Exact Duplicate Filter 的输出数量，即 inputCount - duplicateCount。不是当前 DB 中全部 unique articles，也不是 Completion Remaining。" />
-    </dl>
-    <summary style={{marginTop: '10px'}}>Duplicate categories</summary>
-    <dl className={styles.metricList}>
-      <Metric label="URL only" value={formatMetric(metrics.sameUrlCount)} />
-      <Metric label="Title only" value={formatMetric(metrics.sameTitleCount)} />
-      <Metric label="URL + Title" value={formatMetric(metrics.sameUrlAndTitleCount)} />
-    </dl>
-  </article>;
+function DuplicateFilterCard({
+  metrics,
+  dailyDate,
+}: {
+  metrics: DashboardDuplicateFilterMetrics | null;
+  dailyDate: string;
+}) {
+  if (!metrics)
+    return (
+      <article className={styles.stageCard}>
+        <div className={styles.stageHeader}>
+          <h3>Exact Duplicate Filter</h3>
+          <StepRetryButton
+            dailyDate={dailyDate}
+            step="exact_duplicate_filter"
+            label="Exact Duplicate Filter"
+            initiallyRunning={false}
+          />
+          <span className={styles.naBadge}>N/A</span>
+        </div>
+        <p className={styles.empty}>No execution summary for this date.</p>
+      </article>
+    );
+  return (
+    <article className={styles.stageCard}>
+      <div className={styles.stageHeader}>
+        <h3>Exact Duplicate Filter</h3>
+        {metrics.status !== 'success' ? (
+          <StepRetryButton
+            dailyDate={dailyDate}
+            step="exact_duplicate_filter"
+            label="Exact Duplicate Filter"
+            initiallyRunning={metrics.status === 'running'}
+          />
+        ) : null}
+      </div>
+      <dl className={styles.metricList}>
+        <Metric
+          label="Duplicates ignored"
+          value={formatMetric(metrics.duplicateCount)}
+        />
+        <Metric
+          label="Dedup rate"
+          value={`${(metrics.duplicateRate * 100).toFixed(1)}%`}
+        />
+        <Metric
+          label="Remaining unique articles"
+          value={formatMetric(metrics.outputCount)}
+          info="本次 Exact Duplicate Filter 的输出数量，即 inputCount - duplicateCount。不是当前 DB 中全部 unique articles，也不是 Completion Remaining。"
+        />
+      </dl>
+      <summary style={{ marginTop: '10px' }}>Duplicate categories</summary>
+      <dl className={styles.metricList}>
+        <Metric
+          label="URL only"
+          value={formatMetric(metrics.sameUrlCount)}
+        />
+        <Metric
+          label="Title only"
+          value={formatMetric(metrics.sameTitleCount)}
+        />
+        <Metric
+          label="URL + Title"
+          value={formatMetric(metrics.sameUrlAndTitleCount)}
+        />
+      </dl>
+    </article>
+  );
 }
 
 function SummaryCard({ label, value }: { label: string; value: number }) {
@@ -358,13 +480,18 @@ function StageCard({
   metrics: DashboardStageMetrics | null;
   dailyDate: string;
 }) {
-  const step = label.toLowerCase().replace(" ", "") as "stage1" | "stage2" | "stage3" | "stage4";
+  const step = label.toLowerCase().replace(' ', '') as 'stage1' | 'stage2' | 'stage3' | 'stage4';
   if (!metrics) {
     return (
       <article className={styles.stageCard}>
         <div className={styles.stageHeader}>
           <h3>{label}</h3>
-          <StepRetryButton dailyDate={dailyDate} step={step} label={label} initiallyRunning={false} />
+          <StepRetryButton
+            dailyDate={dailyDate}
+            step={step}
+            label={label}
+            initiallyRunning={false}
+          />
           <span className={styles.naBadge}>N/A</span>
         </div>
         <p className={styles.empty}>No execution summary for this date.</p>
@@ -376,75 +503,161 @@ function StageCard({
   return (
     <article className={styles.stageCard}>
       <div className={styles.stageHeader}>
-        <h3>{label} <MetricInfo text="该状态表示目标 Daily 此步骤最新一次执行的结果。优先读取数据库 pipeline_runs；仅在没有对应运行记录时使用 legacy runtime artifact。" /></h3>
-        {metrics.status !== "success" ? <StepRetryButton dailyDate={dailyDate} step={step} label={label} initiallyRunning={metrics.status === "running"} /> : null}
-        <StatusBadge status={metrics.status} partialReady={metrics.readyCount ?? metrics.enrichmentSuccessCount} />
-        {metrics.status?.toLowerCase() === "failed" && metrics.errorSummary ? <MetricInfo text={`Latest attempt error\n${metrics.errorSummary}`} /> : null}
+        <h3>
+          {label}{' '}
+          <MetricInfo text="该状态表示目标 Daily 此步骤最新一次执行的结果。优先读取数据库 pipeline_runs；仅在没有对应运行记录时使用 legacy runtime artifact。" />
+        </h3>
+        {metrics.status !== 'success' ? (
+          <StepRetryButton
+            dailyDate={dailyDate}
+            step={step}
+            label={label}
+            initiallyRunning={metrics.status === 'running'}
+          />
+        ) : null}
+        <StatusBadge
+          status={metrics.status}
+          partialReady={metrics.readyCount ?? metrics.enrichmentSuccessCount}
+        />
+        {metrics.status?.toLowerCase() === 'failed' && metrics.errorSummary ? (
+          <MetricInfo text={`Latest attempt error\n${metrics.errorSummary}`} />
+        ) : null}
       </div>
       <dl className={styles.metricList}>
-        {metrics.stage === "stage3" ? (
+        {metrics.stage === 'stage3' ? (
           <>
-            <Metric label="Prompt · Event" value={metrics.promptVersions?.event ?? "N/A"} />
-            <Metric label="Prompt · Digest" value={metrics.promptVersions?.digest ?? "N/A"} />
+            <Metric
+              label="Prompt · Event"
+              value={metrics.promptVersions?.event ?? 'N/A'}
+            />
+            <Metric
+              label="Prompt · Digest"
+              value={metrics.promptVersions?.digest ?? 'N/A'}
+            />
             <Metric
               label="Prompt · Long-form"
-              value={metrics.promptVersions?.longForm ?? "N/A"}
+              value={metrics.promptVersions?.longForm ?? 'N/A'}
             />
           </>
         ) : (
-          <Metric label="Prompt version" value={metrics.promptVersion ?? "N/A"} />
+          <Metric
+            label="Prompt version"
+            value={metrics.promptVersion ?? 'N/A'}
+          />
         )}
-        <Metric label="Model" value={metrics.model ?? "N/A"} />
-        <Metric label="Duration" value={formatDuration(metrics.durationMs)} />
-        <Metric label="LLM duration" value={formatDuration(metrics.llmDurationMs)} />
-        <Metric label="LLM calls" value={formatMetric(metrics.llmCalls)} />
-        <Metric label="Retries" value={formatMetric(metrics.retryCount)} />
-        <Metric label="Input tokens" value={formatMetric(metrics.inputTokens)} />
-        <Metric label="Output tokens" value={formatMetric(metrics.outputTokens)} />
-        <Metric label="Total tokens" value={formatMetric(metrics.totalTokens)} />
+        <Metric
+          label="Model"
+          value={metrics.model ?? 'N/A'}
+        />
+        <Metric
+          label="Duration"
+          value={formatDuration(metrics.durationMs)}
+        />
+        <Metric
+          label="LLM duration"
+          value={formatDuration(metrics.llmDurationMs)}
+        />
+        <Metric
+          label="LLM calls"
+          value={formatMetric(metrics.llmCalls)}
+        />
+        <Metric
+          label="Retries"
+          value={formatMetric(metrics.retryCount)}
+        />
+        <Metric
+          label="Input tokens"
+          value={formatMetric(metrics.inputTokens)}
+        />
+        <Metric
+          label="Output tokens"
+          value={formatMetric(metrics.outputTokens)}
+        />
+        <Metric
+          label="Total tokens"
+          value={formatMetric(metrics.totalTokens)}
+        />
+        <Metric
+          label="Cached input tokens"
+          value={formatMetric(metrics.cachedInputTokens)}
+        />
+        <Metric
+          label="Cache hit rate"
+          value={formatCacheHitRate(
+            metrics.cachedInputTokens,
+            metrics.inputTokens,
+            metrics.tokenUsageComplete,
+          )}
+        />
         {stageMetrics.map(([metricLabel, value, info]) => (
-          <Metric key={metricLabel} label={metricLabel} value={formatMetric(value)} info={info} />
+          <Metric
+            key={metricLabel}
+            label={metricLabel}
+            value={formatMetric(value)}
+            info={info}
+          />
         ))}
       </dl>
     </article>
   );
 }
 
-function stageSpecificMetrics(metrics: DashboardStageMetrics): Array<[string, number | null, string?]> {
+function formatCacheHitRate(
+  cachedInputTokens: number | null,
+  inputTokens: number | null,
+  usageComplete: boolean | null,
+): string {
+  if (usageComplete !== true || cachedInputTokens === null || inputTokens === null) {
+    return usageComplete === false ? 'Incomplete' : 'N/A';
+  }
+  return inputTokens > 0 ? `${((cachedInputTokens / inputTokens) * 100).toFixed(1)}%` : 'N/A';
+}
+
+function stageSpecificMetrics(
+  metrics: DashboardStageMetrics,
+): Array<[string, number | null, string?]> {
   switch (metrics.stage) {
-    case "stage1":
+    case 'stage1':
       return [
-        ["Batches", metrics.batchCount],
-        ["Fallback batches", metrics.fallbackBatchCount],
-        ["Splits", metrics.splitCount],
-        ["Singleton batches", metrics.singletonBatchCount],
+        ['Batches', metrics.batchCount],
+        ['Fallback batches', metrics.fallbackBatchCount],
+        ['Splits', metrics.splitCount],
+        ['Singleton batches', metrics.singletonBatchCount],
       ];
-    case "stage2":
+    case 'stage2':
       return [
-        ["Candidates", metrics.candidateCount],
-        ["Groups", metrics.groupCount],
-        ["Warnings", metrics.warningCount, "Stage2 输出可安全使用，但发现重复归属、同组重复或未分组内容等非致命异常；这些异常不会阻断后续 Pipeline。"],
+        ['Candidates', metrics.candidateCount],
+        ['Groups', metrics.groupCount],
+        [
+          'Warnings',
+          metrics.warningCount,
+          'Stage2 输出可安全使用，但发现重复归属、同组重复或未分组内容等非致命异常；这些异常不会阻断后续 Pipeline。',
+        ],
       ];
-    case "stage3":
+    case 'stage3':
       return [
-        ["Event inputs", metrics.groupCount],
-        ["Selected events", metrics.selectedEventCount],
-        ["Digest before dedup", metrics.digestBeforeDedup],
-        ["Digest after dedup", metrics.digestAfterDedup],
-        ["Long-form", metrics.longFormCount],
-        ["Warnings", metrics.warningCount, "Stage3 Ranking 输出存在可确定性修复的非致命异常，例如重复或遗漏 ID；系统已规范化结果并继续 Pipeline。"],
+        ['Event inputs', metrics.groupCount],
+        ['Selected events', metrics.selectedEventCount],
+        ['Digest before dedup', metrics.digestBeforeDedup],
+        ['Digest after dedup', metrics.digestAfterDedup],
+        ['Long-form', metrics.longFormCount],
+        [
+          'Warnings',
+          metrics.warningCount,
+          'Stage3 Ranking 输出存在可确定性修复的非致命异常，例如重复或遗漏 ID；系统已规范化结果并继续 Pipeline。',
+        ],
       ];
-    case "stage4":
+    case 'stage4':
       return [
-        ["Selected input", metrics.selectedEventCount],
-        ["Ready", metrics.readyCount],
-        ["Drafts", metrics.draftCount],
-        ["Published", metrics.publishedCount],
-        ["Enrichment success", metrics.enrichmentSuccessCount],
-        ["Failed", metrics.enrichmentFailureCount],
-        ["Events created", metrics.eventsCreated],
-        ["Web Search Events", metrics.webSearchEventCount],
-        ["Web Search Calls", metrics.totalWebSearchCalls],
+        ['Selected input', metrics.selectedEventCount],
+        ['Ready', metrics.readyCount],
+        ['Drafts', metrics.draftCount],
+        ['Published', metrics.publishedCount],
+        ['Enrichment success', metrics.enrichmentSuccessCount],
+        ['Failed', metrics.enrichmentFailureCount],
+        ['Events created', metrics.eventsCreated],
+        ['Web Search Events', metrics.webSearchEventCount],
+        ['Web Search Calls', metrics.totalWebSearchCalls],
       ];
   }
 }
@@ -452,38 +665,51 @@ function stageSpecificMetrics(metrics: DashboardStageMetrics): Array<[string, nu
 function Metric({ label, value, info }: { label: string; value: string; info?: string }) {
   return (
     <div>
-      <dt>{label}{info ? <MetricInfo text={info} /> : null}</dt>
+      <dt>
+        {label}
+        {info ? <MetricInfo text={info} /> : null}
+      </dt>
       <dd>{value}</dd>
     </div>
   );
 }
 
-function StatusBadge({ status, partialReady = null }: { status: string | null; partialReady?: number | null }) {
-  const normalized = status?.toLowerCase() ?? "unknown";
+function StatusBadge({
+  status,
+  partialReady = null,
+}: {
+  status: string | null;
+  partialReady?: number | null;
+}) {
+  const normalized = status?.toLowerCase() ?? 'unknown';
   const className =
-    normalized === "success" || (normalized === "partial" && (partialReady ?? 0) > 0)
+    normalized === 'success' || (normalized === 'partial' && (partialReady ?? 0) > 0)
       ? styles.successBadge
-      : normalized === "failed"
+      : normalized === 'failed'
         ? styles.failedBadge
         : styles.naBadge;
-  return <span className={className}>{normalized === "partial" && (partialReady ?? 0) > 0 ? "partial success" : status ?? "N/A"}</span>;
+  return (
+    <span className={className}>
+      {normalized === 'partial' && (partialReady ?? 0) > 0 ? 'partial success' : (status ?? 'N/A')}
+    </span>
+  );
 }
 
 function formatNumber(value: number): string {
-  return new Intl.NumberFormat("en-US").format(value);
+  return new Intl.NumberFormat('en-US').format(value);
 }
 
 function formatMetric(value: number | null | undefined): string {
-  return value === null || value === undefined ? "N/A" : formatNumber(value);
+  return value === null || value === undefined ? 'N/A' : formatNumber(value);
 }
 
 function formatPercentage(value: number, total: number): string {
-  return total === 0 ? "N/A" : `${((value / total) * 100).toFixed(1)}%`;
+  return total === 0 ? 'N/A' : `${((value / total) * 100).toFixed(1)}%`;
 }
 
 function formatDuration(value: number | null | undefined): string {
   if (value === null || value === undefined) {
-    return "N/A";
+    return 'N/A';
   }
   if (value < 1_000) {
     return `${value}ms`;

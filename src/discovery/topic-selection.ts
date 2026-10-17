@@ -23,7 +23,13 @@ import {
   resolveDiscoveryLlmTimeout,
   toDiscoveryRequestOptions,
 } from './llm-config.js';
-import { getDiscoveryRun } from './run-service.js';
+import {
+  buildDiscoveryStageState,
+  initialDiscoveryStageState,
+  stageHasHistoricConfig,
+  usageFromLlmResponse,
+} from './execution-diagnostics.js';
+import { getDiscoveryRun, updateDiscoveryBranchExecutionState } from './run-service.js';
 
 export type DiscoveryDirectLead = {
   leadId: string;
@@ -147,6 +153,26 @@ export async function runDiscoveryD2(
   const request = options.request ?? client?.structured.create;
   if (!request) throw new Error('D2 LLM request function is unavailable.');
 
+  const metadata = { provider, model, apiMode: 'chat_completions' };
+  const prior = initialDiscoveryStageState(
+    run.executionState.d2,
+    stageHasHistoricConfig(run.configSnapshot, 'd2'),
+  );
+  const stageStartedAt = Date.now();
+  await updateDiscoveryBranchExecutionState(
+    pool,
+    runId,
+    'd2',
+    buildDiscoveryStageState({
+      status: 'running',
+      endReason: null,
+      errorSummary: null,
+      metadata,
+      prior,
+    }),
+  );
+  let responseUsage: LlmResponse['usage'] | null = null;
+
   try {
     const requestStartedAt = Date.now();
     const response = await request(
@@ -168,16 +194,32 @@ export async function runDiscoveryD2(
       },
       toDiscoveryRequestOptions(timeoutMs),
     );
+    responseUsage = response.usage ?? null;
 
     const validatedSelection = parseAndValidateDiscoveryD2Output(response.output_text, input);
     const selection = await attachDirectLeadUrls(pool, validatedSelection);
-    await persistDiscoveryD2Output(pool, runId, selection, {
-      provider,
-      model,
-      timeoutMs,
-      promptVersion: DISCOVERY_D2_PROMPT_VERSION,
-      editorialPromptVersion: DISCOVERY_EDITORIAL_PROMPT_VERSION,
-    });
+    await persistDiscoveryD2Output(
+      pool,
+      runId,
+      selection,
+      {
+        provider,
+        model,
+        timeoutMs,
+        promptVersion: DISCOVERY_D2_PROMPT_VERSION,
+        editorialPromptVersion: DISCOVERY_EDITORIAL_PROMPT_VERSION,
+      },
+      buildDiscoveryStageState({
+        status: 'completed',
+        endReason: selection.leads.length > 0 ? 'candidates_found' : 'no_candidates',
+        errorSummary: null,
+        metadata: { ...metadata, apiMode: response.api_mode },
+        prior,
+        attemptUsage: usageFromLlmResponse(responseUsage),
+        attemptElapsedMs: Date.now() - stageStartedAt,
+        completedAt: new Date().toISOString(),
+      }),
+    );
 
     return {
       selection,
@@ -188,8 +230,25 @@ export async function runDiscoveryD2(
       apiMode: response.api_mode,
       requestElapsedMs: Date.now() - requestStartedAt,
       timeoutMs,
-      tokenUsage: response.usage ?? null,
+      tokenUsage: responseUsage,
     };
+  } catch (error) {
+    await updateDiscoveryBranchExecutionState(
+      pool,
+      runId,
+      'd2',
+      buildDiscoveryStageState({
+        status: 'failed',
+        endReason: 'error',
+        errorSummary: toErrorMessage(error),
+        metadata,
+        prior,
+        attemptUsage: usageFromLlmResponse(responseUsage),
+        attemptElapsedMs: Date.now() - stageStartedAt,
+        completedAt: new Date().toISOString(),
+      }),
+    );
+    throw error;
   } finally {
     await client?.close();
   }
@@ -366,6 +425,7 @@ async function persistDiscoveryD2Output(
   runId: string,
   selection: DiscoverySelectionOutput,
   config: Record<string, unknown>,
+  executionState: Parameters<typeof updateDiscoveryBranchExecutionState>[3],
 ): Promise<void> {
   const client = await pool.connect();
   try {
@@ -399,6 +459,7 @@ async function persistDiscoveryD2Output(
         },
       });
     }
+    await updateDiscoveryBranchExecutionState(client, runId, 'd2', executionState);
     await client.query('commit');
   } catch (error) {
     await client.query('rollback');
@@ -406,6 +467,10 @@ async function persistDiscoveryD2Output(
   } finally {
     client.release();
   }
+}
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {

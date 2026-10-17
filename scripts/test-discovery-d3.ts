@@ -7,6 +7,10 @@ import {
   startDiscoveryRun,
 } from '../src/discovery/run-service.js';
 import { DiscoveryD3ExecutionError, runDiscoveryD3 } from '../src/discovery/topic-discovery.js';
+import {
+  discoveryCacheHitRate,
+  normalizeDiscoveryStageUsage,
+} from '../src/discovery/execution-diagnostics.js';
 
 loadPipelineEnvironment();
 
@@ -81,6 +85,7 @@ async function main(): Promise<void> {
             traceIds: result.traceIds,
             traceFlushed: result.traceFlushed,
           },
+          executionDiagnostics: formatStageExecution(current?.executionState.d3),
           candidates: await loadD3Candidates(pool, runId),
         },
         null,
@@ -163,6 +168,33 @@ function safeError(error: unknown): string {
     .replace(/Bearer\s+\S+/gi, 'Bearer ***')
     .replace(/sk-[A-Za-z0-9_.-]+/g, 'sk-***')
     .slice(0, 2_000);
+}
+
+function formatStageExecution(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const state = value as Record<string, unknown>;
+  const usage = normalizeDiscoveryStageUsage(state.usage);
+  return {
+    status: state.status ?? null,
+    endReason: state.endReason ?? null,
+    provider: state.provider ?? null,
+    model: state.model ?? null,
+    apiMode: state.apiMode ?? null,
+    elapsedMs: state.elapsedMs ?? null,
+    errorSummary: state.errorSummary ?? null,
+    usage: {
+      requests: usage.requests,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      totalTokens:
+        usage.inputTokens === null || usage.outputTokens === null
+          ? null
+          : usage.inputTokens + usage.outputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      cacheHitRate: discoveryCacheHitRate(usage),
+      usageComplete: usage.usageComplete,
+    },
+  };
 }
 
 main().catch((error) => {

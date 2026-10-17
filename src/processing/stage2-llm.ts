@@ -9,21 +9,24 @@ import {
   resolveStageLlmProvider,
   type LlmProvider,
   type LlmResponse,
-} from "./llm-client.js";
-import {
-  stage2OutputJsonSchema,
-  type Stage2Input,
-  type Stage2Output,
-} from "./stage2-contract.js";
+} from './llm-client.js';
+import { stage2OutputJsonSchema, type Stage2Input, type Stage2Output } from './stage2-contract.js';
 import {
   buildStage2Instructions,
   buildStage2UserPrompt,
   STAGE2_PROMPT_VERSION,
-} from "../prompts/stage2-event-merge.js";
+} from '../prompts/stage2-event-merge.js';
 import {
   resolveStage2MaxOutputTokens,
   resolveStageLlmRuntimeConfig,
-} from "./stage-llm-runtime-config.js";
+} from './stage-llm-runtime-config.js';
+import {
+  emptyLlmTokenUsage,
+  mergeLlmTokenUsage,
+  missingLlmTokenUsage,
+  usageFromProvider,
+  type LlmTokenUsage,
+} from './llm-token-usage.js';
 
 export type Stage2LlmOptions = {
   provider?: LlmProvider;
@@ -37,12 +40,12 @@ export type Stage2LlmOptions = {
 type Stage2ResponseRequest = {
   model: string;
   instructions: string;
-  input: Array<{ role: string; content: Array<{ type: "input_text"; text: string }> }>;
+  input: Array<{ role: string; content: Array<{ type: 'input_text'; text: string }> }>;
   max_output_tokens: number;
   store: boolean;
   text: {
     format: {
-      type: "json_schema";
+      type: 'json_schema';
       name: string;
       description: string;
       schema: typeof stage2OutputJsonSchema;
@@ -61,11 +64,7 @@ export type Stage2LlmAttempt = {
   error: string | null;
 };
 
-export type Stage2TokenUsage = {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-};
+export type Stage2TokenUsage = LlmTokenUsage;
 
 export type Stage2LlmSuccess = {
   success: true;
@@ -106,13 +105,11 @@ export async function runStage2MergeLlm(
   input: Stage2Input,
   options: Stage2LlmOptions = {},
 ): Promise<Stage2LlmResult> {
-  const provider = options.provider ?? resolveStageLlmProvider("stage2");
-  const model = options.model ?? (
-    options.provider
-      ? resolveLlmModel(undefined, provider)
-      : resolveStageLlmModel("stage2")
-  );
-  const runtimeConfig = resolveStageLlmRuntimeConfig("stage2");
+  const provider = options.provider ?? resolveStageLlmProvider('stage2');
+  const model =
+    options.model ??
+    (options.provider ? resolveLlmModel(undefined, provider) : resolveStageLlmModel('stage2'));
+  const runtimeConfig = resolveStageLlmRuntimeConfig('stage2');
   const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
   const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
   const maxOutputTokens = resolveStage2MaxOutputTokens();
@@ -120,14 +117,14 @@ export async function runStage2MergeLlm(
   const client = options.request ? null : createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const request = options.request ?? client?.responses.create;
   if (!request) {
-    throw new Error("Stage 2 LLM request function is unavailable.");
+    throw new Error('Stage 2 LLM request function is unavailable.');
   }
   const startedAt = Date.now();
 
   let rawOutputText: string | null = null;
-  let lastError = "Unknown Stage 2 LLM failure.";
+  let lastError = 'Unknown Stage 2 LLM failure.';
   let attemptsUsed = 0;
-  let tokenUsage: Stage2TokenUsage | null = null;
+  let tokenUsage = emptyLlmTokenUsage();
   let finishReason: string | null = null;
   const attemptLog: Stage2LlmAttempt[] = [];
 
@@ -141,10 +138,10 @@ export async function runStage2MergeLlm(
           instructions: buildStage2Instructions(),
           input: [
             {
-              role: "user",
+              role: 'user',
               content: [
                 {
-                  type: "input_text",
+                  type: 'input_text',
                   text: buildStage2UserPrompt(input),
                 },
               ],
@@ -154,9 +151,9 @@ export async function runStage2MergeLlm(
           store: false,
           text: {
             format: {
-              type: "json_schema",
-              name: "stage2_event_merge",
-              description: "Structured Stage 2 event groups.",
+              type: 'json_schema',
+              name: 'stage2_event_merge',
+              description: 'Structured Stage 2 event groups.',
               schema: stage2OutputJsonSchema,
               strict: true,
             },
@@ -178,13 +175,7 @@ export async function runStage2MergeLlm(
       });
 
       rawOutputText = response.output_text;
-      tokenUsage = response.usage
-        ? {
-            inputTokens: response.usage.input_tokens,
-            outputTokens: response.usage.output_tokens,
-            totalTokens: response.usage.total_tokens,
-          }
-        : null;
+      tokenUsage = mergeLlmTokenUsage(tokenUsage, usageFromProvider(response.usage));
       finishReason = response.finish_reason ?? null;
 
       // Temporary diagnostic mode: keep the provider's Stage 2 grouping even when
@@ -200,12 +191,13 @@ export async function runStage2MergeLlm(
         responseId: response.id,
         attempts: attempt,
         elapsedMs: Date.now() - startedAt,
-        tokenUsage,
+        tokenUsage: attemptsUsed > 0 ? tokenUsage : null,
         finishReason,
         rawOutputText,
         attemptLog,
       };
     } catch (error) {
+      tokenUsage = mergeLlmTokenUsage(tokenUsage, missingLlmTokenUsage());
       lastError = sanitizeLlmError(error instanceof Error ? error.message : String(error));
       const diagnostic = diagnoseLlmError(error, lastError);
       attemptLog.push({
@@ -233,7 +225,7 @@ export async function runStage2MergeLlm(
     promptVersion: STAGE2_PROMPT_VERSION,
     attempts: attemptsUsed,
     elapsedMs: Date.now() - startedAt,
-    tokenUsage,
+    tokenUsage: attemptsUsed > 0 ? tokenUsage : null,
     finishReason,
     error: `Attempts: ${attemptsUsed}, Retries: ${Math.max(0, attemptsUsed - 1)}. ${lastError}`,
     rawOutputText,
@@ -243,9 +235,9 @@ export async function runStage2MergeLlm(
 
 function isNonRetryableLlmError(errorMessage: string): boolean {
   return (
-    errorMessage.includes("401") ||
-    errorMessage.includes("Incorrect API key") ||
-    errorMessage.includes("invalid_api_key") ||
+    errorMessage.includes('401') ||
+    errorMessage.includes('Incorrect API key') ||
+    errorMessage.includes('invalid_api_key') ||
     /\bauthentication(?:\s+failed)?\b/i.test(errorMessage) ||
     /\bunauthorized\b/i.test(errorMessage)
   );
@@ -254,34 +246,38 @@ function isNonRetryableLlmError(errorMessage: string): boolean {
 function diagnoseLlmError(
   error: unknown,
   fallbackMessage: string,
-): Omit<Stage2LlmAttempt, "attempt" | "provider" | "durationMs" | "error"> {
+): Omit<Stage2LlmAttempt, 'attempt' | 'provider' | 'durationMs' | 'error'> {
   const message = error instanceof Error ? error.message : fallbackMessage;
-  const prefix = "LLM HTTP request failed: ";
+  const prefix = 'LLM HTTP request failed: ';
   if (message.startsWith(prefix)) {
     try {
       const diagnostic = JSON.parse(message.slice(prefix.length)) as {
         response?: { status?: unknown; code?: unknown; type?: unknown };
       };
       return {
-        statusCode: typeof diagnostic.response?.status === "number" ? diagnostic.response.status : null,
-        errorCode: typeof diagnostic.response?.code === "string" ? diagnostic.response.code : null,
-        errorType: typeof diagnostic.response?.type === "string" ? diagnostic.response.type : null,
+        statusCode:
+          typeof diagnostic.response?.status === 'number' ? diagnostic.response.status : null,
+        errorCode: typeof diagnostic.response?.code === 'string' ? diagnostic.response.code : null,
+        errorType: typeof diagnostic.response?.type === 'string' ? diagnostic.response.type : null,
       };
     } catch {
       // Preserve the sanitized error even when a proxy returned malformed diagnostic data.
     }
   }
 
-  const value = typeof error === "object" && error !== null ? error as { name?: unknown; code?: unknown; status?: unknown } : {};
+  const value =
+    typeof error === 'object' && error !== null
+      ? (error as { name?: unknown; code?: unknown; status?: unknown })
+      : {};
   return {
-    statusCode: typeof value.status === "number" ? value.status : null,
-    errorCode: typeof value.code === "string" ? value.code : null,
-    errorType: typeof value.name === "string" ? value.name : null,
+    statusCode: typeof value.status === 'number' ? value.status : null,
+    errorCode: typeof value.code === 'string' ? value.code : null,
+    errorType: typeof value.name === 'string' ? value.name : null,
   };
 }
 
 function sanitizeLlmError(errorMessage: string): string {
-  return errorMessage.replace(/sk-[A-Za-z0-9_*.-]+/g, "[redacted_api_key]");
+  return errorMessage.replace(/sk-[A-Za-z0-9_*.-]+/g, '[redacted_api_key]');
 }
 
 function sleep(ms: number): Promise<void> {

@@ -2,17 +2,17 @@
  * Stage 4 Workflow job：读取 Stage 3 选中的 Event、执行 enrichment，并重建最终 events。
  * Daily 运行传入本次 Stage 3 runtime，单独运行才回退到最近成功 artifact。
  */
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import type { Pool } from "pg";
-import { resolveStageLlmModel } from "./llm-client.js";
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { Pool } from 'pg';
+import { resolveStageLlmModel } from './llm-client.js';
 import {
   enrichStage4Event,
   loadStage4SourceCandidates,
   prepareStage4Event,
   type EnrichedStage4Event,
   Stage4EnrichmentError,
-} from "./stage4-event-processing.js";
+} from './stage4-event-processing.js';
 import {
   persistStage4Events,
   loadDraftReviewItemIds,
@@ -23,11 +23,12 @@ import {
   updateStage4RunProgress,
   type Stage4EventToPersist,
   type Stage4PersistenceResult,
-} from "./stage4-persistence.js";
-import { DEFAULT_STAGE4_EVENT_LIMIT } from "./stage4-config.js";
-import { classifyStage4LlmError, type Stage4TokenUsage } from "./stage4-llm.js";
-import { STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION } from "../prompts/stage4-event-enrichment.js";
-import { resolveDailyScope } from "../lib/daily-scope.js";
+} from './stage4-persistence.js';
+import { DEFAULT_STAGE4_EVENT_LIMIT } from './stage4-config.js';
+import { classifyStage4LlmError, type Stage4TokenUsage } from './stage4-llm.js';
+import { emptyLlmTokenUsage, mergeLlmTokenUsage } from './llm-token-usage.js';
+import { STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION } from '../prompts/stage4-event-enrichment.js';
+import { resolveDailyScope } from '../lib/daily-scope.js';
 
 type Stage3RunArtifact = {
   status?: string;
@@ -109,10 +110,10 @@ export async function processStage4(
   const rootDir = options.rootDir ?? process.cwd();
   const startedAt = new Date();
   const runId = toRunTimestamp(startedAt);
-  const runDir = join(rootDir, "runtime/stage4", runId);
-  const eventsDir = join(runDir, "events");
-  const runPath = join(runDir, "run.json");
-  const model = resolveStageLlmModel("stage4", options.model);
+  const runDir = join(rootDir, 'runtime/stage4', runId);
+  const eventsDir = join(runDir, 'events');
+  const runPath = join(runDir, 'run.json');
+  const model = resolveStageLlmModel('stage4', options.model);
   const concurrency = options.concurrency ?? DEFAULT_STAGE4_CONCURRENCY;
 
   await mkdir(eventsDir, { recursive: true });
@@ -133,17 +134,17 @@ export async function processStage4(
     duplicateProcessedContentIds: 0,
   };
   let persistence: Stage4PersistenceResult | null = null;
-  let persistenceStatus: "not_started" | "success" | "failed" = "not_started";
+  let persistenceStatus: 'not_started' | 'success' | 'failed' = 'not_started';
   let error: string | null = null;
 
   try {
     sourceStage3RunDir = await loadLatestSuccessfulStage3RunDir(rootDir, options.stage3RunDir);
-    const stage3Run = await readJson<Stage3RunArtifact>(join(sourceStage3RunDir!, "run.json"));
+    const stage3Run = await readJson<Stage3RunArtifact>(join(sourceStage3RunDir!, 'run.json'));
     const selected = await readJson<Stage3SelectedEventsArtifact>(
-      join(sourceStage3RunDir!, "events/selected.json"),
+      join(sourceStage3RunDir!, 'events/selected.json'),
     );
     selectedEventCount = selected.events.length;
-    await writeJson(join(runDir, "selected-events.json"), selected);
+    await writeJson(join(runDir, 'selected-events.json'), selected);
 
     const allProcessedContentIds = Object.values(selected.idMap).flat();
     associationCoverage.expected = allProcessedContentIds.length;
@@ -175,8 +176,8 @@ export async function processStage4(
     for (const item of eventInputs) {
       const eventDir = join(eventsDir, item.group.eventGroupId);
       await mkdir(eventDir, { recursive: true });
-      await writeJson(join(eventDir, "input.json"), item.input);
-      await writeJson(join(eventDir, "mapping.json"), {
+      await writeJson(join(eventDir, 'input.json'), item.input);
+      await writeJson(join(eventDir, 'mapping.json'), {
         event_group_id: item.group.eventGroupId,
         event_review_item_id: item.group.eventReviewItemId,
         rank: item.group.displayRank,
@@ -194,9 +195,9 @@ export async function processStage4(
         llmCalls += 1;
         retryCount += result.llm.attempts - 1;
         llmDurationMs += result.llm.elapsedMs;
-        await writeJson(join(eventDir, "output.json"), result.output);
-        await writeJson(join(eventDir, "raw-output.json"), result.llm.rawStructuredOutput);
-        await writeJson(join(eventDir, "tool-usage.json"), result.toolUsage);
+        await writeJson(join(eventDir, 'output.json'), result.output);
+        await writeJson(join(eventDir, 'raw-output.json'), result.llm.rawStructuredOutput);
+        await writeJson(join(eventDir, 'tool-usage.json'), result.toolUsage);
         return result;
       } catch (caught) {
         const error = caught instanceof Error ? caught.message : String(caught);
@@ -205,7 +206,7 @@ export async function processStage4(
           retryCount += Math.max(0, caught.attempts - 1);
           llmDurationMs += caught.elapsedMs;
         }
-        await writeJson(join(eventDir, "failure.json"), {
+        await writeJson(join(eventDir, 'failure.json'), {
           error,
           attempts: caught instanceof Stage4EnrichmentError ? caught.attempts : null,
           raw_output_text: caught instanceof Stage4EnrichmentError ? caught.rawOutputText : null,
@@ -220,9 +221,7 @@ export async function processStage4(
       (sum, event) => sum + event.toolUsage.webSearchCallCount,
       0,
     );
-    const rebuildEventDates = uniqueSorted(
-      enriched.map((event) => event.eventDate.eventDate),
-    );
+    const rebuildEventDates = uniqueSorted(enriched.map((event) => event.eventDate.eventDate));
     const previousCreatedEventIds = await loadPreviousCreatedEventIds(
       rootDir,
       runDir,
@@ -232,7 +231,7 @@ export async function processStage4(
       previousCreatedEventIds,
       events: enriched.map(toEventToPersist),
     };
-    await writeJson(join(runDir, "persistence-plan.json"), {
+    await writeJson(join(runDir, 'persistence-plan.json'), {
       rebuild_event_dates: rebuildEventDates,
       previous_created_event_ids: previousCreatedEventIds,
       events: persistencePlan.events.map((event) => ({
@@ -245,21 +244,21 @@ export async function processStage4(
       })),
     });
 
-    persistenceStatus = "failed";
+    persistenceStatus = 'failed';
     const client = await pool.connect();
     try {
-      await client.query("begin");
+      await client.query('begin');
       persistence = await persistStage4Events(client, persistencePlan);
-      await client.query("commit");
-      persistenceStatus = "success";
+      await client.query('commit');
+      persistenceStatus = 'success';
     } catch (caught) {
-      await client.query("rollback");
+      await client.query('rollback');
       throw caught;
     } finally {
       client.release();
     }
 
-    if (!persistence) throw new Error("Stage 4 persistence did not return a result.");
+    if (!persistence) throw new Error('Stage 4 persistence did not return a result.');
     const persisted = persistence!;
     eventsCreated = persisted.createdEventIds.length;
     processedContentEventIdUpdated = persisted.associations.reduce(
@@ -270,7 +269,7 @@ export async function processStage4(
       ...associationCoverage,
       updated: processedContentEventIdUpdated,
     };
-    await writeJson(join(runDir, "persistence.json"), {
+    await writeJson(join(runDir, 'persistence.json'), {
       created_event_ids: persisted.createdEventIds,
       event_group_to_event_id: persisted.eventGroupToEventId,
       associations: persisted.associations,
@@ -287,7 +286,7 @@ export async function processStage4(
       finishedAt: new Date(),
       model,
       concurrency,
-      status: "success",
+      status: 'success',
       selectedEventCount,
       enrichmentSuccessCount,
       llmCalls,
@@ -329,7 +328,7 @@ export async function processStage4(
       finishedAt: new Date(),
       model,
       concurrency,
-      status: "failed",
+      status: 'failed',
       selectedEventCount,
       enrichmentSuccessCount,
       llmCalls,
@@ -365,29 +364,71 @@ export async function processStage4(
   }
 }
 
-async function processStage4FromDb(pool: Pool, options: Stage4JobOptions): Promise<Stage4JobResult> {
+async function processStage4FromDb(
+  pool: Pool,
+  options: Stage4JobOptions,
+): Promise<Stage4JobResult> {
   const rootDir = options.rootDir ?? process.cwd();
   const startedAt = new Date();
-  const runDir = join(rootDir, "runtime/stage4", toRunTimestamp(startedAt));
-  const eventsDir = join(runDir, "events");
+  const runDir = join(rootDir, 'runtime/stage4', toRunTimestamp(startedAt));
+  const eventsDir = join(runDir, 'events');
   const dailyDate = options.dailyDate ?? resolveDailyScope(undefined, startedAt).dailyDate;
-  const model = resolveStageLlmModel("stage4", options.model);
+  const model = resolveStageLlmModel('stage4', options.model);
   await mkdir(eventsDir, { recursive: true });
-  let selectedEventCount = 0, enrichmentSuccessCount = 0, llmCalls = 0, retryCount = 0, llmDurationMs = 0, webSearchEventCount = 0, totalWebSearchCalls = 0;
-  let tokenUsage: Stage4TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-  let hasMissingTokenUsage = false;
+  let selectedEventCount = 0,
+    enrichmentSuccessCount = 0,
+    llmCalls = 0,
+    retryCount = 0,
+    llmDurationMs = 0,
+    webSearchEventCount = 0,
+    totalWebSearchCalls = 0;
+  let tokenUsage: Stage4TokenUsage = emptyLlmTokenUsage();
   const emptyCoverage = { expected: 0, updated: 0, duplicateProcessedContentIds: 0 };
   try {
     const selected = await loadLatestStage4Selection(pool, dailyDate, DEFAULT_STAGE4_EVENT_LIMIT);
     selectedEventCount = selected.length;
     if (selected.length === 0) {
-      await writeRunJson(join(runDir, "run.json"), stage4RuntimeArtifact({
-        startedAt, finishedAt: new Date(), status: "success", dailyDate, stage4RunId: null,
-        model, selectedEventCount: 0, enrichmentSuccessCount: 0, enrichmentFailureCount: 0,
-        llmCalls: 0, retryCount: 0, llmDurationMs: 0, webSearchEventCount: 0,
-        totalWebSearchCalls: 0, eventsCreated: 0, tokenUsage, error: null,
-      }));
-      return { success: true, runDir, sourceStage3RunDir: null, selectedEventCount: 0, enrichmentSuccessCount: 0, enrichmentFailureCount: 0, llmCalls: 0, retryCount: 0, llmDurationMs: 0, tokenUsage, webSearchEventCount: 0, totalWebSearchCalls: 0, eventsCreated: 0, processedContentEventIdUpdated: 0, associationCoverage: emptyCoverage, persistence: null, error: null };
+      await writeRunJson(
+        join(runDir, 'run.json'),
+        stage4RuntimeArtifact({
+          startedAt,
+          finishedAt: new Date(),
+          status: 'success',
+          dailyDate,
+          stage4RunId: null,
+          model,
+          selectedEventCount: 0,
+          enrichmentSuccessCount: 0,
+          enrichmentFailureCount: 0,
+          llmCalls: 0,
+          retryCount: 0,
+          llmDurationMs: 0,
+          webSearchEventCount: 0,
+        totalWebSearchCalls: 0,
+        eventsCreated: 0,
+        tokenUsage: null,
+          error: null,
+        }),
+      );
+      return {
+        success: true,
+        runDir,
+        sourceStage3RunDir: null,
+        selectedEventCount: 0,
+        enrichmentSuccessCount: 0,
+        enrichmentFailureCount: 0,
+        llmCalls: 0,
+        retryCount: 0,
+        llmDurationMs: 0,
+        tokenUsage: null,
+        webSearchEventCount: 0,
+        totalWebSearchCalls: 0,
+        eventsCreated: 0,
+        processedContentEventIdUpdated: 0,
+        associationCoverage: emptyCoverage,
+        persistence: null,
+        error: null,
+      };
     }
     const reviewRunId = selected[0]!.reviewRunId;
     const stage4Run = await loadOrCreateStage4Run(pool, dailyDate, reviewRunId, selected.length);
@@ -398,99 +439,233 @@ async function processStage4FromDb(pool: Pool, options: Stage4JobOptions): Promi
     for (const item of selected) {
       const eventDir = join(eventsDir, item.eventGroupId);
       await mkdir(eventDir, { recursive: true });
-      if (drafted.has(item.reviewItemId)) { enrichmentSuccessCount++; continue; }
-      const prepared = prepareStage4Event({ eventGroupId: item.eventGroupId, eventReviewItemId: item.reviewItemId, eventHint: item.eventHint, aiRank: item.aiRank, displayRank: item.displayRank, processedContentIds: item.processedContentIds }, sourceCandidates, startedAt, dailyDate);
-      await writeJson(join(eventDir, "input.json"), prepared.input);
+      if (drafted.has(item.reviewItemId)) {
+        enrichmentSuccessCount++;
+        continue;
+      }
+      const prepared = prepareStage4Event(
+        {
+          eventGroupId: item.eventGroupId,
+          eventReviewItemId: item.reviewItemId,
+          eventHint: item.eventHint,
+          aiRank: item.aiRank,
+          displayRank: item.displayRank,
+          processedContentIds: item.processedContentIds,
+        },
+        sourceCandidates,
+        startedAt,
+        dailyDate,
+      );
+      await writeJson(join(eventDir, 'input.json'), prepared.input);
       try {
         const enriched = await enrichStage4Event(prepared, { model });
         llmCalls += enriched.llm.llmCallCount;
         retryCount += enriched.llm.attempts - 1;
         llmDurationMs += enriched.llm.llmDurationMs;
-        ({ tokenUsage, hasMissingTokenUsage } = addStage4TokenUsage(tokenUsage, hasMissingTokenUsage, enriched.llm.tokenUsage));
+        tokenUsage = addStage4TokenUsage(tokenUsage, enriched.llm.tokenUsage);
         if (enriched.toolUsage.webSearchPerformed) webSearchEventCount++;
         totalWebSearchCalls += enriched.toolUsage.webSearchCallCount;
         const inserted = await persistStage4Draft(pool, stage4Run.id, toEventToPersist(enriched));
         if (inserted || drafted.has(item.reviewItemId)) enrichmentSuccessCount++;
-        await writeJson(join(eventDir, "output.json"), enriched.output);
+        await writeJson(join(eventDir, 'output.json'), enriched.output);
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : String(caught);
         if (caught instanceof Stage4EnrichmentError) {
           llmCalls += caught.llmCallCount;
           retryCount += Math.max(0, caught.attempts - 1);
           llmDurationMs += caught.llmDurationMs;
-          ({ tokenUsage, hasMissingTokenUsage } = addStage4TokenUsage(tokenUsage, hasMissingTokenUsage, caught.tokenUsage));
+          tokenUsage = addStage4TokenUsage(tokenUsage, caught.tokenUsage);
         }
         failures.push(message);
-        await writeJson(join(eventDir, "failure.json"), { error: message });
-        if (classifyStage4LlmError(message) === "quota_or_auth_unavailable") break;
+        await writeJson(join(eventDir, 'failure.json'), { error: message });
+        if (classifyStage4LlmError(message) === 'quota_or_auth_unavailable') break;
       }
     }
     if (failures.length) {
-      await updateStage4RunProgress(pool, stage4Run.id, "partial");
-      await writeRunJson(join(runDir, "run.json"), stage4RuntimeArtifact({
-        startedAt, finishedAt: new Date(), status: "partial", dailyDate, stage4RunId: stage4Run.id,
-        model, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: failures.length,
-        llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls,
-        eventsCreated: 0, tokenUsage: hasMissingTokenUsage ? null : tokenUsage, error: failures.join("; "),
-      }));
-      return { success: false, runDir, sourceStage3RunDir: null, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: failures.length, llmCalls, retryCount, llmDurationMs, tokenUsage: hasMissingTokenUsage ? null : tokenUsage, webSearchEventCount, totalWebSearchCalls, eventsCreated: 0, processedContentEventIdUpdated: 0, associationCoverage: { ...emptyCoverage, expected: candidateIds.length }, persistence: null, error: failures.join("; ") };
+      await updateStage4RunProgress(pool, stage4Run.id, 'partial');
+      await writeRunJson(
+        join(runDir, 'run.json'),
+        stage4RuntimeArtifact({
+          startedAt,
+          finishedAt: new Date(),
+          status: 'partial',
+          dailyDate,
+          stage4RunId: stage4Run.id,
+          model,
+          selectedEventCount,
+          enrichmentSuccessCount,
+          enrichmentFailureCount: failures.length,
+          llmCalls,
+          retryCount,
+          llmDurationMs,
+          webSearchEventCount,
+          totalWebSearchCalls,
+          eventsCreated: 0,
+          tokenUsage: llmCalls > 0 ? tokenUsage : null,
+          error: failures.join('; '),
+        }),
+      );
+      return {
+        success: false,
+        runDir,
+        sourceStage3RunDir: null,
+        selectedEventCount,
+        enrichmentSuccessCount,
+        enrichmentFailureCount: failures.length,
+        llmCalls,
+        retryCount,
+        llmDurationMs,
+        tokenUsage: llmCalls > 0 ? tokenUsage : null,
+        webSearchEventCount,
+        totalWebSearchCalls,
+        eventsCreated: 0,
+        processedContentEventIdUpdated: 0,
+        associationCoverage: { ...emptyCoverage, expected: candidateIds.length },
+        persistence: null,
+        error: failures.join('; '),
+      };
     }
     const published = await publishStage4Run(pool, stage4Run.id);
-    await writeRunJson(join(runDir, "run.json"), stage4RuntimeArtifact({
-      startedAt, finishedAt: new Date(), status: "success", dailyDate, stage4RunId: stage4Run.id,
-      model, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: 0,
-      llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls,
-      eventsCreated: published.publishedCount, tokenUsage: hasMissingTokenUsage ? null : tokenUsage, error: null,
-    }));
-    return { success: true, runDir, sourceStage3RunDir: null, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: 0, llmCalls, retryCount, llmDurationMs, tokenUsage: hasMissingTokenUsage ? null : tokenUsage, webSearchEventCount, totalWebSearchCalls, eventsCreated: published.publishedCount, processedContentEventIdUpdated: published.associationCount, associationCoverage: { ...emptyCoverage, expected: candidateIds.length, updated: published.associationCount }, persistence: null, error: null };
+    await writeRunJson(
+      join(runDir, 'run.json'),
+      stage4RuntimeArtifact({
+        startedAt,
+        finishedAt: new Date(),
+        status: 'success',
+        dailyDate,
+        stage4RunId: stage4Run.id,
+        model,
+        selectedEventCount,
+        enrichmentSuccessCount,
+        enrichmentFailureCount: 0,
+        llmCalls,
+        retryCount,
+        llmDurationMs,
+        webSearchEventCount,
+        totalWebSearchCalls,
+        eventsCreated: published.publishedCount,
+        tokenUsage: llmCalls > 0 ? tokenUsage : null,
+        error: null,
+      }),
+    );
+    return {
+      success: true,
+      runDir,
+      sourceStage3RunDir: null,
+      selectedEventCount,
+      enrichmentSuccessCount,
+      enrichmentFailureCount: 0,
+      llmCalls,
+      retryCount,
+      llmDurationMs,
+      tokenUsage: llmCalls > 0 ? tokenUsage : null,
+      webSearchEventCount,
+      totalWebSearchCalls,
+      eventsCreated: published.publishedCount,
+      processedContentEventIdUpdated: published.associationCount,
+      associationCoverage: {
+        ...emptyCoverage,
+        expected: candidateIds.length,
+        updated: published.associationCount,
+      },
+      persistence: null,
+      error: null,
+    };
   } catch (caught) {
     const error = caught instanceof Error ? caught.message : String(caught);
-    await writeRunJson(join(runDir, "run.json"), stage4RuntimeArtifact({
-      startedAt, finishedAt: new Date(), status: "failed", dailyDate, stage4RunId: null,
-      model, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: 0,
-      llmCalls, retryCount, llmDurationMs, webSearchEventCount, totalWebSearchCalls,
-      eventsCreated: 0, tokenUsage: hasMissingTokenUsage ? null : tokenUsage, error,
-    }));
-    return { success: false, runDir, sourceStage3RunDir: null, selectedEventCount, enrichmentSuccessCount, enrichmentFailureCount: 0, llmCalls, retryCount, llmDurationMs, tokenUsage: hasMissingTokenUsage ? null : tokenUsage, webSearchEventCount, totalWebSearchCalls, eventsCreated: 0, processedContentEventIdUpdated: 0, associationCoverage: emptyCoverage, persistence: null, error };
+    await writeRunJson(
+      join(runDir, 'run.json'),
+      stage4RuntimeArtifact({
+        startedAt,
+        finishedAt: new Date(),
+        status: 'failed',
+        dailyDate,
+        stage4RunId: null,
+        model,
+        selectedEventCount,
+        enrichmentSuccessCount,
+        enrichmentFailureCount: 0,
+        llmCalls,
+        retryCount,
+        llmDurationMs,
+        webSearchEventCount,
+        totalWebSearchCalls,
+        eventsCreated: 0,
+        tokenUsage: llmCalls > 0 ? tokenUsage : null,
+        error,
+      }),
+    );
+    return {
+      success: false,
+      runDir,
+      sourceStage3RunDir: null,
+      selectedEventCount,
+      enrichmentSuccessCount,
+      enrichmentFailureCount: 0,
+      llmCalls,
+      retryCount,
+      llmDurationMs,
+      tokenUsage: llmCalls > 0 ? tokenUsage : null,
+      webSearchEventCount,
+      totalWebSearchCalls,
+      eventsCreated: 0,
+      processedContentEventIdUpdated: 0,
+      associationCoverage: emptyCoverage,
+      persistence: null,
+      error,
+    };
   }
 }
 
 function addStage4TokenUsage(
   current: Stage4TokenUsage,
-  missing: boolean,
   next: Stage4TokenUsage | null,
-): { tokenUsage: Stage4TokenUsage; hasMissingTokenUsage: boolean } {
-  if (next === null) return { tokenUsage: current, hasMissingTokenUsage: true };
-  return {
-    tokenUsage: {
-      inputTokens: current.inputTokens + next.inputTokens,
-      outputTokens: current.outputTokens + next.outputTokens,
-      totalTokens: current.totalTokens + next.totalTokens,
-    },
-    hasMissingTokenUsage: missing,
-  };
+): Stage4TokenUsage {
+  return next ? mergeLlmTokenUsage(current, next) : current;
 }
 
 function stage4RuntimeArtifact(value: {
-  startedAt: Date; finishedAt: Date; status: "success" | "partial" | "failed"; dailyDate: string;
-  stage4RunId: string | null; model: string; selectedEventCount: number; enrichmentSuccessCount: number;
-  enrichmentFailureCount: number; llmCalls: number; retryCount: number; llmDurationMs: number;
-  webSearchEventCount: number; totalWebSearchCalls: number; eventsCreated: number; tokenUsage?: Stage4TokenUsage | null; error: string | null;
+  startedAt: Date;
+  finishedAt: Date;
+  status: 'success' | 'partial' | 'failed';
+  dailyDate: string;
+  stage4RunId: string | null;
+  model: string;
+  selectedEventCount: number;
+  enrichmentSuccessCount: number;
+  enrichmentFailureCount: number;
+  llmCalls: number;
+  retryCount: number;
+  llmDurationMs: number;
+  webSearchEventCount: number;
+  totalWebSearchCalls: number;
+  eventsCreated: number;
+  tokenUsage?: Stage4TokenUsage | null;
+  error: string | null;
 }): Record<string, unknown> {
   return {
-    stage: "stage4", status: value.status, started_at: value.startedAt.toISOString(),
-    finished_at: value.finishedAt.toISOString(), daily_date: value.dailyDate,
-    stage4_run_id: value.stage4RunId, model: value.model,
+    stage: 'stage4',
+    status: value.status,
+    started_at: value.startedAt.toISOString(),
+    finished_at: value.finishedAt.toISOString(),
+    daily_date: value.dailyDate,
+    stage4_run_id: value.stage4RunId,
+    model: value.model,
     prompt_version: STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
     selected_event_count: value.selectedEventCount,
     enrichment_success_count: value.enrichmentSuccessCount,
     enrichment_failure_count: value.enrichmentFailureCount,
-    llm_call_count: value.llmCalls, retry_count: value.retryCount,
-    llm_duration_ms: value.llmDurationMs, web_search_event_count: value.webSearchEventCount,
-    total_web_search_calls: value.totalWebSearchCalls, events_created: value.eventsCreated,
+    llm_call_count: value.llmCalls,
+    retry_count: value.retryCount,
+    llm_duration_ms: value.llmDurationMs,
+    web_search_event_count: value.webSearchEventCount,
+    total_web_search_calls: value.totalWebSearchCalls,
+    events_created: value.eventsCreated,
     input_tokens: value.tokenUsage?.inputTokens ?? null,
     output_tokens: value.tokenUsage?.outputTokens ?? null,
     total_tokens: value.tokenUsage?.totalTokens ?? null,
+    cached_input_tokens: value.tokenUsage?.cachedInputTokens ?? null,
+    token_usage_complete: value.tokenUsage?.usageComplete ?? null,
     error: value.error,
   };
 }
@@ -501,14 +676,14 @@ async function loadLatestSuccessfulStage3RunDir(
   stage3RunDirOption?: string,
 ): Promise<string> {
   if (stage3RunDirOption) {
-    const runDir = stage3RunDirOption.startsWith("/")
+    const runDir = stage3RunDirOption.startsWith('/')
       ? stage3RunDirOption
       : join(rootDir, stage3RunDirOption);
     await assertSuccessfulStage3Run(runDir);
     return runDir;
   }
 
-  const root = join(rootDir, "runtime/stage3");
+  const root = join(rootDir, 'runtime/stage3');
   const entries = await readdir(root, { withFileTypes: true });
   const candidates = entries
     .filter((entry) => entry.isDirectory())
@@ -531,12 +706,12 @@ async function loadLatestSuccessfulStage3RunDir(
 }
 
 async function assertSuccessfulStage3Run(runDir: string): Promise<void> {
-  const run = await readJson<Stage3RunArtifact>(join(runDir, "run.json"));
-  if (run.status !== "success") {
+  const run = await readJson<Stage3RunArtifact>(join(runDir, 'run.json'));
+  if (run.status !== 'success') {
     throw new Error(`Stage 3 run is not successful: ${runDir}`);
   }
 
-  await stat(join(runDir, "events/selected.json"));
+  await stat(join(runDir, 'events/selected.json'));
 }
 
 /**
@@ -563,7 +738,7 @@ async function loadEventReviewItemIds(
   );
   const ids = new Map(result.rows.map((row) => [row.event_temp_id, row.id]));
   if (ids.size !== eventTempIds.length) {
-    throw new Error("Stage 3 Review snapshot is missing one or more selected Event Groups.");
+    throw new Error('Stage 3 Review snapshot is missing one or more selected Event Groups.');
   }
   return ids;
 }
@@ -581,7 +756,7 @@ async function loadPreviousCreatedEventIds(
     return [];
   }
 
-  const root = join(rootDir, "runtime/stage4");
+  const root = join(rootDir, 'runtime/stage4');
   let entries;
   try {
     entries = await readdir(root, { withFileTypes: true });
@@ -603,11 +778,11 @@ async function loadPreviousCreatedEventIds(
   const eventIds = new Set<string>();
   for (const candidate of candidates) {
     try {
-      const run = await readJson<{ status?: string }>(join(candidate, "run.json"));
+      const run = await readJson<{ status?: string }>(join(candidate, 'run.json'));
       const persistence = await readJson<PreviousStage4PersistenceArtifact>(
-        join(candidate, "persistence.json"),
+        join(candidate, 'persistence.json'),
       );
-      if (run.status === "success" && Array.isArray(persistence.created_event_ids)) {
+      if (run.status === 'success' && Array.isArray(persistence.created_event_ids)) {
         const scopedIds = await loadScopedPreviousCreatedEventIds(
           candidate,
           persistence,
@@ -631,7 +806,7 @@ async function loadScopedPreviousCreatedEventIds(
   rebuildEventDates: string[],
 ): Promise<string[]> {
   const plan = await readJson<PreviousStage4PersistencePlanArtifact>(
-    join(runDir, "persistence-plan.json"),
+    join(runDir, 'persistence-plan.json'),
   );
   const eventGroupToEventId = persistence.event_group_to_event_id ?? {};
   const ids: string[] = [];
@@ -687,15 +862,12 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-async function writeRunJson(
-  path: string,
-  value: Record<string, unknown>,
-): Promise<void> {
+async function writeRunJson(path: string, value: Record<string, unknown>): Promise<void> {
   await writeJson(path, value);
 }
 
 async function readJson<T>(path: string): Promise<T> {
-  return JSON.parse(await readFile(path, "utf8")) as T;
+  return JSON.parse(await readFile(path, 'utf8')) as T;
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {
@@ -703,7 +875,7 @@ async function writeJson(path: string, value: unknown): Promise<void> {
 }
 
 function toRunTimestamp(date: Date): string {
-  return date.toISOString().replaceAll(":", "-").replaceAll(".", "-");
+  return date.toISOString().replaceAll(':', '-').replaceAll('.', '-');
 }
 
 function uniqueSorted(values: string[]): string[] {
@@ -712,9 +884,9 @@ function uniqueSorted(values: string[]): string[] {
 
 function isMissingPathError(error: unknown): boolean {
   return (
-    typeof error === "object" &&
+    typeof error === 'object' &&
     error !== null &&
-    "code" in error &&
-    (error as NodeJS.ErrnoException).code === "ENOENT"
+    'code' in error &&
+    (error as NodeJS.ErrnoException).code === 'ENOENT'
   );
 }
