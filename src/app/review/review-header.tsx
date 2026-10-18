@@ -1,12 +1,12 @@
 /** Human Review 页面共用的日期选择与内部导航。 */
-import styles from "./review.module.css";
+import styles from './review.module.css';
 
 export function ReviewHeader(props: {
   title: string;
   description: string;
   dailyDate: string;
   action?: string;
-  active: "events" | "long-form" | "models";
+  active: 'events' | 'long-form' | 'models' | 'in-depth';
   showDateControl?: boolean;
 }) {
   return (
@@ -17,16 +17,50 @@ export function ReviewHeader(props: {
           <h1>{props.title}</h1>
           <p>{props.description}</p>
         </div>
-        {props.showDateControl !== false ? <form action={props.action} className={styles.dateForm}>
-          <label htmlFor="review-date">Daily date</label>
-          <input id="review-date" name="date" type="date" defaultValue={props.dailyDate} />
-          <button type="submit">View</button>
-        </form> : null}
+        {props.showDateControl !== false ? (
+          <form
+            action={props.action}
+            className={styles.dateForm}
+          >
+            <label htmlFor="review-date">Daily date</label>
+            <input
+              id="review-date"
+              name="date"
+              type="date"
+              defaultValue={props.dailyDate}
+            />
+            <button type="submit">View</button>
+          </form>
+        ) : null}
       </header>
-      <nav className={styles.nav} aria-label="Review navigation">
-        <a className={props.active === "events" ? styles.active : undefined} href={`./events?date=${props.dailyDate}`}>Event Ranking</a>
-        <a className={props.active === "long-form" ? styles.active : undefined} href={`./long-form?date=${props.dailyDate}`}>Long-form Ranking</a>
-        <a className={props.active === "models" ? styles.active : undefined} href={`./models?date=${props.dailyDate}`}>Model Evaluation</a>
+      <nav
+        className={styles.nav}
+        aria-label="Review navigation"
+      >
+        <a
+          className={props.active === 'events' ? styles.active : undefined}
+          href={`./events?date=${props.dailyDate}`}
+        >
+          Event Ranking
+        </a>
+        <a
+          className={props.active === 'long-form' ? styles.active : undefined}
+          href={`./long-form?date=${props.dailyDate}`}
+        >
+          Long-form Ranking
+        </a>
+        <a
+          className={props.active === 'models' ? styles.active : undefined}
+          href={`./models?date=${props.dailyDate}`}
+        >
+          Model Evaluation
+        </a>
+        <a
+          className={props.active === 'in-depth' ? styles.active : undefined}
+          href="./in-depth"
+        >
+          In-depth Review
+        </a>
         <a href="../dashboard">Dashboard</a>
       </nav>
     </>

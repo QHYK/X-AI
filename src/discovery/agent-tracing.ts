@@ -1,3 +1,5 @@
+// D3/5
+// 采集 Agent 执行过程中的 Trace，包括模型调用、工具调用和 Token Usage
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import type { Span, SpanData, Trace, TracingProcessor } from '@openai/agents';

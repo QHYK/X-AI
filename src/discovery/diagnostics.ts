@@ -1,3 +1,5 @@
+// D2–D4	
+// 提供 Discovery 运行过程中的诊断与报告辅助能力
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 

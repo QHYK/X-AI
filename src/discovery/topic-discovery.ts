@@ -1,3 +1,4 @@
+// D3
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import {
@@ -68,6 +69,7 @@ export type DiscoveryD3Candidate = {
   title: string;
   titleZh: string;
   author: string;
+  publication?: string | null;
   contentType: 'article' | 'video' | 'podcast';
   publishedAt: string | null;
   estimatedDurationMinutes: number | null;
@@ -76,6 +78,11 @@ export type DiscoveryD3Candidate = {
   evidence: string;
   limitations: string;
   extraInfo: Record<string, unknown>;
+};
+
+/** Shared fixed-shape candidate after an Agent transport response is validated. */
+export type DiscoveryAgentCandidate = Omit<DiscoveryD3Candidate, 'sourceLeadId'> & {
+  sourceLeadId?: string;
 };
 
 export type DiscoveryD3Usage = DiscoveryStageUsage;
@@ -396,11 +403,48 @@ async function validateAndPersistD3Candidates(
   fetches: DiscoveryFetchResult[],
   executionState: Parameters<typeof updateDiscoveryBranchExecutionState>[3],
 ): Promise<D3Counts> {
+  return validateAndPersistDiscoveryAgentCandidates(pool, {
+    runId,
+    stage: 'd3',
+    discoveryPath: 'topic',
+    topicLeads,
+    candidates,
+    fetches,
+    executionState,
+  });
+}
+
+export type PersistDiscoveryAgentCandidatesInput = {
+  runId: string;
+  stage: 'd3' | 'd5';
+  discoveryPath: 'topic' | 'open';
+  candidates: DiscoveryAgentCandidate[];
+  fetches: DiscoveryFetchResult[];
+  executionState: Parameters<typeof updateDiscoveryBranchExecutionState>[3];
+  topicLeads?: DiscoveryTopicLead[];
+};
+
+export type DiscoveryAgentCandidateCounts = D3Counts;
+
+/**
+ * Persists topic and open-discovery results with the same deterministic URL,
+ * fetch-evidence, duration and review-queue checks. Topic is the only path
+ * that requires a D2 Lead and topic context.
+ */
+export async function validateAndPersistDiscoveryAgentCandidates(
+  pool: Pool,
+  input: PersistDiscoveryAgentCandidatesInput,
+): Promise<DiscoveryAgentCandidateCounts> {
+  const { runId, stage, discoveryPath, candidates, fetches, executionState } = input;
+  const topicLeads = input.topicLeads ?? [];
+  if (discoveryPath === 'topic' && candidates.some((candidate) => !candidate.sourceLeadId)) {
+    throw new Error('Topic Discovery candidate is missing sourceLeadId.');
+  }
   const normalizedUrls = candidates.flatMap((candidate) => {
     const normalized = normalizeArticleUrl(candidate.url);
     return normalized ? [normalized] : [];
   });
-  const historical = await loadDuplicateUrls(pool, runId, normalizedUrls);
+  const historical = await loadDuplicateUrls(pool, runId, normalizedUrls, discoveryPath);
   const successfulFetches = new Map(
     fetches.flatMap((result) => {
       const normalized = normalizeArticleUrl(result.url);
@@ -430,7 +474,7 @@ async function validateAndPersistD3Candidates(
     return {
       id: randomUUID(),
       candidate,
-      lead: leadById.get(candidate.sourceLeadId)!,
+      lead: candidate.sourceLeadId ? (leadById.get(candidate.sourceLeadId) ?? null) : null,
       normalizedUrl,
       fetchEvidence,
       decision,
@@ -448,25 +492,29 @@ async function validateAndPersistD3Candidates(
             author, publication, content_type, published_at, estimated_duration_minutes,
             summary, why_worth_reading, extra_info, evidence, evaluation, status
           ) values (
-            $1::uuid, $2::uuid, 'topic', null, null,
-            $3, $4::jsonb, $5, $6, $7, $8,
-            $9, null, $10, $11::timestamptz, $12,
-            $13, $14, $15::jsonb, $16::jsonb, $17::jsonb, $18
+            $1::uuid, $2::uuid, $3, null, null,
+            $4, $5::jsonb, $6, $7, $8, $9,
+            $10, $11, $12, $13::timestamptz, $14,
+            $15, $16, $17::jsonb, $18::jsonb, $19::jsonb, $20
           )`,
         [
           row.id,
           runId,
-          row.candidate.sourceLeadId,
-          JSON.stringify({
-            question: row.lead.question,
-            newsContext: row.lead.newsContext,
-            sourceContentIds: row.lead.sourceContentIds,
-          }),
+          discoveryPath,
+          row.candidate.sourceLeadId ?? null,
+          row.lead
+            ? JSON.stringify({
+                question: row.lead.question,
+                newsContext: row.lead.newsContext,
+                sourceContentIds: row.lead.sourceContentIds,
+              })
+            : null,
           row.candidate.url,
           row.normalizedUrl,
           row.candidate.title,
           row.candidate.titleZh,
           row.candidate.author || null,
+          row.candidate.publication || null,
           row.candidate.contentType,
           row.candidate.publishedAt,
           row.candidate.estimatedDurationMinutes,
@@ -492,7 +540,7 @@ async function validateAndPersistD3Candidates(
       }
     }
     const selectedCount = rows.filter((row) => row.decision.status === 'selected').length;
-    await updateDiscoveryBranchExecutionState(client, runId, 'd3', executionState);
+    await updateDiscoveryBranchExecutionState(client, runId, stage, executionState);
     await client.query('commit');
     return {
       discoveredCount: rows.length,
@@ -516,14 +564,19 @@ async function completeEmptyD3(
   await updateDiscoveryBranchExecutionState(pool, runId, 'd3', executionState);
 }
 
-async function loadDuplicateUrls(pool: Pool, runId: string, urls: string[]): Promise<Set<string>> {
+async function loadDuplicateUrls(
+  pool: Pool,
+  runId: string,
+  urls: string[],
+  discoveryPath: 'topic' | 'open',
+): Promise<Set<string>> {
   if (urls.length === 0) return new Set();
   const result = await pool.query<{ normalized_url: string }>(
     `select distinct normalized_url
       from discovery_candidates
       where normalized_url = any($1::text[])
-        and (run_id <> $2::uuid or discovery_path <> 'topic')`,
-    [urls, runId],
+        and (run_id <> $2::uuid or discovery_path <> $3)`,
+    [urls, runId, discoveryPath],
   );
   return new Set(result.rows.map((row) => row.normalized_url));
 }

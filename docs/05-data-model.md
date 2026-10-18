@@ -363,7 +363,7 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 - 各 Lead 的执行状态及关联结果首版通过 Run 的 `selection_output`、关联的 `single_lead` Run 和候选记录查询计算，不新增 Lead 表或冗余状态字段。
 - 自动 Open 仅在常规 Direct / Topic 均正常完成且合计 0 篇合格作品时触发；分支失败不自动重跑、不自动 Open。
 - `status` 与 `end_reason` 分开：例如 `partial + timeout`、`completed + candidates_found` 与 `completed + no_candidates` 的业务含义不同；`end_reason` 只在运行结束时填写。
-- `execution_state` 仅接受 JSON 对象。已执行阶段以 `d2` / `d3` / `d4` 键保存 `status`、`endReason`、`completedAt`、错误摘要、Provider / Model / API mode、累计 `elapsedMs` 与 `usage`；D5 未实现时不创建虚假 `d5` 记录。更新单个阶段时不得覆盖其他阶段。`running` 或字段缺失均不表示完成，历史 Run 不从缺失状态推断成功。D3 正常空结果也写入 `d3.status = 'completed'` 与 `endReason = 'no_candidates'`，供 Resume 作确定性判断。
+- `execution_state` 仅接受 JSON 对象。已执行阶段以 `d2` / `d3` / `d4` / `d5` 键保存 `status`、`endReason`、`completedAt`、错误摘要、Provider / Model / API mode、累计 `elapsedMs` 与 `usage`；更新单个阶段时不得覆盖其他阶段。`running` 或字段缺失均不表示完成，历史 Run 不从缺失状态推断成功。D3 / D5 正常空结果也写入对应 `status = 'completed'` 与 `endReason = 'no_candidates'`，供 Resume 作确定性判断。
 - `usage` 包含 `requests`、`inputTokens`、`outputTokens`、`cachedInputTokens` 与 `usageComplete`。缓存输入已包含在输入 Token 内，不得再次加到总 Token；Provider 未返回某字段使用 `null`，任一请求缺失完整 Usage 时 `usageComplete = false`。缓存命中率是读取端派生指标（`cachedInputTokens / inputTokens`），不持久化；统计不完整时不得展示为完整命中率。
 
 ### 11.2 `discovery_trace_spans`
@@ -457,7 +457,7 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 - `UNIQUE(discovery_candidate_id)`；同一候选不重复进入审核队列。
 - 常规路径每次最多 Direct 3 篇 + Topic 3 篇；自动或人工 Open 每次最多 3 篇。数量由 Workflow 校验，不通过数据库复杂 CHECK 实现。
 - 人工触发 Open 后，新增 Run 和审核候选，不覆盖原有记录。
-- 审核通过不代表已经自动发布；最终上架内容与既有 X-field 内容库的映射留待上架流程 Spec 确定。
+- In-depth Reads 首版以 `review_status = 'approved'` 作为上架与前台可见条件；`pending` / `rejected` 不可见。`approved` 改为 `rejected` 即撤下。前台展示时 `editorial_overrides` 中非空的 `title`、`author`、`summary`、`whyWorthReading` 优先于 Candidate 原字段；原字段不被覆盖。
 - 本轮不改 `feedback`；明确要求长期记住的偏好由独立 Memory 流程处理。
 
 ### 11.5 初始索引与实现前核实项

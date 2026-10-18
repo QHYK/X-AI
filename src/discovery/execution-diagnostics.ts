@@ -1,3 +1,5 @@
+// D2–D4	
+// 统一管理各阶段的执行状态、耗时、模型 Usage 和缓存统计。
 import type {
   DiscoveryBranchExecutionState,
   DiscoveryStage,

@@ -502,6 +502,8 @@ Discovery 与 Daily Stage 1–4 分开执行。以下为**中文正式 Runtime P
 约束：`candidates.length <= 3`；`contentType` 为 `article | video | podcast`；可缺失的日期、时长用 `null`，不得虚构。`summary`、`whyWorthReading` 使用中文，`title` 保留原始标题，`title_zh` 提供中文译名。
 Code 仍需检查结构化输出、实际工具访问与阅读证据、URL、时长和历史重复。通过后直接进入 `in_depth_candidates`，不通过的候选保留失败或无法验证原因。`extra_info` 为可选 JSON 对象，默认 `{}`，仅保留有价值的补充信息。
 
+严格 Structured Output 传输中，`extra_info` 使用 JSON 对象序列化后的字符串；Code 解析后仅持久化对象，缺失时默认 `{}`。这不改变上面的业务输出语义。
+
 自动 Open：常规 Direct + Topic 没有合格作品时触发。人工 Open：用户审核后明确要求补充时单独创建关联 Run，传入人工补充上下文，不覆盖原候选。每次 Open 最多提交 3 个合格候选给人工审核。
 
 ### D6. 运行时约束与版本维护

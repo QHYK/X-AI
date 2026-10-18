@@ -365,7 +365,7 @@ raw_articles.stage1_status IN ("pending", "failed")
 
 Stage 1 为减少请求数量使用 micro-batch，但每篇文章仍独立判断。
 
-每次 Stage 1 execution 的逻辑 Batch 1–3 固定尝试 Codex；其既有 retry 耗尽后，仅该 Batch 改用当前配置的 Stage 1 Provider。Batch 4 及之后始终使用当前配置的 Stage 1 Provider。Provider 分配以逻辑 Batch 编号决定，不受并发完成顺序影响；Batch 级诊断保存在 runtime 的 `attempts.jsonl`。
+每次 Stage 1 execution 的逻辑 Batch 1–15 固定尝试 Codex；其既有 retry 耗尽后，仅该 Batch 改用当前配置的 Stage 1 Provider。Batch 4 及之后始终使用当前配置的 Stage 1 Provider。Provider 分配以逻辑 Batch 编号决定，不受并发完成顺序影响；Batch 级诊断保存在 runtime 的 `attempts.jsonl`。
 
 当前默认：
 

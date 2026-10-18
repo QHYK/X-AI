@@ -1,3 +1,5 @@
+// D4	
+// 验证 D2 选出的 Direct Leads，判断 qualified/rejected/unverifiable，并持久化结果
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import {

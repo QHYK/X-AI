@@ -442,7 +442,7 @@ async function processStage1MicroBatch(
   let attemptsForThisBatch = llmResult.attempts;
   let providerForSplit = provider;
 
-  // Only the initial logical batches 1–12 are assigned to Codex. After its
+  // Only the initial logical batches 1–15 are assigned to Codex. After its
   // normal retry budget is exhausted, retry this one batch with the existing
   // Stage1 provider; other logical batches keep their predetermined provider.
   if (shouldFallbackCodexBatch(logicalBatchNumber, provider, llmResult.success)) {

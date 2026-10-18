@@ -102,7 +102,9 @@ Hosted Tool 和自定义 Function Tool 都属于 Agent 的工具调用；使用�
 | `discovery_candidates` | 候选作品、发现路径、证据、验证结论及筛选状态 |
 | `in_depth_candidates` | 通过机器筛选、提交人工审核的作品及审核状态 |
 
-`discovery_runs.execution_state` 保存已执行 D2–D4 阶段的动态完成状态与执行诊断；D5 未实现时不写入虚假记录。它与不可变的 `config_snapshot` 分离；阶段更新必须使用局部 JSONB 更新，缺失或遗留 `running` 不视为完成。字段与 Usage 完整性语义由 `05-data-model.md` 定义。
+`discovery_runs.execution_state` 保存已执行 D2–D5 阶段的动态完成状态与执行诊断。它与不可变的 `config_snapshot` 分离；阶段更新必须使用局部 JSONB 更新，缺失或遗留 `running` 不视为完成。字段与 Usage 完整性语义由 `05-data-model.md` 定义。
+
+常规执行入口仅负责调用 D2、D3、D4，并在两分支均正常完成且没有合格候选时调用 D5；它不复制阶段的 Prompt、验证、候选写入、Trace 或 Usage 累计逻辑。首版顺序执行 D3 后 D4，D5 仅在兜底条件满足时运行；分支各自保留状态与失败隔离。
 
 字段、关联、索引、状态枚举和写入事务由 `05-data-model.md` 定义。本轮不修改既有 `feedback` 表；显式 Memory 写入由独立后续能力负责。
 

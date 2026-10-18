@@ -104,7 +104,7 @@ async function main() {
             scope_start_at: summary.scopeStartAt,
             scope_end_at: summary.scopeEndAt,
             model: summary.model,
-            provider_strategy: `logical batches 1-3: codex; subsequent batches and Codex fallback: ${resolveStageLlmProvider('stage1')}`,
+            provider_strategy: `logical batches 1-15: codex; subsequent batches and Codex fallback: ${resolveStageLlmProvider('stage1')}`,
             prompt_version: STAGE1_PROMPT_VERSION,
             duration_ms: artifact.durationMs,
             candidate_count: summary.loadedCount,

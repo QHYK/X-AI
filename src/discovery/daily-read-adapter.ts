@@ -1,3 +1,5 @@
+// D2
+// 从 Daily Pipeline 读取 Event、Digest、Long-form 等数据，整理成 D2 的输入
 import type { DiscoveryInputContentIds } from '../db/schema.js';
 import { resolveDailyScope } from '../lib/daily-scope.js';
 import { getDailyBriefForDailyDate, type DailyBriefQueryable } from '../lib/daily-brief.js';

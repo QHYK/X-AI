@@ -253,6 +253,12 @@ Discovery 分支失败后不自动重跑。是否复用原 Run，以 D2 的持�
 
 当前 D3 Resume 以完整 Agent Run 为恢复边界：已完成则跳过；未完成、失败或遗留 `running` 时重新执行整个 D3，不实现 Agent 内部 Checkpoint。D4 继续复用 Candidate 级 Resume。
 
+### 8.3.1 D2–D5 编排入口
+
+常规 Discovery 通过统一编排入口按 D2、D3、D4 顺序运行。D2 成功持久化 `selection_output` 后，D3 与 D4 的完成状态仍独立保存；D3 失败不阻断 D4。两个分支均正常完成时，才检查 Open 条件；任一分支失败时按实际完成情况标记 `partial` 或 `failed`。没有对应 Lead 的分支以正常空结果完成，不作为失败。
+
+自动 Open 的资格是读取端派生结论：仅当 D3、D4 都为 `completed` 且整个 Run 没有 `qualified` Candidate 时为真。满足后 D5 作为同一 Regular Run 的内部阶段运行并写入 `execution_state.d5`；D5 正常空结果是有效完成，失败则保留该 Run 供 Resume。人工 Open 则创建关联原 Regular Run 的独立 `open` 子 Run，不重跑 D2–D4，也不覆盖 Parent Run。
+
 ### 8.4 人工补充执行
 
 人工可在审核页面选择原 D2 的 `leadId` 单独执行，或启动 Open；这属于新的人工补充执行，不是原 Run Resume。每次创建新 Run、关联原 Run 与所选 Lead，独立保存执行结果和 Trace。Discovery 不要求相同输入产生相同输出。

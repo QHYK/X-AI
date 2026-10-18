@@ -108,10 +108,10 @@ npm run eval:stage3:long-form -- --run-id=UUID
 | `DISCOVERY_D2_PROVIDER` / `DISCOVERY_D4_PROVIDER` | Discovery D2 / D4 stage Provider | 优先级最高；覆盖 `DISCOVERY_LLM_PROVIDER` |
 | `DISCOVERY_LLM_TIMEOUT_MS` | Discovery D2 / D4 shared request timeout | 正整数毫秒；被对应 stage timeout 覆盖；未设置则使用共享 LLM Client 的 SDK 默认值 |
 | `DISCOVERY_D2_TIMEOUT_MS` / `DISCOVERY_D4_TIMEOUT_MS` | Discovery D2 / D4 stage request timeout | 正整数毫秒；优先级最高；未设置时回退至 `DISCOVERY_LLM_TIMEOUT_MS`，再回退 SDK 默认值 |
-| `DISCOVERY_AGENT_MODEL` | Discovery D3 Agents SDK model | 回退至 `CODEX_MODEL`，再回退代码默认 `gpt-5.6-terra`；D3 固定使用 Codex Responses endpoint |
-| `DISCOVERY_D3_TIMEOUT_MS` | D3 Agent Run 整体 timeout | 默认 `480000` ms |
-| `DISCOVERY_D3_MAX_TURNS` | D3 Agent 最大轮数 | 默认 `8` |
-| `DISCOVERY_FETCH_CONTENT_TIMEOUT_MS` | D3 `fetch_content` 单次工具 timeout | 默认 `90000` ms |
+| `DISCOVERY_AGENT_MODEL` | Discovery D3 / D5 Agents SDK model | 回退至 `CODEX_MODEL`，再回退代码默认 `gpt-5.6-terra`；D3 / D5 固定使用 Codex Responses endpoint |
+| `DISCOVERY_D3_TIMEOUT_MS` / `DISCOVERY_D5_TIMEOUT_MS` | 对应 Agent Run 整体 timeout | 默认 `480000` ms；D5 未设置时回退 D3 值 |
+| `DISCOVERY_D3_MAX_TURNS` / `DISCOVERY_D5_MAX_TURNS` | 对应 Agent 最大轮数 | 默认 `8`；D5 未设置时回退 D3 值 |
+| `DISCOVERY_FETCH_CONTENT_TIMEOUT_MS` | D3 / D5 `fetch_content` 单次工具 timeout | 默认 `90000` ms |
 | `STAGE1_LLM_PROVIDER` / `STAGE2_LLM_PROVIDER` / `STAGE3_LLM_PROVIDER` / `STAGE4_LLM_PROVIDER` | 对应正式 Stage 的 Provider | 默认依次为 `openai`、`deepseek`、`openai`、`openai` |
 | `LLM_DEBUG_HTTP` | LLM 请求诊断日志 | 仅 `true` 启用；输出经过脱敏的 HTTP 诊断 |
 | `BRIEF_API_ALLOWED_ORIGIN` | Brief / read-more API 的 CORS allowlist | 逗号分隔 origin；空值不配置额外 allowlist |
@@ -208,7 +208,21 @@ npm run test:pipeline-env
 npm run test:discovery-phase1
 npm run test:discovery-phase2
 npm run test:discovery-phase3
+npm run test:discovery-orchestrator
+npm run test:discovery-d5
 ```
+
+### Discovery D2–D5 Workflow
+
+```bash
+npm run discovery -- --dates=YYYY-MM-DD,YYYY-MM-DD --confirm-paid
+npm run discovery -- --run-id=UUID --confirm-paid
+npm run discovery -- --open-parent-run-id=UUID --open-context="可选人工补充方向" --confirm-paid
+```
+
+第一个命令创建新的常规 Discovery Run；第二个命令恢复已有 Run；第三个命令创建关联原 Regular Run 的独立人工 Open Run。该入口会调用真实 Provider、D3/D5 Web Search 与 Firecrawl，必须显式 `--confirm-paid`。常规 Run 在 D3、D4 都完成且没有合格候选时自动执行 D5；人工 Open 只执行 D5，不重跑 D2–D4。终端报告输出 Run / Parent Run ID、阶段状态、Usage、缓存命中率和候选/审核数量。
+
+In-depth 人工审核入口为 `/review/in-depth`，审核 API 为 `/api/review/in-depth`，公开列表为 `/in-depth`。当前 Next.js `basePath=/ai`，实际浏览器路径分别为 `/ai/review/in-depth`、`/ai/api/review/in-depth`、`/ai/in-depth`。`npm run dev` 的开发环境可直接访问审核页，不需要独立密码；生产环境尚无统一后台认证，因此审核页和 API（包括读写）均拒绝访问，不会因客户端隐藏按钮而开放。接入可靠的后台认证前不可用于生产审核。公开列表不受此限制。相关状态语义见 [Discovery Workflow](06a-discovery-workflow.md) 和 [Data Model](05-data-model.md)。本地回归：`npm run test:in-depth-review`。
 
 ## 7. Reusable Diagnostics and Smoke Tests
 
@@ -230,7 +244,7 @@ npm run test:discovery-phase3
 
 Discovery Provider 集成验证不会由 regression tests 自动执行。命令复用 Phase 1 Run Service 以及正式 D2 / D4 函数；输出 Run ID、全部 Direct / Topic Leads（含来源内容与 Direct URL）、逐篇 D4 评价、审核队列状态、Token Usage 与耗时。D4 每篇 Direct Candidate 串行发起一次 LLM 请求；每篇成功后立即持久化，单篇失败会记录诊断并继续后续 Candidate。输出会单列成功/失败请求数、各自累计耗时、已知 Token Usage 和 Usage 是否完整。`selection_output` 和 Candidate 均保留在数据库中，后续阶段可直接使用输出的 Run ID。失败时保留 Run、已创建 Candidate 和 diagnostics。指定 `--dates` 时日期必须升序，且每一期都必须存在同一 `daily_date` 的 `pipeline_runs.step IN ('daily', 'stage4') AND status = 'success'`；`--dates` 与 `--run-id` 不可同时使用。
 
-Discovery 阶段级执行诊断保存在 `discovery_runs.execution_state`：D2、D3、D4 记录实际执行状态、结束原因、Provider / Model / API mode、累计耗时与模型 Usage；D5 尚未实现，因此没有 D5 执行记录。Usage 的 `cachedInputTokens` 已包含在 `inputTokens` 中，不能重复加入总 Token。若任一请求没有完整 Usage，`usageComplete` 为 `false`，缓存命中率不应作为完整统计显示；读取端可在完整时按 `cachedInputTokens / inputTokens` 计算。Resume 会累计该 Run 已记录的阶段 Usage；历史 Run 缺失此诊断时保持未知，不从 Candidate 或 Trace 反推。
+Discovery 阶段级执行诊断保存在 `discovery_runs.execution_state`：D2–D5 都记录实际执行状态、结束原因、Provider / Model / API mode、累计耗时与模型 Usage。Usage 的 `cachedInputTokens` 已包含在 `inputTokens` 中，不能重复加入总 Token。若任一请求没有完整 Usage，`usageComplete` 为 `false`，缓存命中率不应作为完整统计显示；读取端可在完整时按 `cachedInputTokens / inputTokens` 计算。Resume 会累计该 Run 已记录的阶段 Usage；历史 Run 缺失此诊断时保持未知，不从 Candidate 或 Trace 反推。
 
 Discovery D2 / D4 的 Structured Output 通过共享 LLM Client 走 Chat Completions；测试输出会显示实际 Provider、model、timeout、API mode 与 LLM request 耗时。`DISCOVERY_D2_PROVIDER` / `DISCOVERY_D4_PROVIDER` 优先于 `DISCOVERY_LLM_PROVIDER`，随后才使用既有 `LLM_PROVIDER`；模型、Base URL 与 API Key 始终由选定 Provider 的既有配置解析，其中模型使用该 Provider 的专属 `*_MODEL` 配置。`DISCOVERY_D2_TIMEOUT_MS` / `DISCOVERY_D4_TIMEOUT_MS` 优先于 `DISCOVERY_LLM_TIMEOUT_MS`；全部未设置时请求选项会省略 timeout，使用 SDK 默认值，并输出 `SDK default`。
 

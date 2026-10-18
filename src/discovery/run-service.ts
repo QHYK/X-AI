@@ -1,3 +1,5 @@
+// D2-5
+// 管理 Discovery Run 的创建、状态更新、恢复及数据库操作
 import type { Pool, PoolClient } from 'pg';
 import type {
   DiscoveryBranchExecutionState,
@@ -49,6 +51,33 @@ export type CreateRegularDiscoveryRunResult = {
   input: DiscoveryWindowInput | null;
   missingDailyDates: string[];
 };
+
+/** Creates an isolated, manually requested Open Discovery child Run. */
+export async function createOpenDiscoveryRun(
+  pool: Pool,
+  input: { parentRunId: string; manualContext?: string; triggerSource: 'manual' },
+): Promise<DiscoveryRunRecord> {
+  const parent = await getDiscoveryRun(pool, input.parentRunId);
+  if (!parent || parent.runType !== 'regular') {
+    throw new Error('Manual Open Discovery requires an existing Regular parent Run.');
+  }
+  const context = input.manualContext?.trim() || null;
+  const result = await pool.query<DiscoveryRunRow>(
+    `insert into discovery_runs (
+        parent_run_id, run_type, trigger_source, status, config_snapshot
+      ) values (
+        $1::uuid, 'open', $2, 'pending', $3::jsonb
+      ) returning ${DISCOVERY_RUN_COLUMNS}`,
+    [
+      input.parentRunId,
+      input.triggerSource,
+      JSON.stringify(context ? { manualOpen: { context } } : {}),
+    ],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error('Open Discovery Run insert did not return a row.');
+  return toDiscoveryRunRecord(row);
+}
 
 type CreateRegularDiscoveryRunDependencies = {
   readWindow: typeof readDiscoveryDailyWindow;
@@ -183,6 +212,26 @@ export async function resumeDiscoveryBranchRun(
   if (!row) {
     throw new Error('Discovery branch execution requires a resumable regular Run with D2 output.');
   }
+  return toDiscoveryRunRecord(row);
+}
+
+/** Resumes only an unfinished manual Open Discovery branch. */
+export async function resumeOpenDiscoveryRun(
+  pool: Pool,
+  runId: string,
+): Promise<DiscoveryRunRecord> {
+  const updated = await pool.query<DiscoveryRunRow>(
+    `update discovery_runs
+      set status = 'running', finished_at = null, end_reason = null,
+          error_summary = null, updated_at = now()
+      where id = $1::uuid
+        and run_type = 'open'
+        and status in ('partial', 'failed')
+      returning ${DISCOVERY_RUN_COLUMNS}`,
+    [runId],
+  );
+  const row = updated.rows[0];
+  if (!row) throw new Error('Open Discovery resume requires a partial or failed Open Run.');
   return toDiscoveryRunRecord(row);
 }
 
