@@ -18,8 +18,10 @@ flock -n 9 || { echo 'Another deployment is in progress.' >&2; exit 1; }
 old_commit=
 old_branch=
 old_build_id=
+old_build_usable=0
 activation_started=0
 code_changed=0
+next_changed=0
 needs_install=0
 had_old_deps=0
 
@@ -59,6 +61,10 @@ rollback() {
   (( original_status != 0 )) || original_status=1
   trap - ERR INT TERM
   if (( activation_started )); then
+    if (( ! old_build_usable )); then
+      echo "DEPLOYMENT FAILED WITHOUT AUTOMATIC ROLLBACK: the previous build was incomplete or absent. Current source, .next, node_modules, and staging files are preserved; inspect $project and $stage for manual recovery." >&2
+      exit "$original_status"
+    fi
     echo "Activation failed; attempting to restore commit $old_commit and previous files." >&2
     sudo -n systemctl stop "$service" || true
     if [[ -d $stage/old-node-modules ]]; then
@@ -69,11 +75,13 @@ rollback() {
     elif (( needs_install )) && (( ! had_old_deps )) && [[ -d $project/node_modules ]]; then
       mv "$project/node_modules" "$stage/failed-node-modules" || restore_ok=0
     fi
-    if [[ -d $stage/old-next ]]; then
+    if (( next_changed )); then
       if [[ -e $project/.next ]]; then
         mv "$project/.next" "$stage/failed-next" || restore_ok=0
       fi
-      mv "$stage/old-next" "$project/.next" || restore_ok=0
+      if [[ -d $stage/old-next ]]; then
+        mv "$stage/old-next" "$project/.next" || restore_ok=0
+      fi
     fi
     if (( code_changed )); then
       if ! git -C "$project" switch -C "$old_branch" "$old_commit"; then
@@ -83,7 +91,8 @@ rollback() {
     fi
     [[ $(git -C "$project" rev-parse HEAD) == "$old_commit" &&
        $(git -C "$project" symbolic-ref -q --short HEAD) == "$old_branch" &&
-       -f $project/.next/BUILD_ID && $(<"$project/.next/BUILD_ID") == "$old_build_id" ]] || restore_ok=0
+       -f $project/.next/BUILD_ID &&
+       $(<"$project/.next/BUILD_ID") == "$old_build_id" ]] || restore_ok=0
     if (( had_old_deps )) && [[ ! -d $project/node_modules ]]; then restore_ok=0; fi
     if (( restore_ok )) && sudo -n systemctl restart "$service" && check_health; then
       echo "Previous service restored on branch $old_branch at $old_commit." >&2
@@ -97,7 +106,6 @@ trap rollback ERR INT TERM
 
 cd "$project"
 [[ -f $project/.env.local ]] || { echo 'Server .env.local is missing; deployment stopped.' >&2; exit 1; }
-[[ -f $project/.next/BUILD_ID ]] || { echo 'Existing build is missing; manual bootstrap required.' >&2; exit 1; }
 [[ -z $(git status --porcelain --untracked-files=normal) ]] || {
   echo 'Server worktree has local changes or untracked files. Reconcile them manually.' >&2
   exit 1
@@ -107,7 +115,13 @@ old_branch=$(git symbolic-ref -q --short HEAD) || {
   echo 'Server checkout is detached; reconcile the branch first.' >&2
   exit 1
 }
-old_build_id=$(<"$project/.next/BUILD_ID")
+if [[ -s $project/.next/BUILD_ID && -d $project/.next/server &&
+      -d $project/.next/static && -d $project/node_modules ]]; then
+  old_build_id=$(<"$project/.next/BUILD_ID")
+  old_build_usable=1
+else
+  echo 'Previous build or dependencies are incomplete or absent; deployment may proceed, but automatic rollback will not be available.' >&2
+fi
 if [[ -d $project/node_modules ]]; then had_old_deps=1; fi
 
 node "$stage/artifact.mjs" verify "$stage" "$target_commit" > "$stage/verified.json"
@@ -189,12 +203,19 @@ sudo -n systemctl stop "$service"
 git merge --ff-only "$target_commit"
 code_changed=1
 [[ $(git rev-parse HEAD) == "$target_commit" ]] || { echo 'Source commit did not advance to target.' >&2; exit 1; }
-mv "$project/.next" "$stage/old-next"
+next_changed=1
+if [[ -d $project/.next ]]; then mv "$project/.next" "$stage/old-next"; fi
 mv "$stage/extracted/.next" "$project/.next"
 if (( needs_install )); then
   if [[ -d $project/node_modules ]]; then mv "$project/node_modules" "$stage/old-node-modules"; fi
   mv "$stage/deps/node_modules" "$project/node_modules"
 fi
+[[ $(git rev-parse HEAD) == "$target_commit" &&
+   $(<"$project/.next/deploy-commit") == "$target_commit" &&
+   $(<"$project/.next/BUILD_ID") == "$expected_build_id" ]] || {
+  echo 'Activated source, build commit marker, or BUILD_ID does not match the target.' >&2
+  exit 1
+}
 sudo -n systemctl restart "$service"
 check_health
 echo "Deployed $target_commit (BUILD_ID $expected_build_id); previous version retained in $stage."

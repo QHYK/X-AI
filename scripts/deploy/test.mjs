@@ -31,7 +31,7 @@ run('git', ['init', '--bare', remote]);
 run('git', ['init', source]);
 run('git', ['-C', source, 'config', 'user.email', 'deploy-test@example.invalid']);
 run('git', ['-C', source, 'config', 'user.name', 'Deploy test']);
-write(join(source, '.gitignore'), '.env.local\n.next/\nnode_modules/\n');
+write(join(source, '.gitignore'), '.env.local\n.next/\nnode_modules/\nruntime/\nlogs/\n');
 write(join(source, 'next-env.d.ts'), 'import "./.next/dev/types/routes.d.ts";\n');
 write(
   join(source, 'package.json'),
@@ -106,7 +106,7 @@ write(
   join(fakeBin, 'curl'),
   `#!/bin/sh
 if [ "${'$'}{DEPLOY_TEST_FAIL_NEW_HEALTH:-0}" = 1 ] &&
-   [ "$(cat "$DEPLOY_PROJECT_DIR/.next/BUILD_ID")" = new-build ]; then
+   [ "$(cat "$DEPLOY_PROJECT_DIR/.next/BUILD_ID")" = "${'$'}{DEPLOY_TEST_FAIL_BUILD_ID:-new-build}" ]; then
   exit 22
 fi
 printf '200'
@@ -126,10 +126,10 @@ const environment = {
 };
 write(environment.DEPLOY_TEST_SERVICE_STATE, 'active\n');
 
-function deploy(extra = {}, commitSha = targetCommit, stagingDir = stage) {
+function deploy(extra = {}, commitSha = targetCommit, stagingDir = stage, projectDir = project) {
   return spawnSync('bash', [join(stagingDir, 'server.sh'), commitSha, stagingDir], {
     encoding: 'utf8',
-    env: { ...environment, ...extra },
+    env: { ...environment, DEPLOY_PROJECT_DIR: projectDir, ...extra },
   });
 }
 
@@ -164,7 +164,9 @@ assert.equal(
 );
 assert.equal(readFileSync(environment.DEPLOY_TEST_SERVICE_STATE, 'utf8').trim(), 'active');
 assert.match(failed.stderr, /Previous service restored on branch/);
-console.log('PASS failed health check restores old branch, source, build, dependencies, and service');
+console.log(
+  'PASS failed health check restores old branch, source, build, dependencies, and service',
+);
 
 const successStage = join(root, 'success-stage');
 run('node', [join(scripts, 'artifact.mjs'), 'create', successStage, targetCommit], { cwd: source });
@@ -179,7 +181,9 @@ assert.ok(
   existsSync(join(successStage, 'old-node-modules')),
   'changed lock must preserve old dependencies',
 );
-console.log('PASS next deployment after rollback installs dependencies and activates matching source/build');
+console.log(
+  'PASS next deployment after rollback installs dependencies and activates matching source/build',
+);
 
 write(join(source, 'source.txt'), 'newer, same dependencies\n');
 const nextCommit = commit(source, 'same lock');
@@ -205,5 +209,96 @@ assert.equal(run('git', ['-C', project, 'rev-parse', 'HEAD']), nextCommit);
 assert.equal(readFileSync(join(project, '.next', 'BUILD_ID'), 'utf8').trim(), 'newer-build');
 assert.ok(!existsSync(join(sameLockStage, 'deps')), 'same lock must not run npm ci');
 console.log('PASS matching lock reuses server dependencies without npm ci');
+
+function incompleteBuildFixture(name, withOldNext = true) {
+  const directory = join(root, name);
+  const stagingDir = join(root, `${name}-stage`);
+  run('git', ['clone', remote, directory]);
+  run('git', ['-C', directory, 'switch', '-c', name, oldCommit]);
+  write(join(directory, '.env.local'), 'FIXTURE_ONLY=true\n');
+  if (withOldNext) {
+    write(join(directory, '.next', 'server', 'index.js'), 'incomplete old server\n');
+    write(join(directory, '.next', 'static', 'index.js'), 'incomplete old static\n');
+  }
+  write(join(directory, 'runtime', 'keep'), 'runtime remains\n');
+  write(join(directory, 'logs', 'keep'), 'logs remain\n');
+  run('npm', ['ci', '--no-audit', '--no-fund'], { cwd: directory });
+  write(join(directory, 'node_modules', 'fixture-marker'), 'old dependencies\n');
+  run('node', [join(scripts, 'artifact.mjs'), 'create', stagingDir, nextCommit], {
+    cwd: source,
+  });
+  cpSync(join(scripts, 'artifact.mjs'), join(stagingDir, 'artifact.mjs'));
+  cpSync(join(scripts, 'server.sh'), join(stagingDir, 'server.sh'));
+  return { directory, stagingDir };
+}
+
+const incompleteSuccess = incompleteBuildFixture('incomplete-success');
+write(environment.DEPLOY_TEST_SERVICE_STATE, 'stopped\n');
+const deployedWithoutOldBuild = deploy(
+  {},
+  nextCommit,
+  incompleteSuccess.stagingDir,
+  incompleteSuccess.directory,
+);
+assert.equal(deployedWithoutOldBuild.status, 0, deployedWithoutOldBuild.stderr);
+assert.equal(run('git', ['-C', incompleteSuccess.directory, 'rev-parse', 'HEAD']), nextCommit);
+assert.equal(
+  readFileSync(join(incompleteSuccess.directory, '.next', 'deploy-commit'), 'utf8').trim(),
+  nextCommit,
+);
+assert.equal(
+  readFileSync(join(incompleteSuccess.directory, '.next', 'BUILD_ID'), 'utf8').trim(),
+  'newer-build',
+);
+assert.equal(readFileSync(environment.DEPLOY_TEST_SERVICE_STATE, 'utf8').trim(), 'active');
+assert.ok(existsSync(join(incompleteSuccess.stagingDir, 'old-next')));
+for (const path of ['.env.local', 'runtime/keep', 'logs/keep']) {
+  assert.ok(existsSync(join(incompleteSuccess.directory, path)), `${path} must remain`);
+}
+assert.match(deployedWithoutOldBuild.stderr, /automatic rollback will not be available/);
+console.log(
+  'PASS missing old BUILD_ID still deploys verified source/build and preserves local data',
+);
+
+const absentBuild = incompleteBuildFixture('absent-build', false);
+write(environment.DEPLOY_TEST_SERVICE_STATE, 'stopped\n');
+const deployedWithoutNext = deploy({}, nextCommit, absentBuild.stagingDir, absentBuild.directory);
+assert.equal(deployedWithoutNext.status, 0, deployedWithoutNext.stderr);
+assert.equal(
+  readFileSync(join(absentBuild.directory, '.next', 'BUILD_ID'), 'utf8').trim(),
+  'newer-build',
+);
+assert.ok(!existsSync(join(absentBuild.stagingDir, 'old-next')));
+console.log('PASS absent old .next directory does not block deployment');
+
+const incompleteFailure = incompleteBuildFixture('incomplete-failure');
+write(environment.DEPLOY_TEST_SERVICE_STATE, 'stopped\n');
+const failedWithoutOldBuild = deploy(
+  {
+    DEPLOY_TEST_FAIL_NEW_HEALTH: '1',
+    DEPLOY_TEST_FAIL_BUILD_ID: 'newer-build',
+  },
+  nextCommit,
+  incompleteFailure.stagingDir,
+  incompleteFailure.directory,
+);
+assert.notEqual(failedWithoutOldBuild.status, 0, 'failed health check must fail deployment');
+assert.equal(run('git', ['-C', incompleteFailure.directory, 'rev-parse', 'HEAD']), nextCommit);
+assert.equal(
+  run('git', ['-C', incompleteFailure.directory, 'symbolic-ref', '--short', 'HEAD']),
+  'incomplete-failure',
+);
+assert.equal(
+  readFileSync(join(incompleteFailure.directory, '.next', 'BUILD_ID'), 'utf8').trim(),
+  'newer-build',
+);
+assert.ok(!existsSync(join(incompleteFailure.directory, 'node_modules', 'fixture-marker')));
+assert.ok(existsSync(join(incompleteFailure.stagingDir, 'old-next')));
+assert.ok(existsSync(join(incompleteFailure.stagingDir, 'old-node-modules')));
+assert.equal(readFileSync(environment.DEPLOY_TEST_SERVICE_STATE, 'utf8').trim(), 'active');
+assert.match(failedWithoutOldBuild.stderr, /DEPLOYMENT FAILED WITHOUT AUTOMATIC ROLLBACK/);
+assert.match(failedWithoutOldBuild.stderr, /manual recovery/);
+assert.doesNotMatch(failedWithoutOldBuild.stderr, /Previous service restored/);
+console.log('PASS failed deploy without old BUILD_ID preserves scene and requires manual recovery');
 
 console.log('Deployment fixture tests passed.');

@@ -50,18 +50,19 @@ node -v
 uname -m
 git status --short
 git rev-parse HEAD
-test -f .env.local && test -f .next/BUILD_ID
+test -f .env.local
+test -s .next/BUILD_ID && test -d .next/server && test -d .next/static || echo 'No complete old build: automatic rollback will not be available'
 test -d runtime
 test -d node_modules || echo 'node_modules missing: deployment will install it before switching'
-sudo -n systemctl is-active x-ai-field
-curl --fail --max-time 10 http://127.0.0.1:5260/ai/in-depth >/dev/null
+sudo -n systemctl is-active x-ai-field || echo 'Old service is inactive'
+curl --fail --max-time 10 http://127.0.0.1:5260/ai/in-depth >/dev/null || echo 'Old HTTP route is unavailable'
 ```
 
 服务器 Git `origin` 须能取得本次固定 Commit；工作区须无本地改动或未跟踪文件，当前 Commit 必须是目标 Commit 的祖先。Ubuntu 服务器的架构、Node ABI、glibc 须与 Runner 产物兼容。部署前请安排不会与 Cron Pipeline 重叠的窗口；Workflow 会检查现有进程并在切换前再次检查，但在不修改 Cron 配置的条件下，无法消除检查后新任务启动的竞态。
 
 上传暂存于 `/home/ubuntu/.x-ai-deploy/<commit>-<run>-<attempt>/`，不会覆盖 `.env.local`、`runtime/`、`logs/` 或 `.git/`。只有部署 Commit 与服务器当前 Commit 的 `package-lock.json` 不同，或 `node_modules` 缺失时，才在独立暂存目录执行服务器 `npm ci`；无法确认已有依赖状态则停止。验证完毕后短暂停止 `x-ai-field`，fast-forward 更新源码、替换整目录 `.next` 与必要的 `node_modules`，重启并检查 systemd 状态及 `/ai/in-depth`。旧 `.next`、旧依赖与 Commit 信息保留在暂存目录，供人工诊断和恢复；清理历史暂存目录前应先确认当前版本稳定。
 
-失败若发生在停机前，线上版本保持不变；若发生在切换后，脚本尝试恢复原分支及 Commit、旧 `.next`、`node_modules` 并重新验证服务。无法安全恢复分支时会明确报错，不会宣称回滚成功；按 Action 输出的暂存目录人工处理，不要仅恢复 `.next`。当前服务器 `ubuntu` 用户具有广泛免密 sudo 权限，这是现有部署账户的安全风险，建议后续收窄为服务管理所需命令。
+旧构建完整时，切换后失败会尝试恢复原分支及 Commit、旧 `.next`、`node_modules` 并重新验证服务。旧构建不完整或不存在时仍可部署，但没有自动回滚：激活失败会保留当前源码、`.next`、依赖及暂存目录现场，并提示人工恢复，不会声称旧服务已恢复。无法安全恢复分支时会明确报错；按 Action 输出的暂存目录人工处理，不要仅恢复 `.next`。当前服务器 `ubuntu` 用户具有广泛免密 sudo 权限，这是现有部署账户的安全风险，建议后续收窄为服务管理所需命令。
 
 ## 3. Production Processing 命令
 
