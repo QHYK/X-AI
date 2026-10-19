@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { withDiscoveryExecutionLock } from '../src/discovery/background-jobs.js';
 import {
   formatDiscoveryWorkflowReport,
   runDiscoveryWorkflow,
@@ -28,13 +29,16 @@ async function main(): Promise<void> {
     ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
   });
   try {
-    const report = await runDiscoveryWorkflow(pool, {
-      runId: options.runId,
-      dailyDates: options.dailyDates,
-      openParentRunId: options.openParentRunId,
-      openContext: options.openContext,
-      triggerSource: 'manual',
-    });
+    const report = await withDiscoveryExecutionLock(pool, () =>
+      runDiscoveryWorkflow(pool, {
+        runId: options.runId,
+        dailyDates: options.dailyDates,
+        openParentRunId: options.openParentRunId,
+        openContext: options.openContext,
+        triggerSource: 'manual',
+      }),
+    );
+    if (!report) throw new Error('Another Discovery executor is running; try later.');
     console.log(JSON.stringify(formatDiscoveryWorkflowReport(report), null, 2));
     if (report.run.status === 'failed' || report.run.status === 'blocked') process.exitCode = 1;
   } finally {

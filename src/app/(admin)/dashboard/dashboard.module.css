@@ -266,6 +266,19 @@
   gap: 8px;
 }
 
+.discoveryControl {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  max-width: 100%;
+}
+
+.discoveryControl p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.72rem;
+}
+
 .retryButton {
   min-height: 30px;
   padding: 0 10px;

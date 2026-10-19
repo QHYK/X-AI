@@ -64,12 +64,12 @@ test -s .next/BUILD_ID && test -d .next/server && test -d .next/static || echo '
 test -d runtime
 test -d node_modules || echo 'node_modules missing: deployment will install it before switching'
 sudo -n systemctl is-active x-ai-field || echo 'Old service is inactive'
-curl --fail --max-time 10 http://127.0.0.1:5260/ai/in-depth >/dev/null || echo 'Old HTTP route is unavailable'
+curl --fail --max-time 10 http://127.0.0.1:5260/ai >/dev/null || echo 'Old HTTP route is unavailable'
 ```
 
 服务器 Git `origin` 须能取得本次固定 Commit；工作区须无本地改动或未跟踪文件，当前 Commit 必须是目标 Commit 的祖先。Ubuntu 服务器的架构、Node ABI、glibc 须与 Runner 产物兼容。部署前请安排不会与 Cron Pipeline 重叠的窗口；Workflow 会检查现有进程并在切换前再次检查，但在不修改 Cron 配置的条件下，无法消除检查后新任务启动的竞态。
 
-上传暂存于 `/home/ubuntu/.x-ai-deploy/<commit>-<run>-<attempt>/`，不会覆盖 `.env.local`、`runtime/`、`logs/` 或 `.git/`。只有部署 Commit 与服务器当前 Commit 的 `package-lock.json` 不同，或 `node_modules` 缺失时，才在独立暂存目录执行服务器 `npm ci`；无法确认已有依赖状态则停止。验证完毕后短暂停止 `x-ai-field`，fast-forward 更新源码、替换整目录 `.next` 与必要的 `node_modules`，重启并检查 systemd 状态及 `/ai/in-depth`。旧 `.next`、旧依赖与 Commit 信息保留在暂存目录，供人工诊断和恢复；清理历史暂存目录前应先确认当前版本稳定。
+上传暂存于 `/home/ubuntu/.x-ai-deploy/<commit>-<run>-<attempt>/`，不会覆盖 `.env.local`、`runtime/`、`logs/` 或 `.git/`。只有部署 Commit 与服务器当前 Commit 的 `package-lock.json` 不同，或 `node_modules` 缺失时，才在独立暂存目录执行服务器 `npm ci`；无法确认已有依赖状态则停止。验证完毕后短暂停止 `x-ai-field`，fast-forward 更新源码、替换整目录 `.next` 与必要的 `node_modules`，重启并检查 systemd 状态及 `/ai`。旧 `.next`、旧依赖与 Commit 信息保留在暂存目录，供人工诊断和恢复；清理历史暂存目录前应先确认当前版本稳定。
 
 旧构建完整时，切换后失败会尝试恢复原分支及 Commit、旧 `.next`、`node_modules` 并重新验证服务。旧构建不完整或不存在时仍可部署，但没有自动回滚：激活失败会保留当前源码、`.next`、依赖及暂存目录现场，并提示人工恢复，不会声称旧服务已恢复。无法安全恢复分支时会明确报错；按 Action 输出的暂存目录人工处理，不要仅恢复 `.next`。当前服务器 `ubuntu` 用户具有广泛免密 sudo 权限，这是现有部署账户的安全风险，建议后续收窄为服务管理所需命令。
 
@@ -275,7 +275,31 @@ npm run discovery -- --open-parent-run-id=UUID --open-context="可选人工补�
 
 第一个命令创建新的常规 Discovery Run；第二个命令恢复已有 Run；第三个命令创建关联原 Regular Run 的独立人工 Open Run。该入口会调用真实 Provider、D3/D5 Web Search 与 Firecrawl，必须显式 `--confirm-paid`。常规 Run 在 D3、D4 都完成且没有合格候选时自动执行 D5；人工 Open 只执行 D5，不重跑 D2–D4。终端报告输出 Run / Parent Run ID、阶段状态、Usage、缓存命中率和候选/审核数量。
 
-In-depth 人工审核入口为 `/review/in-depth`，审核 API 为 `/api/admin/review/in-depth`，公开列表为 `/in-depth`。当前 Next.js `basePath=/ai`，实际浏览器路径分别为 `/ai/review/in-depth`、`/ai/api/admin/review/in-depth`、`/ai/in-depth`。审核页与 API 使用统一管理员 Session，公开列表保持匿名访问。相关状态语义见 [Discovery Workflow](06a-discovery-workflow.md) 和 [Data Model](05-data-model.md)。本地回归：`npm run test:in-depth-review`、`npm run test:admin-auth`。
+In-depth 人工审核入口为 `/review/in-depth`，审核 API 为 `/api/admin/review/in-depth`，公开数据仅通过 `/api/in-depth` 提供。当前 Next.js `basePath=/ai`，实际浏览器路径分别为 `/ai/review/in-depth`、`/ai/api/admin/review/in-depth`、`/ai/api/in-depth`。审核页与 API 使用统一管理员 Session，公开 API 保持匿名访问。相关状态语义见 [Discovery Workflow](06a-discovery-workflow.md) 和 [Data Model](05-data-model.md)。本地回归：`npm run test:in-depth-review`、`npm run test:admin-auth`。
+
+### Discovery Dashboard Worker
+
+```bash
+npm run discovery:worker
+```
+
+该命令持续执行 Dashboard 已接受的任务，会产生付费模型 / Web Search / Firecrawl 调用；只在正式配置好数据库与 Provider 的环境启动。无 Cron。CLI 仍使用上节命令；Worker / CLI 的数据库连接必须支持 session advisory lock（直连或 Session Pooling，不使用 Transaction Pooling）。
+
+Ubuntu systemd 安装入口为 `deploy/x-ai-discovery-worker.service`。先核对 User、WorkingDirectory、npm / Node 22 路径与服务器一致，再执行：
+
+```bash
+sudo install -m 644 deploy/x-ai-discovery-worker.service /etc/systemd/system/x-ai-discovery-worker.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now x-ai-discovery-worker
+sudo systemctl status x-ai-discovery-worker
+journalctl -u x-ai-discovery-worker -n 100 --no-pager
+```
+
+部署前先 `sudo systemctl stop x-ai-discovery-worker`，再运行既有 Deploy；部署脚本会拒绝仍存活的 Worker / Pipeline。停止时优先等待当前工作完成，超出 systemd 停止窗口会终止进程，已开始任务在下次 Worker 启动时明确标记失败，不自动付费重试。部署及验证通过后 `sudo systemctl start x-ai-discovery-worker`；回滚也应在恢复旧代码后人工确认兼容性再启动 Worker。pending 任务保留在数据库，Web 请求或部署中断不丢失已接受提交。不要在旧版不认识队列的代码上遗留无人消费的 pending 任务。
+
+本次无新增 Schema / Migration；按部署版本确认先前 Migration 已应用。协调上线先部署 X-field 的分页消费者（兼容旧 `{ items }` 响应），再上线 X-AI-field 分页 API，避免旧客户端只看到前 10 篇。API 契约见 `04-technical-spec.md`，任务执行与恢复语义见 `04a-discovery-technical-spec.md`。
+
+Mock 回归：`npm run test:discovery-jobs`、`npm run test:discovery-actions`、`npm run test:discovery-orchestrator`、`npm run test:in-depth-pagination`；相邻 X-field 在场时运行 `npm run test:in-depth-load-more` 验证实际客户端的追加、错误恢复、末页与去重。均不执行真实 Discovery 或付费服务。
 
 ## 7. Reusable Diagnostics and Smoke Tests
 

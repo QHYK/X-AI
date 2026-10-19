@@ -71,6 +71,7 @@ const defaults: OrchestratorServices = {
 };
 
 export type RunDiscoveryWorkflowOptions = {
+  queuedRunId?: string;
   dailyDates?: DiscoveryDailyDatePair;
   runId?: string;
   openParentRunId?: string;
@@ -136,7 +137,25 @@ export async function runDiscoveryWorkflow(
   let run: DiscoveryRunRecord;
   let selection: DiscoverySelectionOutput;
 
-  if (options.runId) {
+  if (options.queuedRunId) {
+    const pending = await services.getRun(pool, options.queuedRunId);
+    if (!pending || pending.status !== 'pending') throw new Error('Queued Run must be pending.');
+    run = await services.startRun(pool, pending.id);
+    if (run.runType === 'open') return executeOpenRun(pool, run, services);
+    if (run.runType !== 'regular') throw new Error('Unsupported queued Run type.');
+    try {
+      selection = (await services.runD2(pool, run.id)).selection;
+    } catch (error) {
+      return buildReport(
+        await services.finishRun(pool, run.id, {
+          status: 'failed',
+          endReason: 'error',
+          errorSummary: errorMessage(error),
+        }),
+        emptyCounts(),
+      );
+    }
+  } else if (options.runId) {
     const existing = await services.getRun(pool, options.runId);
     if (!existing) throw new Error(`Discovery Run not found: ${options.runId}`);
     if (existing.runType === 'open') {

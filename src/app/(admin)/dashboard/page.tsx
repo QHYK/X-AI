@@ -6,6 +6,11 @@
 import { getDatabasePool } from '@/db/index.js';
 import { getDiscoveryRunForDate, type DiscoveryDashboardRun } from '@/lib/discovery-dashboard.js';
 import {
+  discoveryRunCacheMetrics,
+  getDiscoveryActiveRunForDate,
+} from '@/lib/discovery-dashboard.js';
+import { DiscoveryActions } from './discovery-actions.js';
+import {
   formatContentCompletionRatio,
   getDashboardData,
   type DashboardContentCompletionMetrics,
@@ -40,6 +45,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const pool = getDatabasePool();
   const data = await getDashboardData(pool, { detailDate });
   const discovery = await getDiscoveryRunForDate(pool, data.detailDate);
+  const activeDiscovery = await getDiscoveryActiveRunForDate(pool, data.detailDate);
   const canRetryDaily = isCurrentDailyDate(data.detailDate, data.latestDailyDate);
   const dailyWorkflowRunning = canRetryDaily ? await isDailyWorkflowRunning() : false;
 
@@ -229,12 +235,39 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           </article>
         )}
       </section>
-      {discovery ? <DiscoveryRunCard run={discovery} /> : null}
+      <section
+        className={styles.details}
+        aria-label="Discovery actions"
+      >
+        <h2>Discovery · {data.detailDate}</h2>
+        <DiscoveryActions
+          key={`regular:${data.detailDate}:${activeDiscovery?.id ?? ''}`}
+          date={data.detailDate}
+          mode="regular"
+          active={activeDiscovery}
+        />
+      </section>
+      {discovery ? (
+        <DiscoveryRunCard
+          run={discovery}
+          date={data.detailDate}
+          active={activeDiscovery}
+        />
+      ) : null}
     </main>
   );
 }
 
-function DiscoveryRunCard({ run }: { run: DiscoveryDashboardRun }) {
+function DiscoveryRunCard({
+  run,
+  date,
+  active,
+}: {
+  run: DiscoveryDashboardRun;
+  date: string;
+  active: { id: string; status: string; errorSummary: string | null } | null;
+}) {
+  const cache = discoveryRunCacheMetrics(run.runType, run.stages);
   const time = (value: string | null) =>
     value
       ? new Intl.DateTimeFormat('zh-CN', {
@@ -262,6 +295,7 @@ function DiscoveryRunCard({ run }: { run: DiscoveryDashboardRun }) {
         </div>
         <StatusBadge status={run.status} />
       </div>
+      {run.errorSummary ? <p role="alert">{run.errorSummary}</p> : null}
       <div className={styles.stageGrid}>
         <article className={`${styles.stageCard} ${styles.discoverySummary}`}>
           <dl className={styles.metricList}>
@@ -290,8 +324,18 @@ function DiscoveryRunCard({ run }: { run: DiscoveryDashboardRun }) {
               value={formatNumber(run.candidateCount)}
             />
             <Metric
-              label="Submitted for review"
+              label="Selected Articles · submitted for review"
               value={formatNumber(run.reviewCount)}
+            />
+            <Metric
+              label="Cached input tokens"
+              value={cache.cachedInputTokens === null ? '—' : formatNumber(cache.cachedInputTokens)}
+            />
+            <Metric
+              label="Cache hit rate"
+              value={
+                cache.cacheHitRate === null ? '—' : `${(cache.cacheHitRate * 100).toFixed(1)}%`
+              }
             />
           </dl>
         </article>
@@ -306,6 +350,14 @@ function DiscoveryRunCard({ run }: { run: DiscoveryDashboardRun }) {
                 <h3>{stage.toUpperCase()}</h3>
                 <StatusBadge status={state?.status ?? null} />
               </div>
+              {stage === 'd5' ? (
+                <DiscoveryActions
+                  key={`open:${date}:${active?.id ?? ''}`}
+                  date={date}
+                  mode="open"
+                  active={active}
+                />
+              ) : null}
               <dl className={styles.metricList}>
                 <Metric
                   label="Model"

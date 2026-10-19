@@ -26,7 +26,7 @@ needs_install=0
 had_old_deps=0
 
 check_pipeline_idle() {
-  local pattern='(run-daily-workflow|run-discovery-workflow|collect-rss|dedupe-stage1|complete-content|process-stage[1-4]|run-model-evaluation|test-discovery-provider|test-discovery-d3)\.(ts|js)|npm run (daily|discovery|collect:rss|dedupe:stage1|complete:content|process:stage[1-4]|eval:stage[1-3])'
+  local pattern='(run-daily-workflow|run-discovery-workflow|run-discovery-worker|collect-rss|dedupe-stage1|complete-content|process-stage[1-4]|run-model-evaluation|test-discovery-provider|test-discovery-d3)\.(ts|js)|npm run (daily|discovery|collect:rss|dedupe:stage1|complete:content|process:stage[1-4]|eval:stage[1-3])'
   local status
   if pgrep -f "$pattern" >/dev/null; then
     echo 'A Daily, Discovery, Evaluation, or processing CLI is running; deployment stopped.' >&2

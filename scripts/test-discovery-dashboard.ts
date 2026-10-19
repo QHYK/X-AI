@@ -77,7 +77,7 @@ const page = await readFile(
   'utf8',
 );
 assert.match(page, /getDiscoveryRunForDate\(pool, data.detailDate\)/);
-assert.match(page, /\{discovery \? <DiscoveryRunCard/);
+assert.match(page, /\{discovery \?\s*\(?\s*<DiscoveryRunCard/);
 await assert.rejects(getDiscoveryRunForDate(db, '2026-02-30'));
 console.log(
   'Discovery Dashboard business date, timezones, date switching, statuses, latest/count and empty-state tests passed.',

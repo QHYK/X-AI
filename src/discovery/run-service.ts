@@ -55,7 +55,12 @@ export type CreateRegularDiscoveryRunResult = {
 /** Creates an isolated, manually requested Open Discovery child Run. */
 export async function createOpenDiscoveryRun(
   pool: Pool,
-  input: { parentRunId: string; manualContext?: string; triggerSource: 'manual' },
+  input: {
+    parentRunId: string;
+    manualContext?: string;
+    triggerSource: 'manual';
+    configSnapshot?: Record<string, unknown>;
+  },
 ): Promise<DiscoveryRunRecord> {
   const parent = await getDiscoveryRun(pool, input.parentRunId);
   if (!parent || parent.runType !== 'regular') {
@@ -64,14 +69,16 @@ export async function createOpenDiscoveryRun(
   const context = input.manualContext?.trim() || null;
   const result = await pool.query<DiscoveryRunRow>(
     `insert into discovery_runs (
-        parent_run_id, run_type, trigger_source, status, config_snapshot
+        parent_run_id, run_type, trigger_source, status, config_snapshot, window_start_date, window_end_date
       ) values (
-        $1::uuid, 'open', $2, 'pending', $3::jsonb
+        $1::uuid, 'open', $2, 'pending', $3::jsonb, $4::date, $5::date
       ) returning ${DISCOVERY_RUN_COLUMNS}`,
     [
       input.parentRunId,
       input.triggerSource,
-      JSON.stringify(context ? { manualOpen: { context } } : {}),
+      JSON.stringify({ ...input.configSnapshot, ...(context ? { manualOpen: { context } } : {}) }),
+      parent.windowStartDate,
+      parent.windowEndDate,
     ],
   );
   const row = result.rows[0];

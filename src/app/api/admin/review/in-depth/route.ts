@@ -62,7 +62,6 @@ export async function PATCH(request: Request): Promise<Response> {
   try {
     const item = await updateInDepthReviewItem(getDatabasePool(), input);
     if (!item) return Response.json({ error: 'Candidate not found.' }, { status: 404 });
-    revalidatePath('/in-depth');
     revalidatePath('/review/in-depth');
     return Response.json({ item }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
@@ -88,7 +87,6 @@ export async function POST(request: Request): Promise<Response> {
   }
   try {
     const introduction = await generateAndSaveInDepthIntroduction(getDatabasePool(), id);
-    revalidatePath('/in-depth');
     revalidatePath('/review/in-depth');
     return Response.json(
       { introduction, saved: true },

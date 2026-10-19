@@ -1,0 +1,18 @@
+[Unit]
+Description=X-AI-field Discovery durable worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/X-AI
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/env npm run discovery:worker
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

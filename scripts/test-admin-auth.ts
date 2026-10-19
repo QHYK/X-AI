@@ -126,6 +126,7 @@ try {
     ['dashboard/analytics/sources', ['GET']],
     ['dashboard/daily/retry', ['POST']],
     ['dashboard/step/retry', ['GET', 'POST']],
+    ['discovery', ['GET', 'POST']],
     ['review/events', ['GET']],
     ['review/events/ranking', ['PATCH']],
     ['review/long-form', ['GET']],
@@ -148,6 +149,36 @@ try {
     }
   }
   const inDepth = await import('../src/app/api/admin/review/in-depth/route.js');
+  const discovery = await import('../src/app/api/admin/discovery/route.js');
+  assert.equal(
+    (
+      await discovery.POST(
+        new Request(`${origin}/ai/api/admin/discovery`, {
+          method: 'POST',
+          headers: { cookie, origin: 'http://evil.test' },
+          body: '{}',
+        }),
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await discovery.POST(
+        new Request(`${origin}/ai/api/admin/discovery`, {
+          method: 'POST',
+          headers: { cookie, origin, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            date: '2026-10-19',
+            mode: 'regular',
+            requestId: 'a'.repeat(32),
+            confirmPaid: false,
+          }),
+        }),
+      )
+    ).status,
+    400,
+  );
   for (const method of ['POST', 'PATCH'] as const) {
     assert.equal(
       (
@@ -187,12 +218,13 @@ try {
   assert.equal(config.matcher.includes('/api/brief/:path*'), false);
   for (const publicPath of [
     'src/app/page.tsx',
-    'src/app/in-depth/page.tsx',
+    'src/app/api/in-depth/route.ts',
     'src/app/api/brief/route.ts',
     'src/app/api/content/read-more/route.ts',
   ]) {
     assert.equal(existsSync(path.join(process.cwd(), publicPath)), true, publicPath);
   }
+  assert.equal(existsSync(path.join(process.cwd(), 'src/app/in-depth/page.tsx')), false);
   const browserPaths: Array<[string, string, string]> = [
     ['/ai/dashboard', './api/admin/dashboard/daily/retry', '/ai/api/admin/dashboard/daily/retry'],
     ['/ai/dashboard', './api/admin/dashboard/step/retry', '/ai/api/admin/dashboard/step/retry'],

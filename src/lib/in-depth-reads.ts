@@ -11,6 +11,11 @@ import {
   type DiscoveryTag,
 } from './discovery-content-metadata.js';
 import type { Pool } from 'pg';
+import {
+  IN_DEPTH_PAGE_SIZE,
+  type InDepthCursor,
+  encodeInDepthCursor,
+} from './in-depth-pagination.js';
 import { z } from 'zod';
 
 export const InDepthReviewStatusSchema = z.enum(['pending', 'approved', 'rejected']);
@@ -146,7 +151,10 @@ export async function getInDepthReviewItem(
 }
 
 /** The only public In-depth Reads query: approval is the publication boundary. */
-export async function listPublishedInDepthReads(db: Queryable): Promise<PublishedInDepthRead[]> {
+export async function listPublishedInDepthReads(
+  db: Queryable,
+  cursor: InDepthCursor | null = null,
+): Promise<PublishedInDepthRead[]> {
   const result = await db.query<
     PublishedInDepthRead & {
       evidence?: Record<string, unknown>;
@@ -154,7 +162,8 @@ export async function listPublishedInDepthReads(db: Queryable): Promise<Publishe
       dailySource?: string;
     }
   >(
-    `select idc.id, ${EDITORIAL_COLUMNS},
+    `select idc.id, ${EDITORIAL_COLUMNS}, dc.id as "cursorId",
+            to_char(dc.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "cursorCreatedAt",
             idc.reviewed_at::text as "reviewedAt", dc.url,
             dc.discovery_path as "discoveryPath", dc.title as "originalTitle",
             dc.title_zh as "titleZh", dc.author, dc.publication,
@@ -166,7 +175,9 @@ export async function listPublishedInDepthReads(db: Queryable): Promise<Publishe
        from in_depth_candidates idc
        join discovery_candidates dc on dc.id = idc.discovery_candidate_id
       where idc.review_status = 'approved'
-      order by idc.reviewed_at desc nulls last, dc.created_at desc, dc.id desc`,
+        and ($1::timestamptz is null or (dc.created_at, dc.id) < ($1::timestamptz, $2::uuid))
+      order by dc.created_at desc, dc.id desc limit $3`,
+    [cursor?.createdAt ?? null, cursor?.id ?? null, IN_DEPTH_PAGE_SIZE + 1],
   );
   const normalized = await normalizePublications(db, result.rows);
   return normalized.map((row) => {
@@ -179,6 +190,22 @@ export async function listPublishedInDepthReads(db: Queryable): Promise<Publishe
     delete fields.evaluation;
     return { ...fields, ...metadata };
   });
+}
+
+export async function getPublishedInDepthPage(db: Queryable, cursor: InDepthCursor | null = null) {
+  const rows = await listPublishedInDepthReads(db, cursor);
+  const hasMore = rows.length > IN_DEPTH_PAGE_SIZE;
+  const items = rows.slice(0, IN_DEPTH_PAGE_SIZE);
+  const last = items.at(-1) as
+    (PublishedInDepthRead & { cursorId: string; cursorCreatedAt: string }) | undefined;
+  return {
+    items: items.map(toPublicInDepthRead),
+    hasMore,
+    nextCursor:
+      hasMore && last
+        ? encodeInDepthCursor({ id: last.cursorId, createdAt: last.cursorCreatedAt })
+        : null,
+  };
 }
 
 async function normalizePublications<

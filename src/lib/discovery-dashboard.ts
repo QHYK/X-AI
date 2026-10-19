@@ -1,12 +1,42 @@
 import { parseBriefDate } from './brief-date.js';
 import type { Pool } from 'pg';
 import type { DiscoveryBranchExecutionState, DiscoveryStage } from '../db/schema.js';
+import {
+  emptyDiscoveryStageUsage,
+  mergeDiscoveryStageUsage,
+  normalizeDiscoveryStageUsage,
+  discoveryCacheHitRate,
+} from '../discovery/execution-diagnostics.js';
+
+export function discoveryRunCacheMetrics(runType: string, stages: DiscoveryDashboardRun['stages']) {
+  const keys =
+    runType === 'open'
+      ? (['d5'] as const)
+      : (['d2', 'd3', 'd4', ...(stages.d5 ? ['d5' as const] : [])] as const);
+  let usage = emptyDiscoveryStageUsage();
+  for (const key of keys)
+    usage = mergeDiscoveryStageUsage(
+      usage,
+      normalizeDiscoveryStageUsage(stages[key as DiscoveryStage]?.usage),
+    );
+  return { cachedInputTokens: usage.cachedInputTokens, cacheHitRate: discoveryCacheHitRate(usage) };
+}
+
+export async function getDiscoveryActiveRunForDate(db: Pick<Pool, 'query'>, date: string) {
+  const result = await db.query<{ id: string; status: string; errorSummary: string | null }>(
+    `select id, status, error_summary as "errorSummary" from discovery_runs where window_end_date = $1::date
+      and status in ('pending', 'running') order by created_at, id limit 1`,
+    [date],
+  );
+  return result.rows[0] ?? null;
+}
 
 export type DiscoveryDashboardRun = {
   id: string;
   runType: string;
   status: string;
   endReason: string | null;
+  errorSummary?: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   durationMs: number | null;
@@ -28,6 +58,7 @@ export async function getDiscoveryRunForDate(
     run_type: string;
     status: string;
     end_reason: string | null;
+    error_summary: string | null;
     started_at: Date | string | null;
     finished_at: Date | string | null;
     execution_state: DiscoveryDashboardRun['stages'] | null;
@@ -39,7 +70,7 @@ export async function getDiscoveryRunForDate(
        select *, count(*) over () as run_count from discovery_runs
        where window_end_date = $1::date
      )
-     select r.id, r.run_type, r.status, r.end_reason, r.started_at, r.finished_at,
+     select r.id, r.run_type, r.status, r.end_reason, r.error_summary, r.started_at, r.finished_at,
             r.execution_state, r.run_count,
             (select count(*) from discovery_candidates dc where dc.run_id = r.id) as candidate_count,
             (select count(*) from in_depth_candidates ic
@@ -58,6 +89,7 @@ export async function getDiscoveryRunForDate(
     runType: row.run_type,
     status: row.status,
     endReason: row.end_reason,
+    errorSummary: row.error_summary,
     startedAt,
     finishedAt,
     durationMs:

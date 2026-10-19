@@ -1,4 +1,4 @@
-// D2–D4	
+// D2–D4
 // 统一管理各阶段的执行状态、耗时、模型 Usage 和缓存统计。
 import type {
   DiscoveryBranchExecutionState,
@@ -103,7 +103,9 @@ export function discoveryCacheHitRate(usage: DiscoveryStageUsage): number | null
   if (!usage.usageComplete || usage.inputTokens === null || usage.cachedInputTokens === null) {
     return null;
   }
-  return usage.inputTokens > 0 ? usage.cachedInputTokens / usage.inputTokens : null;
+  return usage.inputTokens > 0 && usage.cachedInputTokens <= usage.inputTokens
+    ? usage.cachedInputTokens / usage.inputTokens
+    : null;
 }
 
 export function initialDiscoveryStageState(

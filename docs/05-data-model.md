@@ -354,7 +354,7 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 - `run_type` 使用 CHECK 限定为 `regular` / `single_lead` / `open`，并遵守以下父子关系：
   - `regular`：`parent_run_id` 与 `source_lead_id` 均为 NULL；独立重新执行即使输入窗口相同也创建新的无父 Run，不自动建立父子关系。
   - `single_lead`：`parent_run_id` 与 `source_lead_id` 均为 NOT NULL；父 Run 必须是原 `regular` Run，Lead 必须来自父 Run 的 `selection_output`。
-  - `open`：`source_lead_id` 为 NULL；人工补充执行时 `parent_run_id` 为 NOT NULL 并指向原 `regular` Run。自动 Fallback Open 作为 `regular` Run 的内部阶段执行，不创建 `run_type = 'open'` 的子 Run。
+  - `open`：`source_lead_id` 为 NULL；人工补充执行时 `parent_run_id` 为 NOT NULL 并指向原 `regular` Run，并保存继承的 `window_start_date` / `window_end_date`。自动 Fallback Open 作为 `regular` Run 的内部阶段执行，不创建 `run_type = 'open'` 的子 Run。
 - 使用 CHECK 约束上述空值组合：`regular` 只能是无父 Run，`single_lead` 必须同时提供父 Run 和 Lead，独立的 `open` Run 必须提供父 Run 且不能提供 Lead。
 - `CHECK(parent_run_id IS NULL OR parent_run_id <> id)` 防止 Run 自引用；父 Run 的类型与 Lead 归属由应用层验证。
 - 日期字段记录**计划输入窗口**，不从实际执行时间推导；`input_content_ids` 记录当次选入的 Event / Digest / Long-form 内容成员 ID，避免复制 Daily 正文。它不保证当时的完整模型输入文本可复现；本版不增加 `input_snapshot`，D2 实现时再决定模型输入文本的持久化方式。
@@ -365,6 +365,9 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 - `status` 与 `end_reason` 分开：例如 `partial + timeout`、`completed + candidates_found` 与 `completed + no_candidates` 的业务含义不同；`end_reason` 只在运行结束时填写。
 - `execution_state` 仅接受 JSON 对象。已执行阶段以 `d2` / `d3` / `d4` / `d5` 键保存 `status`、`endReason`、`completedAt`、错误摘要、Provider / Model / API mode、累计 `elapsedMs` 与 `usage`；更新单个阶段时不得覆盖其他阶段。`running` 或字段缺失均不表示完成，历史 Run 不从缺失状态推断成功。D3 / D5 正常空结果也写入对应 `status = 'completed'` 与 `endReason = 'no_candidates'`，供 Resume 作确定性判断。
 - `usage` 包含 `requests`、`inputTokens`、`outputTokens`、`cachedInputTokens` 与 `usageComplete`。缓存输入已包含在输入 Token 内，不得再次加到总 Token；Provider 未返回某字段使用 `null`，任一请求缺失完整 Usage 时 `usageComplete = false`。缓存命中率是读取端派生指标（`cachedInputTokens / inputTokens`），不持久化；统计不完整时不得展示为完整命中率。
+
+- Dashboard 已接受任务在 `config_snapshot.dashboardJob.requestId` 保存随机请求标识，已有 status / error_summary / 时间戳记录排队、执行和终态，不新增任务表。Worker 只消费带该标记的 pending Run；普通 CLI 创建的 Run 不被当作排队任务。业务窗口、父子关联和既有候选保持原义。
+- Dashboard Selected Article Count 查询 `discovery_candidates.run_id = discovery_runs.id` 关联的 `in_depth_candidates` 行数，包括提交后已 Approved / Rejected 的行；不是发现数或 Approved 数。普通 Run 与 Open Run 分别统计自己的新增审核候选。
 
 ### 11.2 `discovery_trace_spans`
 

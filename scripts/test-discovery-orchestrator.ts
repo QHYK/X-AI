@@ -15,12 +15,17 @@ type Scenario = {
   qualified?: number;
   initial?: 'new' | 'partial' | 'completed' | 'missing_state';
   manualOpen?: boolean;
+  queued?: 'regular' | 'open';
 };
 
 async function execute(scenario: Scenario) {
   const initial = scenario.initial ?? 'new';
   const calls = { d2: 0, d3: 0, d4: 0, d5: 0 };
   const run = makeRun(initial, scenario.leads);
+  if (scenario.queued === 'open') {
+    run.runType = 'open';
+    run.parentRunId = '00000000-0000-4000-8000-000000000099';
+  }
   const services: OrchestratorServices = {
     createRun: (async () => ({
       run,
@@ -94,11 +99,13 @@ async function execute(scenario: Scenario) {
   const report = await runDiscoveryWorkflow(
     {} as never,
     {
-      ...(scenario.manualOpen
-        ? { openParentRunId: '00000000-0000-4000-8000-000000000099' }
-        : initial === 'new'
-          ? { dailyDates: ['2026-10-14', '2026-10-15'] as const }
-          : { runId: run.id }),
+      ...(scenario.queued
+        ? { queuedRunId: run.id }
+        : scenario.manualOpen
+          ? { openParentRunId: '00000000-0000-4000-8000-000000000099' }
+          : initial === 'new'
+            ? { dailyDates: ['2026-10-14', '2026-10-15'] as const }
+            : { runId: run.id }),
     },
     services,
   );
@@ -248,3 +255,20 @@ assert.equal(manualOpen.report.run.parentRunId, '00000000-0000-4000-8000-0000000
 assert.deepEqual(manualOpen.calls, { d2: 0, d3: 0, d4: 0, d5: 1 });
 
 console.log('Discovery orchestrator mock tests passed.');
+
+for (const queued of ['regular', 'open'] as const) {
+  const { calls, report } = await execute({
+    queued,
+    d3: 'completed',
+    d4: 'completed',
+    leads: [],
+    qualified: 0,
+  });
+  assert.equal(report.run.status, 'completed');
+  assert.deepEqual(
+    calls,
+    queued === 'open' ? { d2: 0, d3: 0, d4: 0, d5: 1 } : { d2: 1, d3: 1, d4: 1, d5: 1 },
+  );
+  if (queued === 'open') assert.deepEqual(Object.keys(report.run.executionState), ['d5']);
+}
+console.log('Queued Regular/Open execute only their real stages; no fabricated D2–D4 states.');

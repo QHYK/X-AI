@@ -284,7 +284,7 @@ User Request → Read More API → Server-side Full Content → LLM → Detailed
 
 ### 6.3 管理路由与认证
 
-`/dashboard/*` 与 `/review/*` 是后台页面，保留现有 URL；`/api/admin/*` 是后台 API。二者均要求单管理员 Session。未登录页面跳转 `/login`，未登录 API 返回 JSON 401。`/`、`/in-depth`、`/api/in-depth`、`/api/brief` 和 `/api/content/read-more` 保持匿名访问。登录与退出端点位于 `/api/auth/*`。
+`/dashboard/*` 与 `/review/*` 是后台页面，保留现有 URL；`/api/admin/*` 是后台 API。二者均要求单管理员 Session。未登录页面跳转 `/login`，未登录 API 返回 JSON 401。`/`、`/api/in-depth`、`/api/brief` 和 `/api/content/read-more` 保持匿名访问。登录与退出端点位于 `/api/auth/*`。
 
 管理员密码以服务端环境变量中的 scrypt hash 配置。登录后生成随机、不透明的 Session Cookie；服务端文件存储其 hash 对应的会话记录和过期时间，独立于业务数据库及 `runtime/` Pipeline Artifacts。退出删除记录；密码 hash 变化会使旧会话失效。不使用用户表或 RBAC。Proxy 保护页面和管理 API，每个管理 Route Handler 还独立校验 Session；修改数据或触发任务的请求校验同源 Origin。Cookie 的 Secure 属性由部署配置决定，具体设置和 HTTP 风险见 `09-operations.md`。
 
@@ -308,7 +308,7 @@ Dashboard 不是 Production Source of Truth。它读取 Production 数据与 Run
 
 查看指定日期的 Daily Job 运行情况与各 Processing Step 的结果，用于判断该次运行是否正常完成以及定位问题。
 
-`/dashboard` 的只读 Discovery Run Card 以当前 Dashboard 选中的业务日期匹配 `discovery_runs.window_end_date = selectedDate`（PostgreSQL `date` 直接比较，不作时区转换），不按服务器当天或启动日期过滤。该日期所有状态的 Run 均计入总次数；详细展示实际 `started_at` 最新的一次（NULL 排最后，同时间按 ID 降序），没有 Run 时隐藏。读取 `discovery_runs.execution_state` 和关联 Candidate / 审核记录显示真实状态、耗时与数量，历史缺失指标显示未知，不从 Trace 或候选反推阶段成功；不提供运行、Retry 或 Resume 控制。
+`/dashboard` 的 Discovery Run Card 以当前 Dashboard 选中的业务日期匹配 `discovery_runs.window_end_date = selectedDate`（PostgreSQL `date` 直接比较，不作时区转换），不按服务器当天或启动日期过滤。该日期所有状态的 Run 均计入总次数；详细展示实际 `started_at` 最新的一次（NULL 排最后，同时间按 ID 降序），没有 Run 时隐藏。读取 `discovery_runs.execution_state` 和关联 Candidate / 审核记录显示真实状态、耗时与数量，历史缺失指标显示未知，不从 Trace 或候选反推阶段成功；完整 Retry 位于 Discovery 区域标题旁，独立 Retry Open 位于 D5 卡片；即使该日期没有 Run，仍可提交完整 Retry。按钮展示窗口 / 阶段及付费确认，Admin API 迅速返回任务 ID 并轮询状态；执行方式见 `04a-discovery-technical-spec.md` §7.1。CLI Resume 保留。缓存 Token 与命中率汇总实际阶段 Usage，缺失值显示 `—`；Selected 统计定义见 `05-data-model.md` §11.1。
 
 ### 7.3 Human Review
 
@@ -328,7 +328,7 @@ In-depth Review 保留完整标题及既有审核操作；基本信息区左侧�
 - 同端点 `POST { id }` 在 Session、同源及输入校验后，调用共享 LLM Client 生成并自动保存介绍。服务端依次复用完整 Fetch Cache / 已有 Candidate 正文、Daily 已保存全文；未命中时复用 Firecrawl 读取 Original URL 并保存到同一 Cache，再交给普通 Structured LLM。当前 Client 的 Chat Completions 入口不执行网页读取工具，不假设模型收到 URL 就已阅读；不引入 Agent、搜索或 Discovery Run。正文不可访问、不完整或超出单次输入上限时明确失败，不用 Agent 摘要替代。原文 Cache 技术边界见 `04a-discovery-technical-spec.md` §4.3。
 - Regenerate 遇到未保存人工修改须确认；请求中继续输入或切换 Candidate 时，旧响应不能覆盖新输入。生成成功但保存失败时返回生成文本，允许直接 Save changes 重试，无需重复模型调用。
 - 介绍的持久化与历史兼容由 `05-data-model.md` §11.4 定义，模型质量与输出契约由 `07-prompt-spec.md` 的 In-depth Editorial Introduction 定义。
-- 公开 `/in-depth` 和匿名 `GET /api/in-depth` 共用 Approved 查询，读取最新已保存介绍及 Editorial extra_info；API 返回 `{ items }`，公开字段显式列出，不序列化 Notes、内部证据、模型诊断或内部 Editorial 传输对象。无介绍时回退原内容，无 Draft/Published 双版本。
+- X-AI-field 不再提供公开 `/in-depth` 页面；匿名 `GET /api/in-depth` 使用 Approved 查询，读取最新已保存介绍及 Editorial extra_info；API 返回 `{ items, nextCursor, hasMore }`，默认每页 10 篇；SQL 按 Discovery Candidate `created_at DESC, id DESC` 排序，以二者组成严格校验的 opaque cursor，保留 UTC 微秒精度，用 tuple `<` 查询下一页并多取一条判断末页，不使用 Offset。非法游标返回 400；末页 nextCursor 为 null、hasMore 为 false。items 中既有 Agent / Editorial / Tags / Cover 等字段语义不变。公开字段显式列出，不序列化 Notes、内部证据、模型诊断或内部 Editorial 传输对象。无介绍时回退原内容，无 Draft/Published 双版本。
 - 读者端 Xfield 使用公开 API 增量字段 `agent: { summary, whyWorthReading }` 与 `editorial: { summary, whyWorthReading, extra_info }` 分别展示原始 Agent 与独立 Editorial，空 Editorial 不回填 Agent；既有顶层展示字段保持原有覆盖语义。公开元信息另提供 `publishedAt`、经既有读取器验证的双语 `tags` 与 `cover`，不返回其所在的完整 `evaluation` / `evidence`。
 
 ### 7.4 Model Evaluation
