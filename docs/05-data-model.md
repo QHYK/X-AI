@@ -366,7 +366,7 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 - `execution_state` 仅接受 JSON 对象。已执行阶段以 `d2` / `d3` / `d4` / `d5` 键保存 `status`、`endReason`、`completedAt`、错误摘要、Provider / Model / API mode、累计 `elapsedMs` 与 `usage`；更新单个阶段时不得覆盖其他阶段。`running` 或字段缺失均不表示完成，历史 Run 不从缺失状态推断成功。D3 / D5 正常空结果也写入对应 `status = 'completed'` 与 `endReason = 'no_candidates'`，供 Resume 作确定性判断。
 - `usage` 包含 `requests`、`inputTokens`、`outputTokens`、`cachedInputTokens` 与 `usageComplete`。缓存输入已包含在输入 Token 内，不得再次加到总 Token；Provider 未返回某字段使用 `null`，任一请求缺失完整 Usage 时 `usageComplete = false`。缓存命中率是读取端派生指标（`cachedInputTokens / inputTokens`），不持久化；统计不完整时不得展示为完整命中率。
 
-- Dashboard 已接受任务在 `config_snapshot.dashboardJob.requestId` 保存随机请求标识，已有 status / error_summary / 时间戳记录排队、执行和终态，不新增任务表。Worker 只消费带该标记的 pending Run；普通 CLI 创建的 Run 不被当作排队任务。业务窗口、父子关联和既有候选保持原义。
+- 已接受的队列任务在 `config_snapshot.dashboardJob.requestId` 保存请求标识（沿用既有键名）：Dashboard 使用随机值；Scheduled CLI 使用 `discovery:scheduled:YYYY-MM-DD` 固定值，日期为上海业务日期，同日各终态也不重复创建定时 Run，`trigger_source` 使用既有 `schedule`。标识查找与创建沿用同一提交锁，手动新请求不与定时标识冲突。已有 status / error_summary / 时间戳记录排队、执行和终态，不新增任务表。Worker 只消费带该标记的 pending Run；普通 CLI 创建的 Run 不被当作排队任务。业务窗口、父子关联和既有候选保持原义。
 - Dashboard Selected Article Count 查询 `discovery_candidates.run_id = discovery_runs.id` 关联的 `in_depth_candidates` 行数，包括提交后已 Approved / Rejected 的行；不是发现数或 Approved 数。普通 Run 与 Open Run 分别统计自己的新增审核候选。
 
 ### 11.2 `discovery_trace_spans`

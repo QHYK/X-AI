@@ -167,7 +167,7 @@ D4 本身不抓取，继续通过现有 Daily 关联读取 `raw_articles.full_co
 
 ### 7.1 Dashboard 持久化异步执行
 
-Dashboard 的 Admin 提交端点先创建并提交 `pending` Run（上游未就绪则为 `blocked`），不在 HTTP 生命周期内调用 Agent。独立 `discovery:worker` 轮询已标记的 pending Run，通过 `runDiscoveryWorkflow({ queuedRunId })` 执行既有阶段；CLI 与 Worker 共用同一编排核心及 PostgreSQL 全局执行锁，串行执行 Discovery，避免跨进程写入 / SDK 全局状态冲突。新提交按业务窗口拒绝同时存在 pending / running，并通过持久化 request ID 识别同一次提交的网络重试；主动再次运行使用新 ID。
+Scheduled CLI 复用 Dashboard 的同一提交函数与队列标记，不直接执行 Pipeline；命令与 Cron 配置见 `09-operations.md`。Dashboard 的 Admin 提交端点先创建并提交 `pending` Run（上游未就绪则为 `blocked`），不在 HTTP 生命周期内调用 Agent。独立 `discovery:worker` 轮询已标记的 pending Run，通过 `runDiscoveryWorkflow({ queuedRunId })` 执行既有阶段；CLI 与 Worker 共用同一编排核心及 PostgreSQL 全局执行锁，串行执行 Discovery，避免跨进程写入 / SDK 全局状态冲突。新提交按业务窗口拒绝同时存在 pending / running，并通过持久化 request ID 识别同一次提交的网络重试；主动再次运行使用新 ID。
 
 Worker 不以进程内存作为任务状态；执行中断后，在取得排他锁的下一轮将遗留 running 任务明确标为 failed 并记录错误，保留已有 Candidate、阶段状态与 Trace，不自动重复付费；pending 保留等待执行。后续可显式通过 CLI Resume（满足既有恢复条件）或创建新 Run。持锁连接丢失时执行进程退出，防止失锁后继续调用模型。systemd 保证退出后重启；错误与报告同时写入 Run / 阶段记录和 journald。执行锁采用 session advisory lock，数据库连接须为直连或 Session Pooling，不能使用 Transaction Pooling。服务安装、部署停启与日志命令见 `09-operations.md`。
 

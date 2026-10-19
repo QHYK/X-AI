@@ -16,10 +16,15 @@ export async function submitDiscoveryJob(
     date: string;
     mode: 'regular' | 'open';
     requestId: string;
+    triggerSource?: 'schedule' | 'manual';
   },
   services = submissionServices,
 ) {
   const dailyDates = discoveryDatesForEndDate(input.date);
+  const triggerSource = input.triggerSource ?? 'manual';
+  if (triggerSource === 'schedule' && input.mode !== 'regular') {
+    throw new Error('Scheduled Discovery only submits Regular Runs.');
+  }
   const gate = await pool.connect();
   try {
     await gate.query('begin');
@@ -30,7 +35,12 @@ export async function submitDiscoveryJob(
     );
     if (repeated.rows[0]) {
       const existing = await services.getDiscoveryRun(pool, repeated.rows[0].id);
-      if (!existing || existing.windowEndDate !== input.date || existing.runType !== input.mode)
+      if (
+        !existing ||
+        existing.windowEndDate !== input.date ||
+        existing.runType !== input.mode ||
+        existing.triggerSource !== triggerSource
+      )
         throw new DiscoveryJobConflict('Request ID already belongs to another request.');
       await gate.query('commit');
       return existing;
@@ -60,7 +70,7 @@ export async function submitDiscoveryJob(
       run = (
         await services.createRegularDiscoveryRun(pool, {
           dailyDates,
-          triggerSource: 'manual',
+          triggerSource,
           configSnapshot,
         })
       ).run;

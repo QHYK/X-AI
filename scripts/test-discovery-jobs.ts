@@ -10,6 +10,7 @@ import { discoveryDatesForEndDate } from '../src/lib/discovery-window.js';
 import { discoveryRunCacheMetrics } from '../src/lib/discovery-dashboard.js';
 import { POST, GET } from '../src/app/api/admin/discovery/route.js';
 import type { DiscoveryRunRecord } from '../src/discovery/run-service.js';
+import { submitScheduledDiscovery } from '../src/discovery/scheduled.js';
 
 const runs: DiscoveryRunRecord[] = [];
 let sequence = 0,
@@ -104,8 +105,16 @@ function create(
 const services = {
   createRegularDiscoveryRun: (async (
     _db: unknown,
-    input: { dailyDates: readonly [string, string]; configSnapshot: Record<string, unknown> },
-  ) => ({ run: create('regular', input.dailyDates, input.configSnapshot) })) as never,
+    input: {
+      dailyDates: readonly [string, string];
+      configSnapshot: Record<string, unknown>;
+      triggerSource: 'manual' | 'schedule';
+    },
+  ) => {
+    const run = create('regular', input.dailyDates, input.configSnapshot);
+    run.triggerSource = input.triggerSource;
+    return { run };
+  }) as never,
   createOpenDiscoveryRun: (async (
     _db: unknown,
     input: { parentRunId: string; configSnapshot: Record<string, unknown> },
@@ -179,6 +188,62 @@ assert.equal(
 );
 assert.equal(queuedAfterRestart.status, 'completed');
 assert.equal(first.status, 'completed', 'Historical Run remains intact.');
+const scheduledNow = new Date('2026-10-20T04:00:00Z');
+const beforeSchedule = runs.length;
+await Promise.all(
+  [1, 2].map(() =>
+    submitScheduledDiscovery(
+      scheduledNow,
+      (input) => submitDiscoveryJob(db, input, services),
+      () => {},
+    ),
+  ),
+);
+assert.equal(runs.length, beforeSchedule + 1, 'Concurrent Cron submissions create one Run.');
+const scheduled = runs.at(-1)!;
+assert.equal(scheduled.triggerSource, 'schedule');
+assert.equal(scheduled.runType, 'regular');
+assert.equal(scheduled.windowStartDate, '2026-10-19');
+assert.equal(scheduled.windowEndDate, '2026-10-20');
+for (const status of ['running', 'completed', 'failed', 'blocked'] as const) {
+  scheduled.status = status;
+  await submitScheduledDiscovery(
+    scheduledNow,
+    (input) => submitDiscoveryJob(db, input, services),
+    () => {},
+  );
+  assert.equal(runs.length, beforeSchedule + 1, 'Cron dedup persists across all statuses.');
+}
+const manualAfterCron = await submitDiscoveryJob(
+  db,
+  { date: '2026-10-20', mode: 'regular', requestId: 'manual-after-cron' },
+  services,
+);
+assert.notEqual(manualAfterCron.id, scheduled.id);
+assert.equal(manualAfterCron.triggerSource, 'manual');
+await submitScheduledDiscovery(
+  scheduledNow,
+  (input) => submitDiscoveryJob(db, input, services),
+  () => {},
+);
+assert.equal(
+  runs.length,
+  beforeSchedule + 2,
+  'Cron retry finds its original Run, not the manual Retry.',
+);
+await assert.rejects(
+  submitDiscoveryJob(
+    db,
+    {
+      date: '2026-10-22',
+      mode: 'open',
+      triggerSource: 'schedule',
+      requestId: 'invalid-scheduled-open',
+    },
+    services,
+  ),
+  /only submits Regular/,
+);
 locked = true;
 assert.equal(
   await withDiscoveryExecutionLock(db, async () => {

@@ -277,17 +277,18 @@ npm run discovery -- --open-parent-run-id=UUID --open-context="可选人工补�
 
 In-depth 人工审核入口为 `/review/in-depth`，审核 API 为 `/api/admin/review/in-depth`，公开数据仅通过 `/api/in-depth` 提供。当前 Next.js `basePath=/ai`，实际浏览器路径分别为 `/ai/review/in-depth`、`/ai/api/admin/review/in-depth`、`/ai/api/in-depth`。审核页与 API 使用统一管理员 Session，公开 API 保持匿名访问。相关状态语义见 [Discovery Workflow](06a-discovery-workflow.md) 和 [Data Model](05-data-model.md)。本地回归：`npm run test:in-depth-review`、`npm run test:admin-auth`。
 
-### Discovery Dashboard Worker
+### Discovery Worker
 
 ```bash
 npm run discovery:worker
 ```
 
-该命令持续执行 Dashboard 已接受的任务，会产生付费模型 / Web Search / Firecrawl 调用；只在正式配置好数据库与 Provider 的环境启动。无 Cron。CLI 仍使用上节命令；Worker / CLI 的数据库连接必须支持 session advisory lock（直连或 Session Pooling，不使用 Transaction Pooling）。
+该命令持续执行 Dashboard / Scheduled CLI 已接受的任务，会产生付费模型 / Web Search / Firecrawl 调用；只在正式配置好数据库与 Provider 的环境启动。CLI 仍使用上节命令；Worker / CLI 的数据库连接必须支持 session advisory lock（直连或 Session Pooling，不使用 Transaction Pooling）。
 
 Ubuntu systemd 安装入口为 `deploy/x-ai-discovery-worker.service`。先核对 User、WorkingDirectory、npm / Node 22 路径与服务器一致，再执行：
 
 ```bash
+cd /home/ubuntu/X-AI
 sudo install -m 644 deploy/x-ai-discovery-worker.service /etc/systemd/system/x-ai-discovery-worker.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now x-ai-discovery-worker
@@ -300,6 +301,42 @@ journalctl -u x-ai-discovery-worker -n 100 --no-pager
 本次无新增 Schema / Migration；按部署版本确认先前 Migration 已应用。协调上线先部署 X-field 的分页消费者（兼容旧 `{ items }` 响应），再上线 X-AI-field 分页 API，避免旧客户端只看到前 10 篇。API 契约见 `04-technical-spec.md`，任务执行与恢复语义见 `04a-discovery-technical-spec.md`。
 
 Mock 回归：`npm run test:discovery-jobs`、`npm run test:discovery-actions`、`npm run test:discovery-orchestrator`、`npm run test:in-depth-pagination`；相邻 X-field 在场时运行 `npm run test:in-depth-load-more` 验证实际客户端的追加、错误恢复、末页与去重。均不执行真实 Discovery 或付费服务。
+
+### Discovery Scheduled CLI / Crontab
+
+`npm run discovery:scheduled` 供 Cron 每天调用；它按 [Discovery Workflow §2.1](06a-discovery-workflow.md#21-触发与依赖) 的上海自然日规则检查是否执行，不依赖服务器本地时区。非执行日只记录 skipped、退出码为 0，不连接数据库；执行日只提交 Regular 任务，窗口为前一天和今天，`trigger_source = schedule`，由上述 Worker 异步执行完整流程（D5 仍遵循原自动触发条件）。不要求 `--confirm-paid`；启用 Cron 即授权自动任务的付费调用，提交脚本自身不调用模型或 Firecrawl。
+
+同日 Cron 重复调用返回已存在的定时 Run，包括已完成、失败或 blocked 的记录，不自动重复付费；幂等标识由 [Data Model §11.1](05-data-model.md#111-discovery_runs) 定义。Dashboard 手动 Retry 使用独立请求标识，终态 Cron Run 不阻止手动新建 Run。沿用现有业务窗口互斥：首次提交时如果同窗口已有 pending / running 则报错，退出码为 1；数据库或提交异常同样非零退出。修复上游后可手动 Retry，或在当天重新调用未成功提交的 Cron 入口；已记录 blocked 的定时 Run 不会被该命令重置。
+
+**先部署新代码并安装、启动 Worker，再启用 Cron。** 若尚未安装，按上一节操作；确认：
+
+```bash
+cd /home/ubuntu/X-AI
+mkdir -p runtime
+sudo systemctl is-active x-ai-discovery-worker
+timedatectl
+date '+%F %T %Z %z'
+sudo systemctl status cron --no-pager
+crontab -l
+```
+
+在 `ubuntu` 用户的 `crontab -e` 中保留原 Daily 条目并追加 Discovery：
+
+```cron
+CRON_TZ=Asia/Shanghai
+30 8 * * * cd /home/ubuntu/X-AI && /usr/bin/npm run daily >> /home/ubuntu/X-AI/runtime/daily.log 2>&1
+0 12 * * * cd /home/ubuntu/X-AI && /usr/bin/npm run discovery:scheduled >> /home/ubuntu/X-AI/runtime/discovery.log 2>&1
+```
+
+上线前必须检查**生产服务器实际 Cron 实现是否支持 `CRON_TZ`，以及实际采用的调度时区**（服务器上 `man 5 crontab`、现有 Cron 配置与运行日志）；不能仅凭该环境变量已写入就认为触发时间正确。如果 Cron 不按 `CRON_TZ` 调度，需先确认实际时区与上海 12:00 对应关系，再配置触发时刻。只设置任务内的 TZ 不等于改变调度器触发时区。本文给出的两条表达式以调度器实际按上海时间执行为前提，不自动修改服务器时区或原 Daily 配置。
+
+```bash
+tail -n 30 /home/ubuntu/X-AI/runtime/discovery.log
+sudo journalctl -u cron --since today --no-pager
+sudo journalctl -u x-ai-discovery-worker -n 100 --no-pager
+```
+
+提交日志显示上海日期及 Run ID / 状态，实际执行日志在 Worker journald。结合 Cron 日志核对首次调用确为上海 12:00。部署时沿用上一节 Worker 停启流程，避开 Cron 提交时刻；排队任务会保留。该入口不新增依赖、Schema、Migration 或调度服务。本地安全回归：`npm run test:discovery-scheduled`、`npm run test:discovery-jobs`；不要直接运行真实 Scheduled CLI 代替 Mock 测试。
 
 ## 7. Reusable Diagnostics and Smoke Tests
 

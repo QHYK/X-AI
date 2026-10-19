@@ -46,7 +46,7 @@
 
 ### 2.1 触发与依赖
 
-Discovery 每两天 12:00（Asia/Shanghai）由独立入口触发。Code 固定本次依赖的两期 Daily 日期和实际输入内容 ID，不因补跑而滑动窗口。
+Discovery 以 2026-10-20 为起始日，按 Asia/Shanghai 自然日期计算与起始日的日差：起始日前跳过，非负偶数日差执行。Cron 每天上海时间 12:00 调用独立 Scheduled CLI。Code 固定本次依赖的两期 Daily 日期和实际输入内容 ID，不因补跑而滑动窗口。
 
 - 两期 Daily 均成功完成后，才启动 Discovery。每一期的就绪判断为：该 `daily_date` 至少存在一条 `pipeline_runs.step IN ('daily', 'stage4') AND status = 'success'` 的记录。
 - `stage4/success` 可独立证明该期 Daily 已完成；手动重跑 Stage4 成功后，不要求原 Daily Run 的状态同步更新，也不增加额外发布状态校验。
