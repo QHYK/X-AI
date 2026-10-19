@@ -3,8 +3,7 @@
  *
  * 数据库指标以 workflow daily_date 为业务归属；runtime 仅补充运行观测数据，不作为业务数据来源。
  */
-import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { opendir, readdir, readFile } from 'node:fs/promises';
 import type { Pool } from 'pg';
 import { parseBriefDate } from './brief-date.js';
 import { getDailyBriefForDailyScope, type DailyBriefResponse } from './daily-brief.js';
@@ -594,7 +593,7 @@ export async function loadContentCompletionRuntimeByDate(
   rootDir: string,
   requestedDates: Set<string>,
 ): Promise<Map<string, DashboardContentCompletionMetrics>> {
-  const completionDir = join(rootDir, 'runtime', 'content-completion');
+  const completionDir = `${rootDir}/runtime/content-completion`;
   let runNames: string[];
   try {
     runNames = await readdir(completionDir);
@@ -607,9 +606,9 @@ export async function loadContentCompletionRuntimeByDate(
 
   const runs = await Promise.all(
     runNames.map(async (runName) => {
-      const runDir = join(completionDir, runName);
+      const runDir = `${completionDir}/${runName}`;
       try {
-        const artifact = asObject(JSON.parse(await readFile(join(runDir, 'run.json'), 'utf8')));
+        const artifact = await readRuntimeObject(`${runDir}/run.json`);
         if (!artifact) {
           throw new Error('Content Completion run.json must contain a JSON object.');
         }
@@ -831,7 +830,7 @@ export async function loadDuplicateFilterRuntimeByDate(
   rootDir: string,
   requestedDates: Set<string>,
 ): Promise<Map<string, DashboardDuplicateFilterMetrics>> {
-  const dailyDir = join(rootDir, 'runtime', 'daily');
+  const dailyDir = `${rootDir}/runtime/daily`;
   let names: string[];
   try {
     names = await readdir(dailyDir);
@@ -842,11 +841,11 @@ export async function loadDuplicateFilterRuntimeByDate(
   const metrics = new Map<string, DashboardDuplicateFilterMetrics>();
   for (const name of names) {
     try {
-      const daily = asObject(JSON.parse(await readFile(join(dailyDir, name, 'run.json'), 'utf8')));
+      const daily = await readRuntimeObject(`${dailyDir}/${name}/run.json`);
       const date = daily && stringValue(daily.daily_date);
       const artifactPath = daily && stringValue(daily.duplicate_filter_run);
       if (!date || !artifactPath || !requestedDates.has(date)) continue;
-      const artifact = asObject(JSON.parse(await readFile(join(artifactPath, 'run.json'), 'utf8')));
+      const artifact = await readRuntimeObject(`${artifactPath}/run.json`);
       if (!artifact) continue;
       metrics.set(date, {
         status: stringValue(artifact.status),
@@ -878,7 +877,7 @@ export async function loadRuntimeMetricsByDate(
 
   await Promise.all(
     STAGES.map(async (stage) => {
-      const stageDir = join(rootDir, 'runtime', stage);
+      const stageDir = `${rootDir}/runtime/${stage}`;
       let runNames: string[];
       try {
         runNames = await readdir(stageDir);
@@ -895,7 +894,7 @@ export async function loadRuntimeMetricsByDate(
           // dynamic segment to path.join so Turbopack does not trace runtime/** during build.
           const runDir = `${stageDir}/${runName}`;
           try {
-            const artifact = asObject(JSON.parse(await readFile(join(runDir, 'run.json'), 'utf8')));
+            const artifact = await readRuntimeObject(`${runDir}/run.json`);
             if (!artifact) {
               throw new Error('run.json must contain a JSON object.');
             }
@@ -959,7 +958,7 @@ async function normalizeRuntimeArtifact(
 ): Promise<JsonObject> {
   if (stage === 'stage1') {
     try {
-      const summary = asObject(JSON.parse(await readFile(join(runDir, 'summary.json'), 'utf8')));
+      const summary = await readRuntimeObject(`${runDir}/summary.json`);
       if (!summary) return artifact;
       const tokenUsage = asObject(summary.tokenUsage);
       return {
@@ -1011,7 +1010,7 @@ async function loadDailyStage1Metrics(
   rootDir: string,
   requestedDates: Set<string>,
 ): Promise<Array<{ date: string; metrics: DashboardStageMetrics }>> {
-  const dailyDir = join(rootDir, 'runtime', 'daily');
+  const dailyDir = `${rootDir}/runtime/daily`;
   let runNames: string[];
   try {
     runNames = await readdir(dailyDir);
@@ -1024,9 +1023,9 @@ async function loadDailyStage1Metrics(
 
   const runs = await Promise.all(
     runNames.map(async (runName) => {
-      const runDir = join(dailyDir, runName);
+      const runDir = `${dailyDir}/${runName}`;
       try {
-        const artifact = asObject(JSON.parse(await readFile(join(runDir, 'run.json'), 'utf8')));
+        const artifact = await readRuntimeObject(`${runDir}/run.json`);
         if (!artifact) {
           throw new Error('Daily run.json must contain a JSON object.');
         }
@@ -1239,10 +1238,11 @@ async function loadStage3DiagnosticTokens(runDir: string): Promise<{
   outputTokens: number;
   totalTokens: number;
 } | null> {
-  const digestDir = join(runDir, 'digest');
+  const digestDir = `${runDir}/digest`;
   let names: string[];
   try {
-    names = await readdir(digestDir);
+    names = [];
+    for await (const entry of await opendir(digestDir)) names.push(entry.name);
   } catch (error) {
     if (isMissingFile(error)) {
       return null;
@@ -1254,7 +1254,7 @@ async function loadStage3DiagnosticTokens(runDir: string): Promise<{
     names
       .filter((name) => name.endsWith('-ranking-diagnostics.json'))
       .map(async (name) => {
-        const value = asObject(JSON.parse(await readFile(join(digestDir, name), 'utf8')));
+        const value = await readRuntimeObject(`${digestDir}/${name}`);
         if (!value) {
           throw new Error(`${name} must contain a JSON object.`);
         }
@@ -1332,6 +1332,10 @@ function booleanFrom(value: JsonObject, ...keys: string[]): boolean | null {
 
 function stringValue(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+async function readRuntimeObject(path: string): Promise<JsonObject | null> {
+  return asObject(JSON.parse(await readFile(path, 'utf8')));
 }
 
 function asObject(value: unknown): JsonObject | null {

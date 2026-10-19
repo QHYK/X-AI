@@ -3,8 +3,9 @@
  * 一次构造并持久化冻结输入，再让多个模型独立复用它；本模块只写 Evaluation 三张表。
  */
 import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import type { Dirent } from "node:fs";
+import { opendir, readdir, readFile } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 import type { Pool } from "pg";
 import { resolveDailyScope } from "./daily-scope.js";
 import { type EvaluationModel } from "./evaluation-model-config.js";
@@ -659,24 +660,25 @@ async function loadStage3FrozenInput(
   const runDir = await findLatestSuccessfulStage3Run(rootDir, dailyDate);
   if (stage === "stage3_event") {
     return {
-      input: await readJson<Stage3EventRankingInput>(join(runDir, "events", "input.json")),
+      input: await readJson<Stage3EventRankingInput>(`${runDir}/events/input.json`),
       source_stage3_run: runDir,
     };
   }
   if (stage === "stage3_long_form") {
     return {
-      input: await readJson<Stage3LongFormRankingInput>(join(runDir, "long-form", "input.json")),
+      input: await readJson<Stage3LongFormRankingInput>(`${runDir}/long-form/input.json`),
       source_stage3_run: runDir,
     };
   }
-  const digestDir = join(runDir, "digest");
-  const entries = await readdir(digestDir, { withFileTypes: true });
+  const digestDir = `${runDir}/digest`;
+  const entries: Dirent[] = [];
+  for await (const entry of await opendir(digestDir)) entries.push(entry);
   const inputs = await Promise.all(
     entries
       .filter((entry) => entry.isFile() && entry.name.endsWith("-input.json"))
       .sort((left, right) => left.name.localeCompare(right.name))
       .map(async (entry) => {
-        const input = await readJson<Stage3DigestRankingInput>(join(digestDir, entry.name));
+        const input = await readJson<Stage3DigestRankingInput>(`${digestDir}/${entry.name}`);
         return { item_key: input.category, input };
       }),
   );
@@ -690,13 +692,13 @@ async function findLatestSuccessfulStage3Run(rootDir: string, dailyDate: string)
   }
 
   // 保留 standalone Stage 3 的支持；它同样是正式处理结果，但不具备 Daily run pointer。
-  const directory = join(rootDir, "runtime", "stage3");
+  const directory = `${rootDir}/runtime/stage3`;
   const entries = await readdir(directory, { withFileTypes: true });
   const candidates = entries.filter((entry) => entry.isDirectory()).sort((a, b) => b.name.localeCompare(a.name));
   for (const candidate of candidates) {
-    const runDir = join(directory, candidate.name);
+    const runDir = `${directory}/${candidate.name}`;
     try {
-      const run = await readJson<{ status?: string; daily_date?: string }>(join(runDir, "run.json"));
+      const run = await readJson<{ status?: string; daily_date?: string }>(`${runDir}/run.json`);
       if (run.status === "success" && run.daily_date === dailyDate) {
         return runDir;
       }
@@ -712,7 +714,7 @@ async function findStage3RunFromDailyLineage(
   rootDir: string,
   dailyDate: string,
 ): Promise<string | null> {
-  const directory = join(rootDir, "runtime", "daily");
+  const directory = `${rootDir}/runtime/daily`;
   let entries;
   try {
     entries = await readdir(directory, { withFileTypes: true });
@@ -722,16 +724,16 @@ async function findStage3RunFromDailyLineage(
   for (const entry of entries.filter((value) => value.isDirectory()).sort((a, b) => b.name.localeCompare(a.name))) {
     try {
       const dailyRun = await readJson<{ daily_date?: string; stage3_run?: string | null }>(
-        join(directory, entry.name, "run.json"),
+        `${directory}/${entry.name}/run.json`,
       );
       if (dailyRun.daily_date !== dailyDate || !dailyRun.stage3_run) {
         continue;
       }
       const stage3RunDir = isAbsolute(dailyRun.stage3_run)
         ? dailyRun.stage3_run
-        : join(rootDir, dailyRun.stage3_run);
+        : `${rootDir}/${dailyRun.stage3_run}`;
       const stage3Run = await readJson<{ status?: string; daily_date?: string }>(
-        join(stage3RunDir, "run.json"),
+        `${stage3RunDir}/run.json`,
       );
       if (stage3Run.status === "success" && stage3Run.daily_date === dailyDate) {
         return stage3RunDir;
