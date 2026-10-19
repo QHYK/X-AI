@@ -82,6 +82,11 @@ await React.act(async () =>
   ),
 );
 assert.equal(document.querySelectorAll('article').length, 2);
+assert.deepEqual(
+  Array.from(document.querySelectorAll('article'), (article) => article.textContent),
+  ['first', 'second'],
+  'Load more appends older works after the existing latest works without reversing either batch.',
+);
 assert.equal(document.querySelector('button'), null);
 assert.match(document.body.textContent!, /已显示全部/);
 await React.act(async () => root.unmount());

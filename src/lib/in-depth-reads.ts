@@ -162,8 +162,8 @@ export async function listPublishedInDepthReads(
       dailySource?: string;
     }
   >(
-    `select idc.id, ${EDITORIAL_COLUMNS}, dc.id as "cursorId",
-            to_char(dc.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "cursorCreatedAt",
+    `select idc.id, ${EDITORIAL_COLUMNS}, idc.id as "cursorId",
+            to_char(idc.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "cursorCreatedAt",
             idc.reviewed_at::text as "reviewedAt", dc.url,
             dc.discovery_path as "discoveryPath", dc.title as "originalTitle",
             dc.title_zh as "titleZh", dc.author, dc.publication,
@@ -175,8 +175,8 @@ export async function listPublishedInDepthReads(
        from in_depth_candidates idc
        join discovery_candidates dc on dc.id = idc.discovery_candidate_id
       where idc.review_status = 'approved'
-        and ($1::timestamptz is null or (dc.created_at, dc.id) < ($1::timestamptz, $2::uuid))
-      order by dc.created_at desc, dc.id desc limit $3`,
+        and ($1::timestamptz is null or (idc.created_at, idc.id) < ($1::timestamptz, $2::uuid))
+      order by idc.created_at desc, idc.id desc limit $3`,
     [cursor?.createdAt ?? null, cursor?.id ?? null, IN_DEPTH_PAGE_SIZE + 1],
   );
   const normalized = await normalizePublications(db, result.rows);
