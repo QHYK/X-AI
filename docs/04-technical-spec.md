@@ -329,6 +329,7 @@ In-depth Review 保留完整标题及既有审核操作；基本信息区左侧�
 - Regenerate 遇到未保存人工修改须确认；请求中继续输入或切换 Candidate 时，旧响应不能覆盖新输入。生成成功但保存失败时返回生成文本，允许直接 Save changes 重试，无需重复模型调用。
 - 介绍的持久化与历史兼容由 `05-data-model.md` §11.4 定义，模型质量与输出契约由 `07-prompt-spec.md` 的 In-depth Editorial Introduction 定义。
 - 公开 `/in-depth` 和匿名 `GET /api/in-depth` 共用 Approved 查询，读取最新已保存介绍及 Editorial extra_info；API 返回 `{ items }`，公开字段显式列出，不序列化 Notes、内部证据、模型诊断或内部 Editorial 传输对象。无介绍时回退原内容，无 Draft/Published 双版本。
+- 读者端 Xfield 使用公开 API 增量字段 `agent: { summary, whyWorthReading }` 与 `editorial: { summary, whyWorthReading, extra_info }` 分别展示原始 Agent 与独立 Editorial，空 Editorial 不回填 Agent；既有顶层展示字段保持原有覆盖语义。公开元信息另提供 `publishedAt`、经既有读取器验证的双语 `tags` 与 `cover`，不返回其所在的完整 `evaluation` / `evidence`。
 
 ### 7.4 Model Evaluation
 

@@ -5,6 +5,11 @@ import {
 } from './in-depth-editorial.js';
 import { discoveryEvidenceMetadata, resolveDiscoveryPublication } from './discovery-source.js';
 import { loadDiscoverySources } from './discovery-source-list.js';
+import {
+  readDiscoveryContentMetadata,
+  type DiscoveryCover,
+  type DiscoveryTag,
+} from './discovery-content-metadata.js';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 
@@ -74,6 +79,7 @@ export type PublishedInDepthRead = Pick<
   | 'originalTitle'
   | 'titleZh'
   | 'author'
+  | 'publishedAt'
   | 'publication'
   | 'contentType'
   | 'estimatedDurationMinutes'
@@ -81,7 +87,7 @@ export type PublishedInDepthRead = Pick<
   | 'whyWorthReading'
   | 'editorialOverrides'
   | 'reviewedAt'
->;
+> & { tags?: DiscoveryTag[]; cover?: DiscoveryCover | null };
 
 type Queryable = Pick<Pool, 'query'>;
 
@@ -142,15 +148,20 @@ export async function getInDepthReviewItem(
 /** The only public In-depth Reads query: approval is the publication boundary. */
 export async function listPublishedInDepthReads(db: Queryable): Promise<PublishedInDepthRead[]> {
   const result = await db.query<
-    PublishedInDepthRead & { evidence?: Record<string, unknown>; dailySource?: string }
+    PublishedInDepthRead & {
+      evidence?: Record<string, unknown>;
+      evaluation?: Record<string, unknown>;
+      dailySource?: string;
+    }
   >(
     `select idc.id, ${EDITORIAL_COLUMNS},
             idc.reviewed_at::text as "reviewedAt", dc.url,
             dc.discovery_path as "discoveryPath", dc.title as "originalTitle",
             dc.title_zh as "titleZh", dc.author, dc.publication,
+            dc.published_at::text as "publishedAt",
             dc.content_type as "contentType",
             dc.estimated_duration_minutes as "estimatedDurationMinutes",
-            dc.summary, dc.why_worth_reading as "whyWorthReading", dc.evidence,
+            dc.summary, dc.why_worth_reading as "whyWorthReading", dc.evidence, dc.evaluation,
             ${DAILY_SOURCE_COLUMN}
        from in_depth_candidates idc
        join discovery_candidates dc on dc.id = idc.discovery_candidate_id
@@ -159,9 +170,14 @@ export async function listPublishedInDepthReads(db: Queryable): Promise<Publishe
   );
   const normalized = await normalizePublications(db, result.rows);
   return normalized.map((row) => {
+    const metadata = readDiscoveryContentMetadata({
+      evidence: row.evidence ?? null,
+      evaluation: row.evaluation ?? null,
+    });
     const fields = { ...row };
     delete fields.evidence;
-    return fields;
+    delete fields.evaluation;
+    return { ...fields, ...metadata };
   });
 }
 
@@ -273,6 +289,14 @@ export function toPublicInDepthRead(item: PublishedInDepthRead) {
     publication: item.publication,
     contentType: item.contentType,
     estimatedDurationMinutes: item.estimatedDurationMinutes,
+    publishedAt: item.publishedAt ?? null,
+    tags: item.tags ?? [],
+    cover: item.cover ?? null,
+    agent: {
+      summary: item.summary,
+      whyWorthReading: item.whyWorthReading,
+    },
+    editorial: readEditorialIntroduction(item.editorialOverrides),
     extra_info: readEditorialIntroduction(item.editorialOverrides).extra_info,
     summary: display.summary,
     whyWorthReading: display.whyWorthReading,

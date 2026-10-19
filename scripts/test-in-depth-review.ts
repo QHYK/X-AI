@@ -147,6 +147,33 @@ assert.equal(displayInDepthFields(publicRow).summary, '更新的 Markdown');
 const publicPayload = toPublicInDepthRead(publicRow);
 assert.equal(publicPayload.summary, '更新的 Markdown');
 assert.equal(publicPayload.extra_info, '面向读者的具体评估');
+assert.deepEqual(publicPayload.agent, {
+  summary: 'AI summary',
+  whyWorthReading: 'AI reason',
+});
+assert.deepEqual(publicPayload.editorial, {
+  summary: '更新的 Markdown',
+  whyWorthReading: '新理由',
+  extra_info: '面向读者的具体评估',
+});
+assert.deepEqual(toPublicInDepthRead({ ...publicRow, editorialOverrides: null }).editorial, {
+  summary: '',
+  whyWorthReading: '',
+  extra_info: '',
+});
+const cover = { url: 'https://example.com/cover.jpg', source: 'og:image', width: 800, height: 600 };
+const tags = [{ zh: '科学方法', en: 'Scientific Method' }];
+rows[0]!.publishedAt = '2026-10-01T12:00:00Z';
+rows[0]!.evaluation = { tags, privateEvaluation: 'Never public' };
+rows[0]!.evidence = { coverImage: cover, trace: 'Never public' };
+const metadataPublicRow = (await listPublishedInDepthReads(db)).find((row) => row.id === firstId)!;
+const metadataPayload = toPublicInDepthRead(metadataPublicRow);
+assert.deepEqual(metadataPayload.cover, cover);
+assert.deepEqual(metadataPayload.tags, tags);
+assert.equal(metadataPayload.publishedAt, '2026-10-01T12:00:00Z');
+assert.equal('evidence' in metadataPublicRow, false);
+assert.equal('evaluation' in metadataPublicRow, false);
+assert.ok(!JSON.stringify(metadataPayload).includes('Never public'));
 assert.deepEqual(rows[0]!.extraInfo, { diagnostic: 'Original Agent metadata' });
 assert.equal(toPublicInDepthRead({ ...publicRow, editorialOverrides: null }).extra_info, '');
 for (const field of [
