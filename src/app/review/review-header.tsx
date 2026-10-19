@@ -1,5 +1,6 @@
 /** Human Review 页面共用的日期选择与内部导航。 */
 import styles from './review.module.css';
+import { AdminLogoutButton } from '../admin-logout-button.js';
 
 export function ReviewHeader(props: {
   title: string;
@@ -62,6 +63,7 @@ export function ReviewHeader(props: {
           In-depth Review
         </a>
         <a href="../dashboard">Dashboard</a>
+        <AdminLogoutButton apiUrl="../api/auth/logout" loginUrl="../login" />
       </nav>
     </>
   );

@@ -1,15 +1,21 @@
-import { NextResponse } from 'next/server.js';
-import { canAccessInDepthReview } from './lib/in-depth-review-access.js';
+import { NextRequest, NextResponse } from 'next/server.js';
+import { adminApiError, hasAdminSession } from './lib/admin-auth.js';
 
-/** Protect the review page and its API before either can read or write data. */
-export function proxy() {
-  if (canAccessInDepthReview()) return NextResponse.next();
-  return new NextResponse('In-depth Review is unavailable without admin authentication.', {
-    status: 403,
-    headers: { 'Cache-Control': 'no-store' },
-  });
+export async function proxy(request: NextRequest) {
+  const basePath = request.nextUrl.basePath;
+  const pathname = request.nextUrl.pathname;
+  if (pathname === '/login') {
+    return (await hasAdminSession(request))
+      ? NextResponse.redirect(new URL(`${basePath}/dashboard`, request.url))
+      : NextResponse.next();
+  }
+  if (pathname.startsWith('/api/admin/')) {
+    return (await adminApiError(request)) ?? NextResponse.next();
+  }
+  if (await hasAdminSession(request)) return NextResponse.next();
+  return NextResponse.redirect(new URL(`${basePath}/login`, request.url));
 }
 
 export const config = {
-  matcher: ['/review/in-depth/:path*', '/api/review/in-depth/:path*'],
+  matcher: ['/login', '/dashboard/:path*', '/review/:path*', '/api/admin/:path*'],
 };

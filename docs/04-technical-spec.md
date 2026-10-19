@@ -282,6 +282,14 @@ User Request → Read More API → Server-side Full Content → LLM → Detailed
 
 原始 Full Content 保持在 Server-side，不返回给 Client。Read More 的 AI 语义见 `03-ai-workflow-spec.md`；Prompt / Structured Output Contract 见 `07-prompt-spec.md`。
 
+### 6.3 管理路由与认证
+
+`/dashboard/*` 与 `/review/*` 是后台页面，保留现有 URL；`/api/admin/*` 是后台 API。二者均要求单管理员 Session。未登录页面跳转 `/login`，未登录 API 返回 JSON 401。`/`、`/in-depth`、`/api/brief` 和 `/api/content/read-more` 保持匿名访问。登录与退出端点位于 `/api/auth/*`。
+
+管理员密码以服务端环境变量中的 scrypt hash 配置。登录后生成随机、不透明的 Session Cookie；服务端文件存储其 hash 对应的会话记录和过期时间，独立于业务数据库及 `runtime/` Pipeline Artifacts。退出删除记录；密码 hash 变化会使旧会话失效。不使用用户表或 RBAC。Proxy 保护页面和管理 API，每个管理 Route Handler 还独立校验 Session；修改数据或触发任务的请求校验同源 Origin。Cookie 的 Secure 属性由部署配置决定，具体设置和 HTTP 风险见 `09-operations.md`。
+
+浏览器 URL 遵循**相对路径优先**：既有 `./`、`../` 构造保持相对形式，迁移 API 时只改必要路径；复用 URL 时须按每个调用页面核对层级。Next.js `Link`、服务端重定向和 Proxy Matcher 按各自路径规则处理。`basePath=/ai` 由 Next.js 路由配置处理，不在浏览器相对 URL 或 Matcher 中重复加入 `/ai`。
+
 ---
 
 ## 7. Internal Dashboard

@@ -73,9 +73,9 @@ checks.push({
 const base = new URL("https://internal.example/ai/review/models");
 checks.push({
   name: "Evaluation GET, Run and Cancel URLs retain the deployed basePath through relative addressing",
-  passed: new URL(evaluationApiUrl("", new URLSearchParams({ date: "2026-08-28", stage: "stage1" })), base).pathname === "/ai/api/evaluation"
-    && new URL(evaluationApiUrl("/run"), base).pathname === "/ai/api/evaluation/run"
-    && new URL(evaluationApiUrl("/cancel"), base).pathname === "/ai/api/evaluation/cancel",
+  passed: new URL(evaluationApiUrl("", new URLSearchParams({ date: "2026-08-28", stage: "stage1" })), base).pathname === "/ai/api/admin/evaluation"
+    && new URL(evaluationApiUrl("/run"), base).pathname === "/ai/api/admin/evaluation/run"
+    && new URL(evaluationApiUrl("/cancel"), base).pathname === "/ai/api/admin/evaluation/cancel",
 });
 
 for (const check of checks) console.log(`${check.passed ? "PASS" : "FAIL"} ${check.name}`);

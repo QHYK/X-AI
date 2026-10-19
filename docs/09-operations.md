@@ -37,8 +37,17 @@ Pipeline CLI 在读取环境派生参数或执行处理模块前，统一通过 
 | `npm run db:check` | Drizzle Kit | 检查 migration 一致性 |
 | `npm run db:migrate` | Drizzle Kit | 应用 migration |
 | `npm run db:seed` | `scripts/import-sources.ts` | 代码试图读取 `docs/08-source-list.md` 后同步 `sources`；会写库 |
+| `npm run admin:hash-password` | `scripts/hash-admin-password.ts` | 隐藏输入管理员密码并输出 scrypt hash；将输出配置为服务端 `ADMIN_PASSWORD_HASH` |
 
-### 2.1 手动构建与部署
+### 2.1 管理员登录配置
+
+启动后台前，在服务端 `.env.local` 配置 `ADMIN_PASSWORD_HASH` 和 `ADMIN_COOKIE_SECURE`。密码至少 16 字符；运行 `npm run admin:hash-password` 时交互输入，复制输出的 hash，不要把明文密码写入仓库或命令参数。Next.js API/Dashboard 按 Next.js 规则加载环境变量；配置缺失或格式错误时后台拒绝访问。更换 hash 会使旧 Session 失效。
+
+反向代理须保留浏览器请求的 Host，并让 Next.js 获得正确的外部请求协议；管理写入请求的 Origin 与该 Host / 协议比较，不使用客户端提供的 `X-Forwarded-Host` 作为白名单。
+
+当前公网 HTTP 部署须设置 `ADMIN_COOKIE_SECURE=false` 才能登录。HTTP 无法保护密码和 Cookie 的传输机密性；`HttpOnly`、`SameSite` 与服务端 Session 校验不能代替 HTTPS。启用 HTTPS 后，将外部登录流量转为 HTTPS，并设置 `ADMIN_COOKIE_SECURE=true`；Session Cookie 的 Path 固定为当前 `basePath=/ai`。会话有效期为 12 小时，退出会删除服务端记录。默认会话目录位于系统临时目录，按工作目录区分部署；临时目录被清理后用户需重新登录。生产部署可通过 `ADMIN_SESSION_DIR` 指定仅服务账户可访问的持久目录，该目录不属于 Pipeline `runtime/`。登录端点有每进程每分钟 10 次的基础限流，不依赖可伪造的转发 IP 头；多实例部署需要共享 Session 存储和统一限流后才能作为同一登录域使用。
+
+### 2.2 手动构建与部署
 
 GitHub Actions 的 **Build X-AI** 可单独手动运行；**Deploy X-AI** 仅通过 `workflow_dispatch` 手动触发，不在 push 时自动部署。在 Actions 页面选择要部署的 branch/tag 后运行 Deploy，Workflow 固定本次的 Commit SHA，复用 Build X-AI 的 Node 22 / `npm ci` / `npm run build` 配置。Runner 上传经过 SHA-256 校验的 `.next` 构建包、manifest 和目标 `package.json` / `package-lock.json`；服务器不执行 Build。需要已有 Repository Secrets：`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_KNOWN_HOSTS`，无需上传服务器 `.env.local` 或新增业务密钥。
 
@@ -142,6 +151,9 @@ npm run eval:stage3:long-form -- --run-id=UUID
 | `LLM_DEBUG_HTTP` | LLM 请求诊断日志 | 仅 `true` 启用；输出经过脱敏的 HTTP 诊断 |
 | `BRIEF_API_ALLOWED_ORIGIN` | Brief / read-more API 的 CORS allowlist | 逗号分隔 origin；空值不配置额外 allowlist |
 | `READ_MORE_LLM_TIMEOUT_MS` | read-more API LLM timeout | 默认 `120000` ms |
+| `ADMIN_PASSWORD_HASH` | 管理员登录 | 必填；`npm run admin:hash-password` 生成的 scrypt hash，不填写明文密码 |
+| `ADMIN_COOKIE_SECURE` | 管理员 Session Cookie | 必填；当前 HTTP 部署设 `false`，切换 HTTPS 后设 `true`；不由 `NODE_ENV` 或请求头推断 |
+| `ADMIN_SESSION_DIR` | Session 文件目录 | 可选；默认系统临时目录中按工作目录区分的目录；持久部署可指定服务账户专用目录 |
 
 ### 5.2 Daily 与内部编排变量
 
@@ -248,7 +260,7 @@ npm run discovery -- --open-parent-run-id=UUID --open-context="可选人工补�
 
 第一个命令创建新的常规 Discovery Run；第二个命令恢复已有 Run；第三个命令创建关联原 Regular Run 的独立人工 Open Run。该入口会调用真实 Provider、D3/D5 Web Search 与 Firecrawl，必须显式 `--confirm-paid`。常规 Run 在 D3、D4 都完成且没有合格候选时自动执行 D5；人工 Open 只执行 D5，不重跑 D2–D4。终端报告输出 Run / Parent Run ID、阶段状态、Usage、缓存命中率和候选/审核数量。
 
-In-depth 人工审核入口为 `/review/in-depth`，审核 API 为 `/api/review/in-depth`，公开列表为 `/in-depth`。当前 Next.js `basePath=/ai`，实际浏览器路径分别为 `/ai/review/in-depth`、`/ai/api/review/in-depth`、`/ai/in-depth`。`npm run dev` 的开发环境可直接访问审核页，不需要独立密码；生产环境尚无统一后台认证，因此审核页和 API（包括读写）均拒绝访问，不会因客户端隐藏按钮而开放。接入可靠的后台认证前不可用于生产审核。公开列表不受此限制。相关状态语义见 [Discovery Workflow](06a-discovery-workflow.md) 和 [Data Model](05-data-model.md)。本地回归：`npm run test:in-depth-review`。
+In-depth 人工审核入口为 `/review/in-depth`，审核 API 为 `/api/admin/review/in-depth`，公开列表为 `/in-depth`。当前 Next.js `basePath=/ai`，实际浏览器路径分别为 `/ai/review/in-depth`、`/ai/api/admin/review/in-depth`、`/ai/in-depth`。审核页与 API 使用统一管理员 Session，公开列表保持匿名访问。相关状态语义见 [Discovery Workflow](06a-discovery-workflow.md) 和 [Data Model](05-data-model.md)。本地回归：`npm run test:in-depth-review`、`npm run test:admin-auth`。
 
 ## 7. Reusable Diagnostics and Smoke Tests
 

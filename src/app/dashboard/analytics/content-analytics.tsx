@@ -32,7 +32,7 @@ function DailyVolumeModule() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     void loadJson<{ days: DashboardDay[] }>(
-      `../api/dashboard/analytics/daily-volume?${query(range)}`,
+      `../api/admin/dashboard/analytics/daily-volume?${query(range)}`,
     )
       .then((value) => {
         setDays(value.days);
@@ -148,7 +148,7 @@ function SourceAnalyticsModule() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     void loadJson<{ rows: SourceAnalyticsRow[] }>(
-      `../api/dashboard/analytics/sources?${query(range)}`,
+      `../api/admin/dashboard/analytics/sources?${query(range)}`,
     )
       .then((value) => {
         setRows(value.rows);
@@ -280,13 +280,13 @@ function SourceDetail({
   const [page, setPage] = useState(1);
   useEffect(() => {
     void loadJson<{ rows: SourceAnalyticsDay[] }>(
-      `../api/dashboard/analytics/source-days?sourceId=${source.sourceId}&${query(range)}`,
+      `../api/admin/dashboard/analytics/source-days?sourceId=${source.sourceId}&${query(range)}`,
     ).then((value) => setDays(value.rows));
   }, [source.sourceId, range]);
   useEffect(() => {
     if (!date) return;
     void loadJson<{ items: IgnoredArticle[]; total: number }>(
-      `../api/dashboard/analytics/ignored-articles?sourceId=${source.sourceId}&date=${date}&page=${page}`,
+      `../api/admin/dashboard/analytics/ignored-articles?sourceId=${source.sourceId}&date=${date}&page=${page}`,
     ).then((value) => {
       setArticles((current) => (page === 1 ? value.items : [...current, ...value.items]));
       setArticleTotal(value.total);

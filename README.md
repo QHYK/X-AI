@@ -76,6 +76,8 @@ cp .env.example .env.local
 npm run dev
 ```
 
+后台登录还需配置 `ADMIN_PASSWORD_HASH`（运行 `npm run admin:hash-password` 生成）及 `ADMIN_COOKIE_SECURE`；具体步骤与当前 HTTP 部署注意事项见 [`docs/09-operations.md`](docs/09-operations.md)。
+
 数据库、LLM Provider、Firecrawl 等完整环境变量说明见
 [`docs/09-operations.md`](docs/09-operations.md)。
 

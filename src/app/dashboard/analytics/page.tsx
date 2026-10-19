@@ -1,4 +1,5 @@
 import { ContentAnalytics } from "./content-analytics.js";
+import { AdminLogoutButton } from "../../admin-logout-button.js";
 import styles from "../dashboard.module.css";
 
 export const runtime = "nodejs";
@@ -14,6 +15,7 @@ export default function AnalyticsPage() {
       </div>
       <div className={styles.headerActions}>
         <a href="/dashboard">返回 Dashboard</a>
+        <AdminLogoutButton apiUrl="../api/auth/logout" loginUrl="../login" />
       </div>
     </header>
     <ContentAnalytics />

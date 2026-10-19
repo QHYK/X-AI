@@ -10,7 +10,7 @@ import {
 import styles from '../review.module.css';
 
 function apiUrl(): string {
-  return window.location.pathname.replace(/\/review\/in-depth\/?$/, '/api/review/in-depth');
+  return window.location.pathname.replace(/\/review\/in-depth\/?$/, '/api/admin/review/in-depth');
 }
 const STATUSES: InDepthReviewStatus[] = ['pending', 'approved', 'rejected'];
 

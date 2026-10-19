@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import type { Pool } from 'pg';
-import { canAccessInDepthReview } from '../src/lib/in-depth-review-access.js';
-import { config as proxyConfig, proxy } from '../src/proxy.js';
-import { GET, PATCH } from '../src/app/api/review/in-depth/route.js';
+import { GET, PATCH } from '../src/app/api/admin/review/in-depth/route.js';
 import {
   displayInDepthFields,
   getInDepthReviewItem,
@@ -151,45 +149,8 @@ assert.throws(() =>
   }),
 );
 
-assert.deepEqual(proxyConfig.matcher, ['/review/in-depth/:path*', '/api/review/in-depth/:path*']);
-assert.equal(canAccessInDepthReview('development'), true);
-assert.equal(canAccessInDepthReview('production'), false);
-assert.equal(canAccessInDepthReview(''), false);
-
-const mutableEnv = process.env as Record<string, string | undefined>;
-const priorNodeEnv = mutableEnv.NODE_ENV;
-const apiPath = 'https://example.test/ai/api/review/in-depth';
-try {
-  mutableEnv.NODE_ENV = 'development';
-  assert.equal(proxy().status, 200);
-  assert.equal((await GET(new Request(`${apiPath}?id=invalid`))).status, 400);
-  const crossOriginWrite = await PATCH(
-    new Request(apiPath, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json', origin: 'https://elsewhere.test' },
-      body: '{}',
-    }),
-  );
-  assert.equal(crossOriginWrite.status, 403);
-
-  mutableEnv.NODE_ENV = 'production';
-  assert.equal(proxy().status, 403);
-  const unauthorizedRead = await GET(new Request(`${apiPath}?id=${firstId}`));
-  assert.equal(unauthorizedRead.status, 403);
-  const unauthorizedWrite = await PATCH(
-    new Request(apiPath, {
-      method: 'PATCH',
-      headers: {
-        'content-type': 'application/json',
-        origin: 'https://example.test',
-      },
-      body: '{}',
-    }),
-  );
-  assert.equal(unauthorizedWrite.status, 403);
-} finally {
-  if (priorNodeEnv === undefined) delete mutableEnv.NODE_ENV;
-  else mutableEnv.NODE_ENV = priorNodeEnv;
-}
+const apiPath = 'https://example.test/ai/api/admin/review/in-depth';
+assert.equal((await GET(new Request(`${apiPath}?id=${firstId}`))).status, 401);
+assert.equal((await PATCH(new Request(apiPath, { method: 'PATCH' }))).status, 401);
 
 console.log('In-depth Review mock tests passed.');
