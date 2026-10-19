@@ -5,6 +5,7 @@ target_commit=${1:?Expected target commit}
 stage=${2:?Expected uploaded staging directory}
 project=${DEPLOY_PROJECT_DIR:-/home/ubuntu/X-AI}
 service=x-ai-field
+worker_service=x-ai-discovery-worker
 health_url=http://127.0.0.1:5260/ai
 
 [[ $target_commit =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid target commit.' >&2; exit 1; }
@@ -26,7 +27,7 @@ needs_install=0
 had_old_deps=0
 
 check_pipeline_idle() {
-  local pattern='(run-daily-workflow|run-discovery-workflow|run-discovery-worker|collect-rss|dedupe-stage1|complete-content|process-stage[1-4]|run-model-evaluation|test-discovery-provider|test-discovery-d3)\.(ts|js)|npm run (daily|discovery|collect:rss|dedupe:stage1|complete:content|process:stage[1-4]|eval:stage[1-3])'
+  local pattern='(run-daily-workflow|run-discovery-workflow|collect-rss|dedupe-stage1|complete-content|process-stage[1-4]|run-model-evaluation|test-discovery-provider|test-discovery-d3)\.(ts|js)|npm run (daily|discovery|collect:rss|dedupe:stage1|complete:content|process:stage[1-4]|eval:stage[1-3])([[:space:]]|$)'
   local status
   if pgrep -f "$pattern" >/dev/null; then
     echo 'A Daily, Discovery, Evaluation, or processing CLI is running; deployment stopped.' >&2
@@ -40,11 +41,73 @@ check_pipeline_idle() {
   fi
 }
 
+# Worker is long-lived: verify its actual work and stop it while holding its existing execution lock.
+# This closes the gap between checking idle state and systemd stopping the idle Worker.
+stop_worker_if_idle() {
+node - "$project" "$worker_service" "$stage/deps" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const { createRequire } = require('node:module');
+const { execFileSync } = require('node:child_process');
+const [project, worker, prepared] = process.argv.slice(2);
+const appRequire = createRequire(
+  path.join(
+    fs.existsSync(path.join(prepared, 'node_modules/pg/package.json')) ? prepared : project,
+    'package.json',
+  ),
+);
+const { parse } = appRequire('dotenv');
+const readEnv = (name) =>
+  fs.existsSync(path.join(project, name)) ? parse(fs.readFileSync(path.join(project, name))) : {};
+const env = { ...readEnv('.env'), ...readEnv('.env.local'), ...process.env };
+const { Client } = appRequire('pg');
+async function main() {
+  if (!env.DATABASE_URL) throw new Error('Cannot verify Discovery: DATABASE_URL is missing.');
+  const client = new Client({
+    connectionString: env.DATABASE_URL,
+    ssl: env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
+    connectionTimeoutMillis: 5000,
+    query_timeout: 10000,
+  });
+  try {
+    await client.connect();
+    const check = async () => {
+      if (
+        (await client.query("select id from discovery_runs where status = 'running' limit 1")).rows
+          .length
+      )
+        throw new Error('Discovery is running; refusing to stop Worker.');
+    };
+    await check();
+    await client.query("set lock_timeout = '2s'");
+    await client.query('select pg_advisory_lock(736210, 1)');
+    await check();
+    try {
+      execFileSync('sudo', ['-n', 'systemctl', 'stop', worker], { stdio: 'inherit' });
+    } catch (error) {
+      // No source/build change yet; restore the old Worker if its stop failed.
+      try {
+        execFileSync('sudo', ['-n', 'systemctl', 'start', worker], { stdio: 'inherit' });
+      } catch {}
+      throw error;
+    }
+  } finally {
+    await client.end();
+  }
+}
+main().catch((error) => {
+  console.error('Discovery idle/stop check failed:', error.code ?? error.message);
+  process.exitCode = 1;
+});
+NODE
+}
+
 check_health() {
   local attempt
   local http_status
   for attempt in {1..12}; do
     if sudo -n systemctl is-active --quiet "$service" &&
+       sudo -n systemctl is-active --quiet "$worker_service" &&
        http_status=$(curl --silent --show-error --output /dev/null \
          --write-out '%{http_code}' --max-time 8 "$health_url") &&
        [[ $http_status =~ ^2[0-9][0-9]$ ]]; then
@@ -66,6 +129,10 @@ rollback() {
       exit "$original_status"
     fi
     echo "Activation failed; attempting to restore commit $old_commit and previous files." >&2
+    if ! stop_worker_if_idle; then
+      echo 'Cannot safely stop Discovery Worker for rollback; preserve current files and recover manually.' >&2
+      exit "$original_status"
+    fi
     sudo -n systemctl stop "$service" || true
     if [[ -d $stage/old-node-modules ]]; then
       if [[ -e $project/node_modules ]]; then
@@ -94,7 +161,7 @@ rollback() {
        -f $project/.next/BUILD_ID &&
        $(<"$project/.next/BUILD_ID") == "$old_build_id" ]] || restore_ok=0
     if (( had_old_deps )) && [[ ! -d $project/node_modules ]]; then restore_ok=0; fi
-    if (( restore_ok )) && sudo -n systemctl restart "$service" && check_health; then
+    if (( restore_ok )) && sudo -n systemctl start "$service" "$worker_service" && check_health; then
       echo "Previous service restored on branch $old_branch at $old_commit." >&2
     else
       echo "AUTOMATIC ROLLBACK FAILED. Inspect $project and $stage before manual recovery." >&2
@@ -198,6 +265,7 @@ fi
 
 # The old application remains untouched until all validation and any dependency install finish.
 check_pipeline_idle
+stop_worker_if_idle
 activation_started=1
 sudo -n systemctl stop "$service"
 git merge --ff-only "$target_commit"
@@ -216,6 +284,6 @@ fi
   echo 'Activated source, build commit marker, or BUILD_ID does not match the target.' >&2
   exit 1
 }
-sudo -n systemctl restart "$service"
+sudo -n systemctl start "$service" "$worker_service"
 check_health
 echo "Deployed $target_commit (BUILD_ID $expected_build_id); previous version retained in $stage."

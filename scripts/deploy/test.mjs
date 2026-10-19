@@ -84,7 +84,16 @@ cpSync(join(scripts, 'server.sh'), join(stage, 'server.sh'));
 
 mkdirSync(fakeBin);
 write(join(fakeBin, 'flock'), '#!/bin/sh\nexit 0\n');
-write(join(fakeBin, 'pgrep'), '#!/bin/sh\nexit ${DEPLOY_TEST_PIPELINE_RUNNING:-1}\n');
+write(
+  join(fakeBin, 'pgrep'),
+  `#!/bin/sh
+if [ -n "$DEPLOY_TEST_PROCESS" ]; then
+  printf '%s\\n' "$DEPLOY_TEST_PROCESS" | grep -E "$2" >/dev/null
+  exit $?
+fi
+exit ${'$'}{DEPLOY_TEST_PIPELINE_RUNNING:-1}
+`,
+);
 write(join(fakeBin, 'sleep'), '#!/bin/sh\nexit 0\n');
 write(
   join(fakeBin, 'sudo'),
@@ -92,11 +101,28 @@ write(
 [ "$1" = '-n' ] && shift
 if [ "$1" = systemctl ]; then
   shift
-  case "$1" in
-    stop) printf 'stopped\\n' > "$DEPLOY_TEST_SERVICE_STATE" ;;
-    restart) printf 'active\\n' > "$DEPLOY_TEST_SERVICE_STATE" ;;
-    is-active) [ "$(cat "$DEPLOY_TEST_SERVICE_STATE")" = active ] || exit 1 ;;
-  esac
+  action=$1
+  shift
+  [ "$1" = --quiet ] && shift
+  for unit in "$@"; do
+    case "$unit" in
+      x-ai-field) state=$DEPLOY_TEST_SERVICE_STATE ;;
+      x-ai-discovery-worker) state=$DEPLOY_TEST_SERVICE_STATE.worker ;;
+      *) exit 2 ;;
+    esac
+    printf '%s %s\\n' "$action" "$unit" >> "$DEPLOY_TEST_ACTION_LOG"
+    case "$action" in
+      stop) printf 'stopped\\n' > "$state" ;;
+      start|restart)
+        if [ "$unit" = x-ai-discovery-worker ] && [ "$DEPLOY_TEST_FAIL_WORKER" = 1 ] &&
+          [ "$(cat "$DEPLOY_PROJECT_DIR/.next/BUILD_ID")" = new-build ]; then exit 1; fi
+        if [ "$unit" = x-ai-discovery-worker ] && [ "$DEPLOY_TEST_WORKER_INACTIVE" = 1 ] &&
+          [ "$(cat "$DEPLOY_PROJECT_DIR/.next/BUILD_ID")" = new-build ]; then
+          printf 'stopped\\n' > "$state"
+        else printf 'active\\n' > "$state"; fi ;;
+      is-active) [ "$(cat "$state")" = active ] || exit 1 ;;
+    esac
+  done
   exit 0
 fi
 exit 2
@@ -113,7 +139,45 @@ printf '200'
 exit 0
 `,
 );
-for (const name of ['flock', 'pgrep', 'sleep', 'sudo', 'curl']) {
+// Execute the production inline guard with a mock PG client, never a real database.
+write(
+  join(root, 'guard-fixture.cjs'),
+  `
+const fs = require('node:fs');
+const vm = require('node:vm');
+const realRequire = require;
+process.argv = [process.execPath, ...process.argv.slice(2)];
+process.env.DATABASE_URL = 'mock';
+const log = text => fs.appendFileSync(process.env.DEPLOY_TEST_ACTION_LOG, text + String.fromCharCode(10));
+const appRequire = name => {
+  if (name === 'dotenv') return {parse: () => ({})};
+  if (name === 'pg') return {Client: class {
+    async connect() { if(process.env.DEPLOY_TEST_DB_ERROR === '1') throw new Error('Mock DB unavailable'); }
+    async query(sql) {
+      if(sql.includes("status = 'running'")) return {rows: process.env.DEPLOY_TEST_DISCOVERY_RUNNING === '1' ? [{id:'busy'}] : []};
+      if(sql.includes('pg_advisory_lock')) {
+        if(process.env.DEPLOY_TEST_LOCK_BUSY === '1') throw new Error('Mock lock busy');
+        log('guard-locked');
+      }
+      return {rows:[]};
+    }
+    async end() { log('guard-released'); }
+  }};
+  return realRequire(name);
+};
+vm.runInNewContext(fs.readFileSync(0,'utf8'), {process,console,require: name => name === 'node:module' ? {createRequire:()=>appRequire} : realRequire(name)});
+`,
+);
+write(
+  join(fakeBin, 'node'),
+  `#!/bin/sh
+if [ "$1" = - ] && [ "$3" = x-ai-discovery-worker ]; then
+  exec '${process.execPath}' '${join(root, 'guard-fixture.cjs')}' "$@"
+fi
+exec '${process.execPath}' "$@"
+`,
+);
+for (const name of ['flock', 'pgrep', 'sleep', 'sudo', 'curl', 'node']) {
   run('chmod', ['+x', join(fakeBin, name)]);
 }
 
@@ -123,10 +187,14 @@ const environment = {
   DEPLOY_TEST_MODE: '1',
   DEPLOY_PROJECT_DIR: project,
   DEPLOY_TEST_SERVICE_STATE: join(root, 'service-state'),
+  DEPLOY_TEST_ACTION_LOG: join(root, 'service-actions'),
 };
 write(environment.DEPLOY_TEST_SERVICE_STATE, 'active\n');
+write(`${environment.DEPLOY_TEST_SERVICE_STATE}.worker`, 'active\n');
+write(environment.DEPLOY_TEST_ACTION_LOG, '');
 
 function deploy(extra = {}, commitSha = targetCommit, stagingDir = stage, projectDir = project) {
+  write(environment.DEPLOY_TEST_ACTION_LOG, '');
   return spawnSync('bash', [join(stagingDir, 'server.sh'), commitSha, stagingDir], {
     encoding: 'utf8',
     env: { ...environment, DEPLOY_PROJECT_DIR: projectDir, ...extra },
@@ -138,6 +206,48 @@ assert.notEqual(blocked.status, 0, 'running Pipeline must block deployment');
 assert.equal(run('git', ['-C', project, 'rev-parse', 'HEAD']), oldCommit);
 assert.equal(readFileSync(join(project, '.next', 'BUILD_ID'), 'utf8').trim(), 'old-build');
 console.log('PASS running Pipeline prevents activation');
+
+for (const command of [
+  'tsx scripts/run-daily-workflow.ts',
+  'npm run discovery',
+  'tsx scripts/run-model-evaluation.ts',
+]) {
+  assert.notEqual(deploy({ DEPLOY_TEST_PROCESS: command }).status, 0, command);
+  assert.equal(readFileSync(environment.DEPLOY_TEST_ACTION_LOG, 'utf8'), '');
+}
+for (const [name, extra] of [
+  ['busy-worker', { DEPLOY_TEST_DISCOVERY_RUNNING: '1' }],
+  ['locked-worker', { DEPLOY_TEST_LOCK_BUSY: '1' }],
+  ['unknown-worker', { DEPLOY_TEST_DB_ERROR: '1' }],
+  ['worker-start-failed', { DEPLOY_TEST_FAIL_WORKER: '1' }],
+  ['worker-not-active', { DEPLOY_TEST_WORKER_INACTIVE: '1' }],
+]) {
+  const testStage = join(root, name);
+  run('node', [join(scripts, 'artifact.mjs'), 'create', testStage, targetCommit], { cwd: source });
+  cpSync(join(scripts, 'artifact.mjs'), join(testStage, 'artifact.mjs'));
+  cpSync(join(scripts, 'server.sh'), join(testStage, 'server.sh'));
+  const result = deploy(
+    { ...extra, DEPLOY_TEST_PROCESS: 'tsx scripts/run-discovery-worker.ts' },
+    targetCommit,
+    testStage,
+  );
+  assert.notEqual(result.status, 0, name);
+  assert.equal(run('git', ['-C', project, 'rev-parse', 'HEAD']), oldCommit, name);
+  assert.equal(readFileSync(join(project, '.next', 'BUILD_ID'), 'utf8').trim(), 'old-build', name);
+  assert.equal(readFileSync(environment.DEPLOY_TEST_SERVICE_STATE, 'utf8').trim(), 'active', name);
+  assert.equal(
+    readFileSync(`${environment.DEPLOY_TEST_SERVICE_STATE}.worker`, 'utf8').trim(),
+    'active',
+    name,
+  );
+  const actions = readFileSync(environment.DEPLOY_TEST_ACTION_LOG, 'utf8');
+  if (name.endsWith('worker'))
+    assert.doesNotMatch(actions, /stop x-ai/, 'Busy/unverifiable tasks must not be stopped.');
+  else assert.match(result.stderr, /Previous service restored on branch/);
+}
+console.log(
+  'PASS busy Worker is never stopped; Worker start/health failures restore both services',
+);
 
 write(join(project, 'source.txt'), 'dirty\n');
 const dirty = deploy();
@@ -163,6 +273,10 @@ assert.equal(
   'old dependencies',
 );
 assert.equal(readFileSync(environment.DEPLOY_TEST_SERVICE_STATE, 'utf8').trim(), 'active');
+assert.equal(
+  readFileSync(`${environment.DEPLOY_TEST_SERVICE_STATE}.worker`, 'utf8').trim(),
+  'active',
+);
 assert.match(failed.stderr, /Previous service restored on branch/);
 console.log(
   'PASS failed health check restores old branch, source, build, dependencies, and service',
@@ -172,7 +286,11 @@ const successStage = join(root, 'success-stage');
 run('node', [join(scripts, 'artifact.mjs'), 'create', successStage, targetCommit], { cwd: source });
 cpSync(join(scripts, 'artifact.mjs'), join(successStage, 'artifact.mjs'));
 cpSync(join(scripts, 'server.sh'), join(successStage, 'server.sh'));
-const success = deploy({}, targetCommit, successStage);
+const success = deploy(
+  { DEPLOY_TEST_PROCESS: 'tsx scripts/run-discovery-worker.ts' },
+  targetCommit,
+  successStage,
+);
 assert.equal(success.status, 0, success.stderr);
 assert.equal(run('git', ['-C', project, 'rev-parse', 'HEAD']), targetCommit);
 assert.equal(run('git', ['-C', project, 'symbolic-ref', '--short', 'HEAD']), oldBranch);
@@ -181,6 +299,12 @@ assert.ok(
   existsSync(join(successStage, 'old-node-modules')),
   'changed lock must preserve old dependencies',
 );
+const actions = readFileSync(environment.DEPLOY_TEST_ACTION_LOG, 'utf8');
+assert.match(actions, /guard-locked\nstop x-ai-discovery-worker\nguard-released\nstop x-ai-field/);
+for (const unit of ['x-ai-field', 'x-ai-discovery-worker']) {
+  assert.ok(actions.includes(`start ${unit}`));
+  assert.ok(actions.includes(`is-active ${unit}`));
+}
 console.log(
   'PASS next deployment after rollback installs dependencies and activates matching source/build',
 );
@@ -203,7 +327,11 @@ assert.notEqual(diverged.status, 0, 'diverged server history must block deployme
 assert.equal(run('git', ['-C', project, 'rev-parse', 'HEAD']), localCommit);
 run('git', ['-C', project, 'switch', '-c', 'back-to-target', targetCommit]);
 console.log('PASS commit mismatch and non-fast-forward history are rejected');
-const sameLock = deploy({}, nextCommit, sameLockStage);
+const sameLock = deploy(
+  { DEPLOY_TEST_PROCESS: 'npm run discovery:worker' },
+  nextCommit,
+  sameLockStage,
+);
 assert.equal(sameLock.status, 0, sameLock.stderr);
 assert.equal(run('git', ['-C', project, 'rev-parse', 'HEAD']), nextCommit);
 assert.equal(readFileSync(join(project, '.next', 'BUILD_ID'), 'utf8').trim(), 'newer-build');
