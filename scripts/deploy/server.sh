@@ -5,7 +5,7 @@ target_commit=${1:?Expected target commit}
 stage=${2:?Expected uploaded staging directory}
 project=${DEPLOY_PROJECT_DIR:-/home/ubuntu/X-AI}
 service=x-ai-field
-health_url=http://127.0.0.1:5260/ai/in-depth
+health_url=http://127.0.0.1:5260/ai
 
 [[ $target_commit =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid target commit.' >&2; exit 1; }
 [[ -d $project/.git && -d $stage ]] || { echo 'Project or staging directory is missing.' >&2; exit 1; }
