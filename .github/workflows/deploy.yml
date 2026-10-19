@@ -1,0 +1,68 @@
+name: Deploy X-AI
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: x-ai-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout deployment scripts at the same commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: x-ai-build
+          path: ${{ runner.temp }}/x-ai-release
+
+      - name: Verify artifact before upload
+        run: node scripts/deploy/artifact.mjs verify "$RUNNER_TEMP/x-ai-release" "$GITHUB_SHA"
+
+      - name: Configure verified SSH host and key
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "$RUNNER_TEMP/x-ai-ssh"
+          printf '%s\n' "$SSH_KEY" > "$RUNNER_TEMP/x-ai-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/x-ai-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/x-ai-ssh/key" "$RUNNER_TEMP/x-ai-ssh/known_hosts"
+
+      - name: Upload to isolated server staging directory
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          stage="/home/ubuntu/.x-ai-deploy/${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh -i "$RUNNER_TEMP/x-ai-ssh/key" \
+            -o UserKnownHostsFile="$RUNNER_TEMP/x-ai-ssh/known_hosts" \
+            -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=10 \
+            "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p /home/ubuntu/.x-ai-deploy && mkdir '$stage'"
+          scp -i "$RUNNER_TEMP/x-ai-ssh/key" \
+            -o UserKnownHostsFile="$RUNNER_TEMP/x-ai-ssh/known_hosts" \
+            -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            "$RUNNER_TEMP/x-ai-release/next.tar.gz" \
+            "$RUNNER_TEMP/x-ai-release/manifest.json" \
+            "$RUNNER_TEMP/x-ai-release/package.json" \
+            "$RUNNER_TEMP/x-ai-release/package-lock.json" \
+            scripts/deploy/artifact.mjs scripts/deploy/server.sh \
+            "$DEPLOY_USER@$DEPLOY_HOST:$stage/"
+          ssh -i "$RUNNER_TEMP/x-ai-ssh/key" \
+            -o UserKnownHostsFile="$RUNNER_TEMP/x-ai-ssh/known_hosts" \
+            -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=10 \
+            "$DEPLOY_USER@$DEPLOY_HOST" "bash '$stage/server.sh' '$GITHUB_SHA' '$stage'"

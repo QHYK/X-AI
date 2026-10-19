@@ -1,17 +1,23 @@
-
 name: Build X-AI
 
 on:
   workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -24,3 +30,18 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Package build for deployment
+        run: node scripts/deploy/artifact.mjs create "$RUNNER_TEMP/x-ai-release" "$GITHUB_SHA"
+
+      - name: Upload verified build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: x-ai-build
+          path: |
+            ${{ runner.temp }}/x-ai-release/next.tar.gz
+            ${{ runner.temp }}/x-ai-release/manifest.json
+            ${{ runner.temp }}/x-ai-release/package.json
+            ${{ runner.temp }}/x-ai-release/package-lock.json
+          if-no-files-found: error
+          retention-days: 3

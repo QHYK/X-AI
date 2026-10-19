@@ -22,7 +22,7 @@ Pipeline CLI 在读取环境派生参数或执行处理模块前，统一通过 
 
 `daily` 的 `--date` 优先于 `DAILY_DATE`。其余 processing CLI 不解析 `--date`，要指定目标日期时使用 `DAILY_DATE=YYYY-MM-DD`。
 
-当前仓库没有 CI workflow、Docker/部署 manifest、Procfile 或内置 scheduler。生产调度器若存在于部署环境，应调用固定的 `npm run daily`，而不是未登记的脚本或任意 shell 命令。
+仓库通过 GitHub Actions 手动 Build / Deploy；没有 Docker、Procfile 或内置 scheduler。服务器 Cron 继续使用既有 Daily / Discovery 命令，部署 Workflow 不修改 Cron。
 
 ## 2. 应用与数据库命令
 
@@ -37,6 +37,31 @@ Pipeline CLI 在读取环境派生参数或执行处理模块前，统一通过 
 | `npm run db:check` | Drizzle Kit | 检查 migration 一致性 |
 | `npm run db:migrate` | Drizzle Kit | 应用 migration |
 | `npm run db:seed` | `scripts/import-sources.ts` | 代码试图读取 `docs/08-source-list.md` 后同步 `sources`；会写库 |
+
+### 2.1 手动构建与部署
+
+GitHub Actions 的 **Build X-AI** 可单独手动运行；**Deploy X-AI** 仅通过 `workflow_dispatch` 手动触发，不在 push 时自动部署。在 Actions 页面选择要部署的 branch/tag 后运行 Deploy，Workflow 固定本次的 Commit SHA，复用 Build X-AI 的 Node 22 / `npm ci` / `npm run build` 配置。Runner 上传经过 SHA-256 校验的 `.next` 构建包、manifest 和目标 `package.json` / `package-lock.json`；服务器不执行 Build。需要已有 Repository Secrets：`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_KNOWN_HOSTS`，无需上传服务器 `.env.local` 或新增业务密钥。
+
+首次部署前，在服务器人工核实：
+
+```bash
+cd /home/ubuntu/X-AI
+node -v
+uname -m
+git status --short
+git rev-parse HEAD
+test -f .env.local && test -f .next/BUILD_ID
+test -d runtime
+test -d node_modules || echo 'node_modules missing: deployment will install it before switching'
+sudo -n systemctl is-active x-ai-field
+curl --fail --max-time 10 http://127.0.0.1:5260/ai/in-depth >/dev/null
+```
+
+服务器 Git `origin` 须能取得本次固定 Commit；工作区须无本地改动或未跟踪文件，当前 Commit 必须是目标 Commit 的祖先。Ubuntu 服务器的架构、Node ABI、glibc 须与 Runner 产物兼容。部署前请安排不会与 Cron Pipeline 重叠的窗口；Workflow 会检查现有进程并在切换前再次检查，但在不修改 Cron 配置的条件下，无法消除检查后新任务启动的竞态。
+
+上传暂存于 `/home/ubuntu/.x-ai-deploy/<commit>-<run>-<attempt>/`，不会覆盖 `.env.local`、`runtime/`、`logs/` 或 `.git/`。只有部署 Commit 与服务器当前 Commit 的 `package-lock.json` 不同，或 `node_modules` 缺失时，才在独立暂存目录执行服务器 `npm ci`；无法确认已有依赖状态则停止。验证完毕后短暂停止 `x-ai-field`，fast-forward 更新源码、替换整目录 `.next` 与必要的 `node_modules`，重启并检查 systemd 状态及 `/ai/in-depth`。旧 `.next`、旧依赖与 Commit 信息保留在暂存目录，供人工诊断和恢复；清理历史暂存目录前应先确认当前版本稳定。
+
+失败若发生在停机前，线上版本保持不变；若发生在切换后，脚本尝试恢复原分支及 Commit、旧 `.next`、`node_modules` 并重新验证服务。无法安全恢复分支时会明确报错，不会宣称回滚成功；按 Action 输出的暂存目录人工处理，不要仅恢复 `.next`。当前服务器 `ubuntu` 用户具有广泛免密 sudo 权限，这是现有部署账户的安全风险，建议后续收窄为服务管理所需命令。
 
 ## 3. Production Processing 命令
 
