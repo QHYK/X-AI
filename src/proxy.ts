@@ -1,3 +1,4 @@
+// this + 服务端认证：负责后台访问控制
 import { NextRequest, NextResponse } from 'next/server.js';
 import { adminApiError, hasAdminSession } from './lib/admin-auth.js';
 

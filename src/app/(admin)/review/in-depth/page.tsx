@@ -23,7 +23,6 @@ export default async function InDepthReviewPage(props: {
         title="In-depth Reads Review"
         description="Review and publish Discovery works. Approval makes a work visible immediately."
         dailyDate={resolveDailyScope(undefined).dailyDate}
-        active="in-depth"
         showDateControl={false}
       />
       <InDepthReviewClient

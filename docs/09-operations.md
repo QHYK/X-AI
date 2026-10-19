@@ -227,6 +227,8 @@ Regression tests validate stable correctness contracts; they are not Production 
 
 Representative long-lived checks:
 
+后台目录与导航匹配回归使用 `npm run test:admin-navigation`；认证边界回归使用 `npm run test:admin-auth`。导航架构见 [Technical Spec](04-technical-spec.md#7-internal-dashboard)。
+
 ```bash
 npm run test:daily-scope
 npm run test:pre-stage1-duplicates

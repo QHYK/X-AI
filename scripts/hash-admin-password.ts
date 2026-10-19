@@ -34,5 +34,5 @@ async function readPassword(): Promise<string> {
 }
 
 const password = await readPassword();
-if (password.length < 16) throw new Error('Admin password must contain at least 16 characters.');
+if (password.length < 8) throw new Error('Admin password must contain at least 8 characters.');
 console.log(await createAdminPasswordHash(password));

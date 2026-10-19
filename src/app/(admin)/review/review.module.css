@@ -8,7 +8,7 @@
 .header {
   display: flex;
   max-width: 1180px;
-  margin: 0 auto;
+  margin: 0 auto 24px;
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
@@ -37,7 +37,6 @@
 }
 
 .dateForm,
-.nav,
 .saveBar,
 .saveBar > div,
 .itemControls,
@@ -84,25 +83,6 @@
   cursor: pointer;
   font-size: 0.78rem;
   font-weight: 750;
-}
-
-.nav {
-  max-width: 1180px;
-  margin: 24px auto 18px;
-  border-bottom: 1px solid #d8dfdc;
-}
-
-.nav a {
-  padding: 10px 12px;
-  color: #53635b;
-  text-decoration: none;
-  font-size: 0.82rem;
-  font-weight: 700;
-}
-
-.nav .active {
-  border-bottom: 2px solid #315a45;
-  color: #173b29;
 }
 
 .snapshot {

@@ -16,7 +16,6 @@ import { isCurrentDailyDate, isDailyWorkflowRunning } from '@/lib/daily-workflow
 import { DailyRetryButton } from './daily-retry-button.js';
 import { StepRetryButton } from './step-retry-button.js';
 import { MetricInfo } from './metric-info.js';
-import { AdminLogoutButton } from '../admin-logout-button.js';
 import styles from './dashboard.module.css';
 
 export const runtime = 'nodejs';
@@ -52,12 +51,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           </p>
         </div>
         <div className={styles.headerActions}>
-          <a href={`./review/events?date=${data.latestDailyDate}`}>Event Review</a>
-          <a href={`./review/long-form?date=${data.latestDailyDate}`}>Long-form Review</a>
-          <a href="./review/in-depth">In-depth Review</a>
-          <a href="./dashboard/analytics">Analytics</a>
-          <a href="./dashboard/metrics">指标说明</a>
-          <AdminLogoutButton apiUrl="./api/auth/logout" loginUrl="./login" />
           <div className={styles.today}>Latest Daily · {data.latestDailyDate}</div>
         </div>
       </header>

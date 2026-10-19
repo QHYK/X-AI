@@ -296,6 +296,8 @@ User Request → Read More API → Server-side Full Content → LLM → Detailed
 
 X-AI-field 包含一个 Internal Dashboard，用于运行观察、Human Review 与 Model Evaluation。
 
+后台 `dashboard/` 与 `review/` 页面集中放在 `src/app/(admin)/` Route Group，由共享 `layout.tsx` 和可复用 Sidebar 提供后台外壳；Route Group 不改变浏览器 URL。`src/app/admin-navigation.ts` 是 Sidebar 分组、名称和链接的唯一配置来源，不承担认证或路由注册职责。跨页面菜单使用 Next.js `Link` 的应用根路径，由 Next.js 处理 basePath；其余既有相对 URL 约定见 §6.3。登录、启动页和公开 In-depth 列表位于 Route Group 外。
+
 Dashboard 不是 Production Source of Truth。它读取 Production 数据与 Runtime Artifacts，并调用已有 Application Services，不应在 UI 层复制 Processing、Review 或 Evaluation 的业务逻辑。
 
 ### 7.1 最近 7 天 Overview
