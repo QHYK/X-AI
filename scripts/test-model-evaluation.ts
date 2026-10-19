@@ -36,6 +36,9 @@ try {
   await writeJson(join(runtimeRoot, "runtime", "stage3", "from-daily-lineage", "events", "input.json"), {
     events: [],
   });
+  await writeJson(join(runtimeRoot, "runtime", "stage3", "from-daily-lineage", "digest", "technology-input.json"), {
+    category: "technology",
+  });
   await writeJson(join(runtimeRoot, "runtime", "stage3", "newer-global", "run.json"), {
     status: "success",
     daily_date: "2026-08-28",
@@ -54,6 +57,19 @@ try {
     passed:
       frozenStage3.source_stage3_run?.endsWith("runtime/stage3/from-daily-lineage") === true &&
       frozenStage3.input?.events?.length === 0,
+  });
+  const frozenDigest = await buildFrozenEvaluationInput({
+    pool: {} as never,
+    date: "2026-08-28",
+    stage: "stage3_digest",
+    rootDir: runtimeRoot,
+  }) as { source_stage3_run?: string; inputs?: Array<{ item_key: string }> };
+  checks.push({
+    name: "Stage 3 Digest Evaluation reads all runtime inputs from the selected lineage",
+    passed:
+      frozenDigest.source_stage3_run?.endsWith("runtime/stage3/from-daily-lineage") === true &&
+      frozenDigest.inputs?.length === 1 &&
+      frozenDigest.inputs[0]?.item_key === "technology",
   });
 } finally {
   await rm(runtimeRoot, { recursive: true, force: true });

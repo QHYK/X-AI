@@ -231,6 +231,12 @@ try {
     },
     status: "success",
   });
+  await mkdir(join(runtimeRoot, "runtime/stage3/fixture/digest"), { recursive: true });
+  await writeFile(join(runtimeRoot, "runtime/stage3/fixture/digest/technology-ranking-diagnostics.json"), `${JSON.stringify({
+    initial_input_tokens: 23,
+    initial_output_tokens: 7,
+    initial_total_tokens: 30,
+  })}\n`);
   await writeRun(runtimeRoot, "runtime/stage4/fixture", {
     stage: "stage4",
     daily_date: "2026-08-20",
@@ -329,6 +335,13 @@ try {
       stages.get("stage1")?.batchCount === 3 && stages.get("stage1")?.fallbackBatchCount === 1 &&
       stages.get("stage1")?.splitCount === 2 && stages.get("stage1")?.singletonBatchCount === 1 &&
       stages.get("stage1")?.inputTokens === 100 && stages.get("stage1")?.totalTokens === 150,
+  });
+  checks.push({
+    name: "Dashboard reads Stage3 digest diagnostic tokens from runtime",
+    passed:
+      stages?.get("stage3")?.inputTokens === 23 &&
+      stages.get("stage3")?.outputTokens === 7 &&
+      stages.get("stage3")?.totalTokens === 30,
   });
   checks.push({
     name: "Dashboard runtime returns Exact Duplicate Filter statistics from the Daily run artifact",
