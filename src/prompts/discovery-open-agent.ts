@@ -2,9 +2,10 @@ import {
   buildDiscoveryEditorialCriteria,
   DISCOVERY_EDITORIAL_PROMPT_VERSION,
 } from './discovery-topic-selection.js';
+import { DISCOVERY_TAGS_INSTRUCTIONS } from './discovery-tags.js';
 
 export { DISCOVERY_EDITORIAL_PROMPT_VERSION };
-export const DISCOVERY_D5_PROMPT_VERSION = 'v1';
+export const DISCOVERY_D5_PROMPT_VERSION = 'v2';
 
 const DISCOVERY_D5_RUNTIME_PROMPT = `请为 X-AI-field 的高质量人类创作内容库，广泛寻找并推荐最多 3 篇真正出色、值得主动学习者亲自阅读、观看或收听的作品。不要依赖当期新闻或 Topic Leads；优先作品本身的原创性、结构、深度、可信作者与证据，以及长期学习价值，而不是新闻热度。
 
@@ -21,7 +22,7 @@ const DISCOVERY_D5_RUNTIME_PROMPT = `请为 X-AI-field 的高质量人类创作�
 为兼容严格 Structured Output，extra_info 必须输出 JSON 对象序列化后的字符串；没有补充信息时输出 "{}"。`;
 
 export function buildDiscoveryD5Instructions(): string {
-  return `${buildDiscoveryEditorialCriteria()}\n\n${DISCOVERY_D5_RUNTIME_PROMPT}`;
+  return `${buildDiscoveryEditorialCriteria()}\n\n${DISCOVERY_D5_RUNTIME_PROMPT}\n\n${DISCOVERY_TAGS_INSTRUCTIONS}`;
 }
 
 export function buildDiscoveryD5UserPrompt(memory: unknown = null, manualContext?: string): string {

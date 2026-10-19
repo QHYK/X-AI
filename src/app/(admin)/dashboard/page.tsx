@@ -4,6 +4,7 @@
  * 作为 Server Component 加载数据库业务统计，以及 DB-first 的 Stage execution summary；日期详情不会改变顶部最近七期数据。
  */
 import { getDatabasePool } from '@/db/index.js';
+import { getDiscoveryRunForDate, type DiscoveryDashboardRun } from '@/lib/discovery-dashboard.js';
 import {
   formatContentCompletionRatio,
   getDashboardData,
@@ -36,7 +37,9 @@ type DashboardPageProps = {
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const { date } = await searchParams;
   const detailDate = Array.isArray(date) ? date[0] : date;
-  const data = await getDashboardData(getDatabasePool(), { detailDate });
+  const pool = getDatabasePool();
+  const data = await getDashboardData(pool, { detailDate });
+  const discovery = await getDiscoveryRunForDate(pool, data.detailDate);
   const canRetryDaily = isCurrentDailyDate(data.detailDate, data.latestDailyDate);
   const dailyWorkflowRunning = canRetryDaily ? await isDailyWorkflowRunning() : false;
 
@@ -226,7 +229,115 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           </article>
         )}
       </section>
+      {discovery ? <DiscoveryRunCard run={discovery} /> : null}
     </main>
+  );
+}
+
+function DiscoveryRunCard({ run }: { run: DiscoveryDashboardRun }) {
+  const time = (value: string | null) =>
+    value
+      ? new Intl.DateTimeFormat('zh-CN', {
+          timeZone: 'Asia/Shanghai',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hourCycle: 'h23',
+        }).format(new Date(value))
+      : 'N/A';
+  return (
+    <section
+      className={styles.details}
+      aria-label="Selected date Discovery Run"
+    >
+      <div className={styles.sectionHeading}>
+        <div>
+          <p className={styles.kicker}>Discovery · Selected business date</p>
+          <h2>Latest Discovery Run</h2>
+          <p className={styles.subtitle}>
+            所选业务日期共 {run.runCount} 次运行，展示最新启动的一次（{run.runType}）。
+          </p>
+        </div>
+        <StatusBadge status={run.status} />
+      </div>
+      <div className={styles.stageGrid}>
+        <article className={`${styles.stageCard} ${styles.discoverySummary}`}>
+          <dl className={styles.metricList}>
+            <Metric
+              label="Run ID"
+              value={run.id}
+            />
+            <Metric
+              label="Started · Shanghai"
+              value={time(run.startedAt)}
+            />
+            <Metric
+              label="Finished · Shanghai"
+              value={time(run.finishedAt)}
+            />
+            <Metric
+              label="Duration"
+              value={formatDuration(run.durationMs)}
+            />
+            <Metric
+              label="End reason"
+              value={run.endReason ?? 'N/A'}
+            />
+            <Metric
+              label="Candidates"
+              value={formatNumber(run.candidateCount)}
+            />
+            <Metric
+              label="Submitted for review"
+              value={formatNumber(run.reviewCount)}
+            />
+          </dl>
+        </article>
+        {(['d2', 'd3', 'd4', 'd5'] as const).map((stage) => {
+          const state = run.stages[stage];
+          return (
+            <article
+              key={stage}
+              className={styles.stageCard}
+            >
+              <div className={styles.stageHeader}>
+                <h3>{stage.toUpperCase()}</h3>
+                <StatusBadge status={state?.status ?? null} />
+              </div>
+              <dl className={styles.metricList}>
+                <Metric
+                  label="Model"
+                  value={state?.model ?? 'N/A'}
+                />
+                <Metric
+                  label="Duration"
+                  value={formatDuration(state?.elapsedMs)}
+                />
+                <Metric
+                  label="LLM calls"
+                  value={formatMetric(state?.usage?.requests)}
+                />
+                <Metric
+                  label="Input tokens"
+                  value={formatMetric(state?.usage?.inputTokens)}
+                />
+                <Metric
+                  label="Output tokens"
+                  value={formatMetric(state?.usage?.outputTokens)}
+                />
+                <Metric
+                  label="End reason"
+                  value={state?.endReason ?? 'N/A'}
+                />
+              </dl>
+              {state?.errorSummary ? <p className={styles.empty}>{state.errorSummary}</p> : null}
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -679,7 +790,9 @@ function StatusBadge({
 }) {
   const normalized = status?.toLowerCase() ?? 'unknown';
   const className =
-    normalized === 'success' || (normalized === 'partial' && (partialReady ?? 0) > 0)
+    normalized === 'success' ||
+    normalized === 'completed' ||
+    (normalized === 'partial' && (partialReady ?? 0) > 0)
       ? styles.successBadge
       : normalized === 'failed'
         ? styles.failedBadge

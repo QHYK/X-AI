@@ -15,6 +15,10 @@ import {
 import OpenAI from 'openai';
 import { z } from 'zod';
 import {
+  DiscoveryTagsSchema,
+  DiscoveryTagsTransportSchema,
+} from '../lib/discovery-content-metadata.js';
+import {
   buildDiscoveryD5Instructions,
   buildDiscoveryD5UserPrompt,
   DISCOVERY_D5_PROMPT_VERSION,
@@ -56,6 +60,7 @@ const D5CandidateTransportSchema = z
     whyWorthReading: z.string().min(1),
     evidence: z.string().min(1),
     limitations: z.string(),
+    tags: DiscoveryTagsTransportSchema,
     extra_info: z.string(),
   })
   .strict();
@@ -219,6 +224,7 @@ export function validateDiscoveryD5Output(output: unknown): DiscoveryAgentCandid
     whyWorthReading: candidate.whyWorthReading,
     evidence: candidate.evidence,
     limitations: candidate.limitations,
+    tags: DiscoveryTagsSchema.parse(candidate.tags),
     extraInfo: parseExtraInfo(candidate.extra_info),
   }));
 }
@@ -277,7 +283,7 @@ export async function runDiscoveryD5Agent(input: {
     instructions: buildDiscoveryD5Instructions(),
     tools: [
       webSearchTool({ searchContextSize: 'medium' }),
-      createDiscoveryFetchContentTool({ timeoutMs: input.config.fetchTimeoutMs }),
+      createDiscoveryFetchContentTool({ timeoutMs: input.config.fetchTimeoutMs, pool: input.pool }),
     ],
     outputType: DiscoveryD5OutputSchema,
   });

@@ -71,6 +71,18 @@ Agent 每轮依据工具观察结果决定搜索、阅读、追踪或结束。�
 
 Hosted Tool 和自定义 Function Tool 都属于 Agent 的工具调用；使用平台提供的搜索能力不改变 X-field 自己负责 Workflow、Agent 指令、验证、数据存储和人工审核的职责。**不需要 Skill**。
 
+Content Fetch 的同一次 Firecrawl Scrape 请求同时取 Markdown、主内容 HTML 和响应元数据，不为图片追加抓取。Code 按 `og:image`、`twitter:image`、正文图片的顺序选一个 Cover：社会化元数据提供文章关联依据，正文图片要求位置与声明尺寸证据（宽至少 600，已知高至少 300）；过滤明显 Logo、头像、图标、广告及推荐区，已知尺寸不足或比例极端时弃用。相对图片地址以原文 URL 解析，仅接受无凭据的 HTTP(S)。没有合适图片或解析失败只令 Cover 为空，不影响已获取正文。Direct 路径仅复用已有 `raw_articles.metadata` 和 `image_url`，不为图片重抓。图片不经过 LLM，也不上传或代理；持久化形状见 `05-data-model.md` §11.3。
+
+#### 原文持久化与复用
+
+D3 / D5 的工具调用早于最终 Candidate 选择，可能读取更多作品、重复 URL，甚至在读完后 Agent 失败。因此采用独立 `discovery_fetch_cache`，不在 Candidate JSONB 重复存正文，也不依赖 Run / Candidate 完成后再保存。`src/lib/article-fetch-cache.ts` 按现有 URL 规范化规则查询；正文与元数据字段由 `05-data-model.md` §11.5 定义。
+
+`fetch_content` 优先复用完整 Cache 或 Daily 已存全文，未命中时才抓取固定 URL。同次 Firecrawl 完整 Markdown 原文在工具返回前持久化。Agent 接收内容仍沿用既有 Daily 提取器：优先选择 Abstract / Takeaways / Summary 等有效片段，否则使用文章正文；再限制为最多 20,000 字符，并标明内容类型及真实截断状态。摘要片段不标为完整正文；提取与交付限制均不替换或截断 Cache 中的原文。Candidate 的 `evidence.fetch` 与 Trace 继续只保留诊断摘要，正文通过规范化 URL 关联 Cache，不通过 Trace 恢复。
+
+成功但明确不完整的响应可保存并标记不完整，不能命中完整正文复用；HTTP 错误、空响应不保存为成功正文。缓存唯一键避免重复记录；同一规范化请求 URL 使用 PostgreSQL 事务级 advisory lock 并在锁内复查，减少多进程并发重复付费，适用于 transaction pooling。锁与持久化独立于 Candidate 写入事务；已成功抓取但 Cache 写入失败时明确记录日志并保留本次已取得内容，不能静默当作已缓存。查询 / 锁失败不降级为无保护的付费抓取。已有重定向目标也可命中 Cache；不同未知别名首次并发抓取不实现复杂的别名协调。
+
+D4 本身不抓取，继续通过现有 Daily 关联读取 `raw_articles.full_content_text`；不复制到新 Cache。共享原文读取器还可复用 Daily `content_text` 中有明确证明的完整短正文：Content Completion 为 success、类型 article_body、full_content_length 为 0（既有提取器只在正文不超过 Stage1 上限时如此保存）；不能将 Abstract / Summary 或没有这些证明的片段当作全文。Daily 只保留摘要、未保存全文的历史记录无法无成本恢复原文。Editorial 原文读取与生成边界见 `04-technical-spec.md` §7.3；本轮不改变 Daily Pipeline。
+
 如果 Hosted Web Search 在实际模型、SDK 或证据记录要求下无法满足需求，再引入第三方搜索 API 并实现自定义 `search_web`，不提前维护两套搜索实现。
 
 视频 / 播客只有在能取得足够内容用于验证时才进入最终候选。暂不专门处理付费墙。外部内容属于不可信数据，不允许其中的指令改变 Agent 的系统任务。
@@ -87,9 +99,21 @@ Hosted Tool 和自定义 Function Tool 都属于 Agent 的工具调用；使用�
 - Direct、Topic、Open 产出的候选使用统一的内部数据契约，至少包含 URL、作品信息、发现路径、关联线索、证据、读取完整度与局限。
 - Code 负责 URL 规范化、候选去重、历史重复检查、可访问性及可核查的时长 / 内容类型检查。
 - LLM 负责编辑价值判断；最终候选必须关联实际读取证据，不以 Agent 自述作为已阅读全文的依据。
+- Tags 复用各路径已有最终阅读评价，不额外请求或建立补标签服务；阶段职责见 `06a-discovery-workflow.md` §4.1。双语输出契约见 `07-prompt-spec.md` 的 Discovery Candidate Tags，存储映射见 `05-data-model.md` §11.3。
 - 常规路径 **Direct 最多 3 篇、Topic 最多 3 篇**，最多 6 篇进入人工审核；不凑数。
 - 仅当常规 Direct / Topic 均正常完成且 Code 核查后合计 0 篇合格作品时自动触发 Open；人工可在审核不满意时额外触发 Open。Open 每次最多提交 3 篇，不覆盖已有审核候选。
 - 作品可以在不同路径重复发现，但应在统一 Pool 中去重并保留发现来源；最终审核列表不重复展示同一作品。
+
+### 5.1 Candidate Source 归一化
+
+`src/lib/discovery-source.ts` 是 Direct / Topic / Open 写入及 Review / 公开读取共用的 Source 规则。Source 表示发布机构或网站，不使用作者或完整 URL：
+
+1. 同次 Fetch 的可信 `og:site_name` / JSON-LD `publisher.name` 或等价站点元数据；D3 / D5 复用 Firecrawl 同一响应的 Metadata / HTML，D4 只读取已有 Daily 元数据，不重新抓取。
+2. D4 的 Daily `source_id → sources.name`，以及已有 Candidate `publication` 兼容值；D5 原有模型 publication 仅为此级补充，不能覆盖可信 Fetch Metadata，不增加模型来源生成任务。
+3. 复用数据库已有 `sources.url / name` 按清理后的 hostname 精确匹配，不新增域名映射或来源注册系统。
+4. Original URL 的 http(s) hostname，去除 `www.` / `wwwN.` / `m.` 前缀；以上均不可用时为 `Unknown`。
+
+空值、Unknown、泛化模板名、URL 等无效来源名跳过；已存的 URL hostname 仍允许升级为来源配置中的名称。Source 提取为可选元数据，失败不阻断正文获取。历史 Candidate 只在读取时回退，不回写数据库。持久化字段映射见 `05-data-model.md` §11.3。
 
 ## 6. 数据持久化与执行追踪
 

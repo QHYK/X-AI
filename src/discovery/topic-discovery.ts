@@ -1,3 +1,5 @@
+import { resolveDiscoveryPublication } from '../lib/discovery-source.js';
+import { loadDiscoverySources } from '../lib/discovery-source-list.js';
 // D3
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
@@ -14,6 +16,11 @@ import {
 } from '@openai/agents';
 import OpenAI from 'openai';
 import { z } from 'zod';
+import {
+  DiscoveryTagsSchema,
+  DiscoveryTagsTransportSchema,
+  type DiscoveryTag,
+} from '../lib/discovery-content-metadata.js';
 import { normalizeArticleUrl } from '../processing/url-normalization.js';
 import {
   buildDiscoveryD3Instructions,
@@ -55,6 +62,7 @@ const D3CandidateTransportSchema = z
     whyWorthReading: z.string().min(1),
     evidence: z.string().min(1),
     limitations: z.string(),
+    tags: DiscoveryTagsTransportSchema,
     extra_info: z.string(),
   })
   .strict();
@@ -77,6 +85,7 @@ export type DiscoveryD3Candidate = {
   whyWorthReading: string;
   evidence: string;
   limitations: string;
+  tags: DiscoveryTag[];
   extraInfo: Record<string, unknown>;
 };
 
@@ -291,6 +300,7 @@ export function validateDiscoveryD3Output(
       whyWorthReading: candidate.whyWorthReading,
       evidence: candidate.evidence,
       limitations: candidate.limitations,
+      tags: DiscoveryTagsSchema.parse(candidate.tags),
       extraInfo: parseExtraInfo(candidate.extra_info),
     };
   });
@@ -348,7 +358,7 @@ export async function runDiscoveryD3Agent(input: {
     instructions: buildDiscoveryD3Instructions(),
     tools: [
       webSearchTool({ searchContextSize: 'medium' }),
-      createDiscoveryFetchContentTool({ timeoutMs: input.config.fetchTimeoutMs }),
+      createDiscoveryFetchContentTool({ timeoutMs: input.config.fetchTimeoutMs, pool: input.pool }),
     ],
     outputType: DiscoveryD3OutputSchema,
   });
@@ -481,6 +491,7 @@ export async function validateAndPersistDiscoveryAgentCandidates(
     };
   });
 
+  const sources = rows.length ? await loadDiscoverySources(pool) : [];
   const client = await pool.connect();
   try {
     await client.query('begin');
@@ -514,7 +525,12 @@ export async function validateAndPersistDiscoveryAgentCandidates(
           row.candidate.title,
           row.candidate.titleZh,
           row.candidate.author || null,
-          row.candidate.publication || null,
+          resolveDiscoveryPublication({
+            url: row.candidate.url,
+            metadata: row.fetchEvidence?.metadata,
+            publication: row.candidate.publication,
+            sources,
+          }),
           row.candidate.contentType,
           row.candidate.publishedAt,
           row.candidate.estimatedDurationMinutes,
@@ -526,7 +542,7 @@ export async function validateAndPersistDiscoveryAgentCandidates(
             limitations: row.candidate.limitations,
             fetch: row.fetchEvidence ? summarizeFetch(row.fetchEvidence) : null,
           }),
-          JSON.stringify({ decision: row.decision.reason }),
+          JSON.stringify({ decision: row.decision.reason, tags: row.candidate.tags }),
           row.decision.status,
         ],
       );
@@ -721,6 +737,7 @@ function summarizeFetch(fetchResult: DiscoveryFetchResult): Record<string, unkno
     truncated: fetchResult.truncated,
     contentType: fetchResult.content_type,
     metadata: fetchResult.metadata,
+    coverImage: fetchResult.cover_image ?? null,
   };
 }
 

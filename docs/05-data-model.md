@@ -408,7 +408,7 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 | `title` | text | nullable；作品原始标题 |
 | `title_zh` | text | nullable；中文标题，来自 D3 / D5 输出或后续编辑补充 |
 | `author` | text | nullable |
-| `publication` | text | nullable；作品发布来源，D5 明确输出；其他路径有可靠元数据时填写 |
+| `publication` | text | nullable；作品发布来源；各路径共用归一化规则，见 `04a-discovery-technical-spec.md` §5.1 |
 | `content_type` | text | nullable；`article` / `video` / `podcast` |
 | `published_at` | timestamptz | nullable |
 | `estimated_duration_minutes` | integer | nullable |
@@ -434,9 +434,11 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
   Lead 存在 JSONB 中，因此不建立数据库 FK，由应用层校验归属。Lead ID 由应用代码稳定生成，不能由 LLM 自由生成。
 - D3 Final Output 的每篇 Candidate 必须显式提供一个 `sourceLeadId`，且必须属于本次输入的 Topic Leads。Agent 选择作品的主要归属 Lead，Code 严格校验并映射到 `source_lead_id`；首版不猜测默认 Lead，也不建立多对多来源关系。
 - Candidate 使用 CHECK 将 `discovery_path` 限定为 `direct` / `topic` / `open`，并约束 `direct` / `topic` 必须提供 `source_lead_id`、`open` 必须保持 `source_lead_id` 为 NULL。
-- D3 / D5 的 `title_zh`、`summary`、`whyWorthReading` 分别映射为 `title_zh`、`summary`、`why_worth_reading`；D5 的 `publication` 映射为同名字段。D4 的 `decision`、`reason`、`limitations` 等评价结果保存于 `evaluation` / `evidence` JSONB，不要求为每个评价属性建立独立列。Direct 来源的标题译名、概要和推荐理由如尚未生成，可以暂时为 NULL；不得用模型未输出的内容伪造填充。
+- D3 / D4 / D5 的 `title_zh`、`summary`、`whyWorthReading` 分别映射为已有列 `title_zh`、`summary`、`why_worth_reading`。D4 的 `decision` / `reason` 保存于 `evaluation`，内容证据 / `limitations` 保存于 `evidence`，不挪作读者介绍。历史 Direct 未生成介绍时允许 NULL，不重写历史输出。归一化后的 Source 写入已有 `publication`；Topic / Open 的 Fetch 来源元数据随 `evidence.fetch.metadata.publication` 保存，Direct 可用元数据摘要保存在 `evidence.sourceMetadata.publication`。这些字段映射复用既有列；独立原文 Cache 的新增表见 §11.5。
 - D3 / D4 / D5 的 `extra_info` 统一保存于 `extra_info` JSONB；缺失时规范化为 `{}`，只允许 JSON 对象，禁止数组、字符串等非对象值。应用层应限制序列化大小并过滤敏感、重复、无关内容；`extra_info` 不得替代固定字段、证据或业务校验。
 - `evidence` 保存实际获取的内容证据及其来源，不把 Agent 的自然语言声明当成已阅读证据。
+- `evaluation.tags` 保存最终内容评价生成的双语标签：`[{ "zh": "科学方法", "en": "Scientific Method" }]`，最多 3 对，每对中英文均非空；按任一语言名称去重，历史缺失按空数组读取。它是评价的固定键，不写入自由补充字段 `extra_info`。
+- Cover 复用 `evidence` JSONB：Direct 使用 `evidence.coverImage`，Topic / Open 使用实际 Fetch 摘要中的 `evidence.fetch.coverImage`，不重复保存。值为 `{ url, source, width, height }` 或 `null`；`source` 为 `og:image` / `twitter:image` / `article` / `raw_article`，尺寸为可获得的正整数，否则为 `null`。它只来自 Code 验证的抓取或已有来源元数据，不接受模型输出的图片。历史缺失按无图片读取。本次不新增数据库列，也不回写历史输出。
 - 若某篇作品由多个路径发现，可在 `topic_context` / `evidence` 中保留额外来源关联；首版不增加候选来源关系表。
 
 ### 11.4 `in_depth_candidates`
@@ -449,7 +451,9 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 | `discovery_candidate_id` | uuid | NOT NULL, FK → `discovery_candidates.id` |
 | `review_status` | text | NOT NULL；`pending` / `approved` / `rejected` |
 | `editorial_notes` | text | nullable；人工审核意见 |
-| `editorial_overrides` | jsonb | nullable；人工修改后的必要展示 / 编辑字段 |
+| `editorial_summary` | text | nullable；「讲了什么」Markdown |
+| `editorial_why_worth_reading` | text | nullable；「为什么值得用心阅读」Markdown |
+| `editorial_extra_info` | text | nullable；面向读者的「其他具体评估」Markdown |
 | `reviewed_at` | timestamptz | nullable |
 | `created_at` | timestamptz | NOT NULL |
 | `updated_at` | timestamptz | NOT NULL |
@@ -457,10 +461,32 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 - `UNIQUE(discovery_candidate_id)`；同一候选不重复进入审核队列。
 - 常规路径每次最多 Direct 3 篇 + Topic 3 篇；自动或人工 Open 每次最多 3 篇。数量由 Workflow 校验，不通过数据库复杂 CHECK 实现。
 - 人工触发 Open 后，新增 Run 和审核候选，不覆盖原有记录。
-- In-depth Reads 首版以 `review_status = 'approved'` 作为上架与前台可见条件；`pending` / `rejected` 不可见。`approved` 改为 `rejected` 即撤下。前台展示时 `editorial_overrides` 中非空的 `title`、`author`、`summary`、`whyWorthReading` 优先于 Candidate 原字段；原字段不被覆盖。
+- In-depth Reads 以 `review_status = 'approved'` 作为上架与前台可见条件；`pending` / `rejected` 不可见。`approved` 改为 `rejected` 即撤下。标题和作者使用 Candidate 客观字段。
+- 「完善介绍」独立保存到以上三个 TEXT 列；Generate 自动保存与 Save changes 写入同一组列，不覆盖 Candidate 原始 Agent 字段。非空 Editorial summary / why worth reading 优先于 Candidate 原字段；NULL / 空字符串按无覆盖处理。Editorial extra_info 缺失时返回空字符串，禁止回退到内部 `discovery_candidates.extra_info`。
+- 管理 API 继续以 `editorialOverrides` 对象返回这三个值，仅作为传输结构，由查询从独立列组装；数据库不再保存该 JSONB。公开 API 字段名不变。
+- 介绍、Notes、审核状态独立写入：介绍仅更新三列，Notes 仅更新 `editorial_notes`；只有审核操作改变 `review_status` / `reviewed_at`。均更新 `updated_at`，不维护版本历史。
 - 本轮不改 `feedback`；明确要求长期记住的偏好由独立 Memory 流程处理。
 
-### 11.5 初始索引与实现前核实项
+### 11.5 `discovery_fetch_cache`
+
+独立于 Candidate / Run 保存成功获取的原文，避免为同一规范化 URL 在不同运行重复保存大段正文；不建立 Candidate FK，读取时用已有 URL 规范化规则关联。Daily 已存全文仍以 `raw_articles.full_content_text` 为来源，不复制到 Cache。
+
+| Field | Type | Constraint / Notes |
+|---|---|---|
+| `normalized_url` | text | Primary Key；规范化请求 URL，去追踪参数 / fragment、排序保留参数 |
+| `normalized_final_url` | text | NOT NULL；索引；支持已知最终 URL 复用 |
+| `original_url` / `final_url` | text | NOT NULL；最终 URL 使用抓取响应的 url / sourceURL，无时保留请求 URL |
+| `fetched_at` | timestamptz | NOT NULL；实际取得内容时间 |
+| `status` | text | NOT NULL，当前仅 `success`；失败 / 空正文不入表 |
+| `markdown` | text | NOT NULL，非空；抓取返回的完整 Markdown，不存 Agent 截断副本 |
+| `is_complete` | boolean | NOT NULL；与 Agent 交付截断状态独立；不完整响应不能作为完整正文复用 |
+| `metadata` | jsonb | NOT NULL，默认 `{}`，必须为对象 |
+
+`metadata` 只保留有用站点信息：title、description、author、publishedTime、sourceURL / url、HTTP 状态、站点 / publisher、OG / Twitter 图像及可得尺寸、语言和完整性提示；同次 HTML 的 meta 可补齐相应字段。`metadata.coverImage` 保存 Code 验证的优选封面。不保存大型 HTML、截图或整个原始 Firecrawl 响应。元数据缺失允许，不让模型生成来源或封面 URL。
+
+同一规范化 URL 使用 UPSERT 更新，不维护正文版本历史；不完整结果不能覆盖已有完整正文。成功结果在工具返回前独立提交，后续 Agent / Candidate / Editorial 失败不回滚原文 Cache。并发和错误处理见 `04a-discovery-technical-spec.md` §4.3；部署 Migration 见 `09-operations.md`。
+
+### 11.6 初始索引与实现前核实项
 
 ```text
 discovery_runs(parent_run_id)

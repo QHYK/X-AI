@@ -120,6 +120,20 @@
       "when": 1792209600000,
       "tag": "0016_discovery_execution_state",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792414845529,
+      "tag": "0017_discovery_fetch_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792420000000,
+      "tag": "0018_flatten_in_depth_editorial",
+      "breakpoints": true
     }
   ]
 }

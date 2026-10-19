@@ -3,9 +3,10 @@ import {
   DISCOVERY_EDITORIAL_PROMPT_VERSION,
 } from './discovery-topic-selection.js';
 import type { DiscoveryTopicLead } from '../discovery/topic-selection.js';
+import { DISCOVERY_TAGS_INSTRUCTIONS } from './discovery-tags.js';
 
 export { DISCOVERY_EDITORIAL_PROMPT_VERSION };
-export const DISCOVERY_D3_PROMPT_VERSION = 'v2';
+export const DISCOVERY_D3_PROMPT_VERSION = 'v3';
 
 const DISCOVERY_D3_RUNTIME_PROMPT = `你的目标是为 X-AI-field 找到真正值得阅读、观看或收听的原创作品，而不是直接解答给定的知识问题。
 
@@ -24,7 +25,7 @@ const DISCOVERY_D3_RUNTIME_PROMPT = `你的目标是为 X-AI-field 找到真正�
 为兼容严格 Structured Output，extra_info 必须输出 JSON 对象序列化后的字符串；没有补充信息时输出 "{}"。`;
 
 export function buildDiscoveryD3Instructions(): string {
-  return `${buildDiscoveryEditorialCriteria()}\n\n${DISCOVERY_D3_RUNTIME_PROMPT}`;
+  return `${buildDiscoveryEditorialCriteria()}\n\n${DISCOVERY_D3_RUNTIME_PROMPT}\n\n${DISCOVERY_TAGS_INSTRUCTIONS}`;
 }
 
 export function buildDiscoveryD3UserPrompt(

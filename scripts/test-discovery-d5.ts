@@ -18,6 +18,7 @@ const candidate = {
   whyWorthReading: '中文理由',
   evidence: '正文中的具体论证',
   limitations: '',
+  tags: [{ zh: '科学方法', en: 'Scientific Method' }],
   extra_info: '{}',
 };
 

@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { IntroductionEditor } from './introduction-editor.js';
+
+import { resolveDiscoveryPublication, discoveryEvidenceMetadata } from '@/lib/discovery-source.js';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation.js';
-import {
-  displayInDepthFields,
-  type InDepthReviewItem,
-  type InDepthReviewStatus,
-} from '@/lib/in-depth-reads.js';
+import { readDiscoveryContentMetadata } from '@/lib/discovery-content-metadata.js';
+import { type InDepthReviewItem, type InDepthReviewStatus } from '@/lib/in-depth-reads.js';
 import styles from '../review.module.css';
 
 function apiUrl(): string {
@@ -21,16 +21,18 @@ export function InDepthReviewClient(props: {
   const [items, setItems] = useState(props.initialItems);
   const [selected, setSelected] = useState<InDepthReviewItem | null>(props.initialItems[0] ?? null);
   const [notes, setNotes] = useState(selected?.editorialNotes ?? '');
-  const [title, setTitle] = useState(editValue(selected, 'title'));
-  const [author, setAuthor] = useState(editValue(selected, 'author'));
-  const [summary, setSummary] = useState(editValue(selected, 'summary'));
-  const [whyWorthReading, setWhyWorthReading] = useState(editValue(selected, 'whyWorthReading'));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [failedCover, setFailedCover] = useState<string | null>(null);
   const router = useRouter();
+  const requestLock = useRef(false);
+  const selectionRequest = useRef(0);
+  const selectedId = useRef(selected?.id);
 
   async function selectItem(id: string) {
+    if (requestLock.current) return;
+    const requestId = ++selectionRequest.current;
     setError(null);
     try {
       const response = await fetch(`${apiUrl()}?id=${encodeURIComponent(id)}`, {
@@ -38,20 +40,20 @@ export function InDepthReviewClient(props: {
       });
       const payload = (await response.json()) as { item?: InDepthReviewItem; error?: string };
       if (!response.ok || !payload.item) throw new Error(payload.error ?? 'Failed to load item.');
+      if (requestId !== selectionRequest.current) return;
+      selectedId.current = payload.item.id;
       setSelected(payload.item);
       setNotes(payload.item.editorialNotes ?? '');
-      setTitle(editValue(payload.item, 'title'));
-      setAuthor(editValue(payload.item, 'author'));
-      setSummary(editValue(payload.item, 'summary'));
-      setWhyWorthReading(editValue(payload.item, 'whyWorthReading'));
       setMessage(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Failed to load item.');
     }
   }
 
-  async function save(reviewStatus: InDepthReviewStatus) {
-    if (!selected || saving) return;
+  async function save(action: 'review' | 'notes', reviewStatus = selected?.reviewStatus) {
+    if (!selected || requestLock.current) return;
+    requestLock.current = true;
+    const id = selected.id;
     setSaving(true);
     setError(null);
     setMessage(null);
@@ -61,13 +63,13 @@ export function InDepthReviewClient(props: {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: selected.id,
-          reviewStatus,
-          editorialNotes: notes,
-          editorialOverrides: { title, author, summary, whyWorthReading },
+          action,
+          ...(action === 'notes' ? { editorialNotes: notes } : { reviewStatus }),
         }),
       });
       const payload = (await response.json()) as { item?: InDepthReviewItem; error?: string };
       if (!response.ok || !payload.item) throw new Error(payload.error ?? 'Failed to save review.');
+      if (selectedId.current !== id) return;
       setSelected(payload.item);
       setItems((current) =>
         payload.item?.reviewStatus === props.status
@@ -75,18 +77,26 @@ export function InDepthReviewClient(props: {
           : current.filter((item) => item.id !== payload.item?.id),
       );
       setMessage(
-        reviewStatus === 'approved' ? 'Approved and visible in In-depth Reads.' : 'Review saved.',
+        action === 'notes'
+          ? 'Notes saved.'
+          : reviewStatus === 'approved'
+            ? 'Approved and visible in In-depth Reads.'
+            : 'Review saved.',
       );
       router.refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Failed to save review.');
     } finally {
+      requestLock.current = false;
       setSaving(false);
     }
   }
 
   const details = selected ? readDetails(selected) : null;
-  const display = selected ? displayInDepthFields(selected) : null;
+  const contentMetadata = selected
+    ? readDiscoveryContentMetadata(selected)
+    : { tags: [], cover: null };
+  const cover = contentMetadata.cover?.url === failedCover ? null : contentMetadata.cover;
 
   return (
     <section className={styles.inDepthSection}>
@@ -113,7 +123,10 @@ export function InDepthReviewClient(props: {
             <p className={styles.empty}>No {props.status} candidates.</p>
           ) : null}
           {items.map((item) => {
-            const fields = displayInDepthFields(item);
+            const fields = {
+              title: item.originalTitle ?? item.titleZh ?? 'Untitled work',
+              author: item.author,
+            };
             return (
               <button
                 key={item.id}
@@ -124,7 +137,12 @@ export function InDepthReviewClient(props: {
               >
                 <strong>{fields.title}</strong>
                 <span>
-                  {fields.author ?? 'Author unknown'} · {item.publication ?? 'Source unknown'}
+                  {fields.author ?? 'Author unknown'} ·{' '}
+                  {resolveDiscoveryPublication({
+                    url: item.url,
+                    metadata: discoveryEvidenceMetadata(item.evidence),
+                    publication: item.publication,
+                  })}
                 </span>
                 <small>{item.url}</small>
                 <small>
@@ -148,42 +166,96 @@ export function InDepthReviewClient(props: {
               <div className={styles.inDepthDetailHeader}>
                 <div>
                   <p className={styles.eyebrow}>Discovery · {capitalize(selected.discoveryPath)}</p>
-                  <h2>{display?.title}</h2>
-                  <p>{selected.originalTitle ?? 'Original title unavailable'}</p>
+                  <h2>
+                    {selected.originalTitle ?? selected.titleZh ?? 'Original title unavailable'}
+                  </h2>
+                  {selected.titleZh && selected.titleZh !== selected.originalTitle ? (
+                    <p>{selected.titleZh}</p>
+                  ) : null}
                 </div>
                 <span className={styles.inDepthBadge}>{capitalize(selected.reviewStatus)}</span>
               </div>
-              <dl className={styles.inDepthMeta}>
-                <dt>Author</dt>
-                <dd>{selected.author ?? 'Unknown'}</dd>
-                <dt>Source</dt>
-                <dd>{selected.publication ?? 'Unknown'}</dd>
-                <dt>Type / duration</dt>
-                <dd>
-                  {selected.contentType ?? 'Unknown'} · {selected.estimatedDurationMinutes ?? '—'}{' '}
-                  min
-                </dd>
-                <dt>Discovered</dt>
-                <dd>{formatDate(selected.candidateCreatedAt)}</dd>
-                <dt>Run ID</dt>
-                <dd>
-                  <code>{selected.runId}</code>
-                </dd>
-                <dt>Original URL</dt>
-                <dd>
-                  {safeHttpUrl(selected.url) ? (
-                    <a
-                      href={selected.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Open original ↗
-                    </a>
+              <div className={styles.inDepthBasicInfo}>
+                <dl className={styles.inDepthMeta}>
+                  <dt>Author</dt>
+                  <dd>{selected.author ?? 'Unknown'}</dd>
+                  <dt>Source</dt>
+                  <dd>
+                    {resolveDiscoveryPublication({
+                      url: selected.url,
+                      metadata: discoveryEvidenceMetadata(selected.evidence),
+                      publication: selected.publication,
+                    })}
+                  </dd>
+                  <dt>Type / duration</dt>
+                  <dd>
+                    {selected.contentType ?? 'Unknown'} · {selected.estimatedDurationMinutes ?? '—'}{' '}
+                    min
+                  </dd>
+                  <dt>Published</dt>
+                  <dd>{selected.publishedAt ? formatDate(selected.publishedAt) : 'Unknown'}</dd>
+                  <dt>Discovered</dt>
+                  <dd>{formatDate(selected.candidateCreatedAt)}</dd>
+                  <dt>Discovery Path</dt>
+                  <dd>{capitalize(selected.discoveryPath)}</dd>
+                  <dt>Processing Stage</dt>
+                  <dd>{{ direct: 'D4', topic: 'D3', open: 'D5' }[selected.discoveryPath]}</dd>
+                  <dt>Candidate ID</dt>
+                  <dd>
+                    <code>{selected.candidateId}</code>
+                  </dd>
+                  <dt>Run ID</dt>
+                  <dd>
+                    <code>{selected.runId}</code>
+                  </dd>
+                  <dt>Original URL</dt>
+                  <dd>
+                    {safeHttpUrl(selected.url) ? (
+                      <a
+                        href={selected.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Open original ↗
+                      </a>
+                    ) : (
+                      selected.url
+                    )}
+                  </dd>
+                  <dt>Tags</dt>
+                  <dd>
+                    <div className={styles.inDepthTags}>
+                      {contentMetadata.tags.length ? (
+                        contentMetadata.tags.map((tag) => (
+                          <span key={`${tag.zh}:${tag.en}`}>
+                            <strong>{tag.zh}</strong>
+                            <small>{tag.en}</small>
+                          </span>
+                        ))
+                      ) : (
+                        <span className={styles.inDepthNoTags}>No tags recorded.</span>
+                      )}
+                    </div>
+                  </dd>
+                </dl>
+                <div className={styles.inDepthCover}>
+                  {cover ? (
+                    // External source images remain unoptimized; no image proxy or upload service.
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={cover.url}
+                      alt={`Cover · ${selected.originalTitle ?? selected.titleZh ?? 'Article'}`}
+                      width={cover.width ?? undefined}
+                      height={cover.height ?? undefined}
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                      onError={() => setFailedCover(cover.url)}
+                    />
                   ) : (
-                    selected.url
+                    <span>No cover image available.</span>
                   )}
-                </dd>
-              </dl>
+                </div>
+              </div>
 
               <section className={styles.inDepthCopy}>
                 <h3>Agent summary</h3>
@@ -208,42 +280,6 @@ export function InDepthReviewClient(props: {
               </section>
 
               <div className={styles.inDepthEditor}>
-                <h3>Editorial display</h3>
-                <p>Empty fields use the original Candidate value. Agent output stays unchanged.</p>
-                <label>
-                  Title
-                  <input
-                    value={title}
-                    onChange={(event) => setTitle(event.target.value)}
-                    maxLength={300}
-                  />
-                </label>
-                <label>
-                  Author
-                  <input
-                    value={author}
-                    onChange={(event) => setAuthor(event.target.value)}
-                    maxLength={300}
-                  />
-                </label>
-                <label>
-                  Summary
-                  <textarea
-                    value={summary}
-                    onChange={(event) => setSummary(event.target.value)}
-                    maxLength={6000}
-                    rows={4}
-                  />
-                </label>
-                <label>
-                  Why worth reading
-                  <textarea
-                    value={whyWorthReading}
-                    onChange={(event) => setWhyWorthReading(event.target.value)}
-                    maxLength={6000}
-                    rows={4}
-                  />
-                </label>
                 <label>
                   Review notes
                   <textarea
@@ -257,23 +293,9 @@ export function InDepthReviewClient(props: {
                   <button
                     type="button"
                     disabled={saving}
-                    onClick={() => void save('approved')}
+                    onClick={() => void save('notes')}
                   >
-                    Approve & publish
-                  </button>
-                  <button
-                    type="button"
-                    disabled={saving}
-                    onClick={() => void save('rejected')}
-                  >
-                    Reject / unpublish
-                  </button>
-                  <button
-                    type="button"
-                    disabled={saving}
-                    onClick={() => void save(selected.reviewStatus)}
-                  >
-                    Save edits & notes
+                    Save notes
                   </button>
                 </div>
                 {error ? (
@@ -292,6 +314,28 @@ export function InDepthReviewClient(props: {
                     {message}
                   </p>
                 ) : null}
+              </div>
+              <IntroductionEditor
+                key={selected.id}
+                id={selected.id}
+                overrides={selected.editorialOverrides}
+                apiUrl={apiUrl}
+              />
+              <div className={styles.inDepthActions}>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void save('review', 'approved')}
+                >
+                  Approve &amp; publish
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void save('review', 'rejected')}
+                >
+                  Reject / unpublish
+                </button>
               </div>
               <details className={styles.inDepthRaw}>
                 <summary>Raw diagnostic fields</summary>
@@ -313,11 +357,6 @@ export function InDepthReviewClient(props: {
       </div>
     </section>
   );
-}
-
-function editValue(item: InDepthReviewItem | null, key: string): string {
-  const value = item?.editorialOverrides?.[key];
-  return typeof value === 'string' ? value : '';
 }
 
 function readDetails(item: InDepthReviewItem) {

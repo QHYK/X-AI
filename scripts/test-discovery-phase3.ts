@@ -14,6 +14,7 @@ import {
   DiscoveryD3ExecutionError,
   runDiscoveryD3,
   validateDiscoveryD3Output,
+  validateAndPersistDiscoveryAgentCandidates,
   type DiscoveryD3Runtime,
 } from '../src/discovery/topic-discovery.js';
 import type { DiscoverySelectionOutput } from '../src/discovery/topic-selection.js';
@@ -23,6 +24,7 @@ const RUN_ID = '00000000-0000-4000-8000-000000000301';
 
 async function main(): Promise<void> {
   await testSingleAgentRunValidationPersistenceAndResume();
+  await testOpenSourcePersistence();
   await testNormalEmptyAndFailureReasons();
   await testTracePersistenceAndSanitization();
   testUsageNormalization();
@@ -75,10 +77,55 @@ async function testSingleAgentRunValidationPersistenceAndResume(): Promise<void>
   assert.equal(db.candidates.filter((row) => row.path === 'direct').length, 1);
   assert.equal(db.run.execution_state.d4?.status, 'completed');
   assert.equal(db.run.execution_state.d3?.status, 'completed');
+  const selected = db.candidates.find((row) => row.path === 'topic' && row.status === 'selected');
+  assert.equal(selected?.publication, 'Verified Site');
+  assert.deepEqual(selected?.evaluation?.tags, [{ zh: '科学方法', en: 'Scientific Method' }]);
+  assert.equal(
+    ((selected?.evidence?.fetch as Record<string, unknown>)?.coverImage as { source?: string })
+      ?.source,
+    'og:image',
+  );
 
   const resumed = await runDiscoveryD3(db as unknown as Pool, RUN_ID, { runtime });
   assert.equal(resumed.skipped, true);
   assert.equal(calls, 1, 'completed D3 must not call the Agent again');
+}
+
+async function testOpenSourcePersistence(): Promise<void> {
+  const db = new FakeD3Pool(selection());
+  const { validateDiscoveryD5Output } = await import('../src/discovery/open-discovery.js');
+  const output = {
+    ...candidate('lead-01', 'https://example.test/open'),
+    publication: 'Model Publication',
+  };
+  const openOutput = Object.fromEntries(
+    Object.entries(output).filter(([key]) => key !== 'sourceLeadId'),
+  );
+  const candidates = validateDiscoveryD5Output({ candidates: [openOutput] });
+  await validateAndPersistDiscoveryAgentCandidates(db as unknown as Pool, {
+    runId: RUN_ID,
+    stage: 'd5',
+    discoveryPath: 'open',
+    candidates,
+    fetches: [successfulFetch('https://example.test/open')],
+    executionState: {
+      ...initialDiscoveryStageState(undefined, false),
+      errorSummary: null,
+      provider: 'codex',
+      model: 'mock',
+      apiMode: 'responses',
+      status: 'completed',
+      endReason: 'candidates_found',
+      completedAt: '2026-10-19T00:00:00Z',
+    },
+  });
+  assert.equal(
+    db.candidates[0]?.publication,
+    'Verified Site',
+    'D5 model publication must not override verified Fetch Metadata.',
+  );
+  assert.equal(db.candidates[0]?.status, 'selected');
+  assert.equal(db.reviewCandidateIds.size, 1);
 }
 
 async function testNormalEmptyAndFailureReasons(): Promise<void> {
@@ -336,6 +383,7 @@ function candidate(sourceLeadId: string, url: string) {
     whyWorthReading: '中文推荐理由',
     evidence: '正文中的具体论点',
     limitations: '',
+    tags: [{ zh: '科学方法', en: 'Scientific Method' }],
     extra_info: '{}',
   };
 }
@@ -350,7 +398,14 @@ function successfulFetch(url: string): DiscoveryFetchResult {
     content_complete: true,
     truncated: false,
     content_type: 'article_body',
+    cover_image: {
+      url: 'https://example.test/article-cover.jpg',
+      source: 'og:image',
+      width: 1200,
+      height: 800,
+    },
     metadata: {
+      publication: 'Verified Site',
       title: 'Original title',
       author: 'Author',
       published_time: null,
@@ -395,6 +450,9 @@ type FakeCandidate = {
   path: 'direct' | 'topic';
   normalizedUrl: string | null;
   status: string;
+  publication?: unknown;
+  evaluation?: Record<string, unknown>;
+  evidence?: Record<string, unknown>;
 };
 
 type FakeBranchState = {
@@ -459,6 +517,7 @@ class FakeD3Pool {
     text: string,
     values: unknown[] = [],
   ): Promise<{ rows: unknown[]; rowCount?: number }> {
+    if (text === 'select name, url from sources order by name') return { rows: [] };
     if (['begin', 'commit', 'rollback'].includes(text.trim())) return { rows: [] };
     if (text.includes('from discovery_runs where id')) return { rows: [this.run] };
     if (text.includes("when coalesce(config_snapshot, '{}'::jsonb) ? 'd3'")) {
@@ -485,8 +544,11 @@ class FakeD3Pool {
       this.candidates.push({
         id: String(values[0]),
         path: 'topic',
-        normalizedUrl: values[5] === null ? null : String(values[5]),
-        status: String(values[17]),
+        normalizedUrl: values[6] === null ? null : String(values[6]),
+        status: String(values[19]),
+        evidence: JSON.parse(String(values[17])) as Record<string, unknown>,
+        publication: values[10],
+        evaluation: JSON.parse(String(values[18])) as Record<string, unknown>,
       });
       return { rows: [], rowCount: 1 };
     }

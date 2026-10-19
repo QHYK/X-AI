@@ -285,6 +285,19 @@ async function testD2PersistenceAndUrlEnrichment() {
 }
 
 function testD4OutputValidation() {
+  for (const field of ['title_zh', 'summary', 'whyWorthReading']) {
+    for (const invalid of [undefined, '', 'English only']) {
+      const output = { ...evaluation('candidate', 'qualified'), [field]: invalid };
+      checks.push([
+        `D4 rejects invalid qualified ${field}: ${invalid}`,
+        throws(() =>
+          parseAndValidateDiscoveryD4Output(JSON.stringify({ evaluations: [output] }), [
+            'candidate',
+          ]),
+        ),
+      ]);
+    }
+  }
   const valid = parseAndValidateDiscoveryD4Output(
     JSON.stringify({
       evaluations: [
@@ -378,12 +391,24 @@ async function testD4PrechecksAndPersistence() {
   const qualified = db.candidates.find((candidate) => candidate.sourceLeadId === 'lead-01');
   const missingBody = db.candidates.find((candidate) => candidate.sourceLeadId === 'lead-02');
   const duplicate = db.candidates.find((candidate) => candidate.sourceLeadId === 'lead-03');
+  const storedQualified = db.candidates.find(
+    (candidate) => candidate.evaluation?.decision === 'qualified',
+  );
+  checks.push([
+    'D4 persists independent reader copy into existing Candidate columns',
+    storedQualified?.titleZh === '中文标题' &&
+      storedQualified?.summary === '文章主要论证和细节概要' &&
+      storedQualified?.whyWorthReading === '适合关注科学方法的读者，具有长期学习价值',
+  ]);
   checks.push(
     [
       'D4 persists source linkage and promotes qualified Direct candidates',
       qualified?.sourceContentId === IDS.digestEligible &&
         qualified.status === 'selected' &&
-        db.reviewCandidateIds.has(qualified.id),
+        db.reviewCandidateIds.has(qualified.id) &&
+        JSON.stringify(qualified.evaluation?.tags) ===
+          JSON.stringify([{ zh: '科学方法', en: 'Scientific Method' }]) &&
+        (qualified.evidence.coverImage as { source?: string })?.source === 'raw_article',
     ],
     [
       'D4 records missing body as unverifiable and historical duplicate as rejected',
@@ -458,6 +483,46 @@ async function testD4SerialPerCandidateRequests() {
       result.tokenUsage.output_tokens === 2 &&
       result.tokenUsage.total_tokens === 4 &&
       result.tokenUsageComplete,
+  ]);
+}
+
+async function testD4MissingReaderFields() {
+  const input = discoveryWindowFixture();
+  const db = new FakeDiscoveryPool(
+    input,
+    {},
+    { leads: [directLead('lead-01', IDS.digestEligible, 'https://example.test/incomplete')] },
+  );
+  db.sources.set(IDS.digestEligible, {
+    ...sourceRow(IDS.digestEligible, 'Article body', null),
+    metadata: { ogSiteName: 'Verified Publisher' },
+  });
+  const result = await runDiscoveryD4(db as unknown as Pool, RUN_ID, {
+    provider: 'openai',
+    request: async (request) => {
+      const payload = JSON.parse(request.input);
+      return llmResponse({
+        evaluations: [
+          { ...evaluation(payload.candidates[0].candidateId, 'qualified'), summary: '' },
+        ],
+      });
+    },
+  });
+  checks.push([
+    'D4 missing qualified content records failure without promotion or substitute calls',
+    result.failedRequestCount === 1 &&
+      result.requestCount === 1 &&
+      db.candidates[0]?.status === 'discovered' &&
+      db.reviewCandidateIds.size === 0 &&
+      db.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.requestStatus === 'response_received_validation_or_persistence_failed' &&
+          String(diagnostic.error).includes('summary'),
+      ),
+  ]);
+  checks.push([
+    'D4 verified metadata takes priority over inherited Daily source',
+    db.candidates[0]?.publication === 'Verified Publisher',
   ]);
 }
 
@@ -649,8 +714,12 @@ function evaluation(candidateId: string, decision: string) {
     candidateId,
     decision,
     reason: `${decision} reason`,
+    title_zh: decision === 'qualified' ? '中文标题' : '',
+    summary: decision === 'qualified' ? '文章主要论证和细节概要' : '',
+    whyWorthReading: decision === 'qualified' ? '适合关注科学方法的读者，具有长期学习价值' : '',
     evidence: ['evidence'],
     limitations: [],
+    tags: [{ zh: '科学方法', en: 'Scientific Method' }],
     extra_info: '{}',
   };
 }
@@ -726,6 +795,7 @@ function sourceRow(sourceContentId: string, full: string | null, partial: string
     content_text: partial,
     full_content_text: full,
     metadata: {},
+    image_url: 'https://example.test/article-cover.jpg',
     source_name: 'Source',
     source_type: 'article',
   };
@@ -747,6 +817,11 @@ type FakeCandidate = {
   normalizedUrl: string | null;
   status: string;
   evaluation: Record<string, unknown> | null;
+  evidence: Record<string, unknown>;
+  titleZh?: unknown;
+  summary?: unknown;
+  whyWorthReading?: unknown;
+  publication?: unknown;
 };
 
 class FakeDiscoveryPool {
@@ -796,6 +871,7 @@ class FakeDiscoveryPool {
     text: string,
     values: unknown[] = [],
   ): Promise<{ rows: unknown[]; rowCount?: number }> {
+    if (text === 'select name, url from sources order by name') return { rows: [] };
     if (text.trim() === 'begin' || text.trim() === 'commit' || text.trim() === 'rollback') {
       return { rows: [] };
     }
@@ -860,7 +936,9 @@ class FakeDiscoveryPool {
         sourceContentId: String(values[2]),
         sourceLeadId: String(values[3]),
         normalizedUrl: values[5] === null ? null : String(values[5]),
+        publication: values[8],
         evaluation: values[13] ? (JSON.parse(String(values[13])) as Record<string, unknown>) : null,
+        evidence: JSON.parse(String(values[12])) as Record<string, unknown>,
         status: String(values[14]),
       });
       return { rows: [], rowCount: 1 };
@@ -868,7 +946,11 @@ class FakeDiscoveryPool {
     if (text.includes('set evaluation =')) {
       const candidate = this.candidates.find((row) => row.id === values[0]);
       if (candidate && candidate.status === 'discovered') {
+        candidate.titleZh = values[5];
+        candidate.summary = values[6];
+        candidate.whyWorthReading = values[7];
         candidate.evaluation = JSON.parse(String(values[1])) as Record<string, unknown>;
+        candidate.evidence = JSON.parse(String(values[2])) as Record<string, unknown>;
         candidate.status = String(values[4]);
       }
       return { rows: [], rowCount: candidate ? 1 : 0 };
@@ -919,6 +1001,7 @@ testD4OutputValidation();
 await testD4PrechecksAndPersistence();
 await testD4SerialPerCandidateRequests();
 await testD4FailureRecovery();
+await testD4MissingReaderFields();
 
 const failures = checks.filter(([, passed]) => !passed);
 console.log(JSON.stringify({ success: failures.length === 0, checks }, null, 2));

@@ -597,6 +597,8 @@
   margin-top: 16px;
 }
 
+.discoverySummary dd { max-width: 75%; overflow-wrap: anywhere; text-align: right; }
+
 .successBadge,
 .failedBadge,
 .naBadge {

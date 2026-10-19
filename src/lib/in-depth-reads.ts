@@ -1,26 +1,31 @@
+import {
+  EditorialIntroductionSchema,
+  readEditorialIntroduction,
+  type EditorialIntroduction,
+} from './in-depth-editorial.js';
+import { discoveryEvidenceMetadata, resolveDiscoveryPublication } from './discovery-source.js';
+import { loadDiscoverySources } from './discovery-source-list.js';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 
 export const InDepthReviewStatusSchema = z.enum(['pending', 'approved', 'rejected']);
 export type InDepthReviewStatus = z.infer<typeof InDepthReviewStatusSchema>;
 
-const EditorialOverridesSchema = z
-  .object({
-    title: z.string().max(300).optional(),
-    author: z.string().max(300).optional(),
-    summary: z.string().max(6_000).optional(),
-    whyWorthReading: z.string().max(6_000).optional(),
-  })
-  .strict();
-
-const ReviewUpdateSchema = z
-  .object({
-    id: z.uuid(),
-    reviewStatus: InDepthReviewStatusSchema,
-    editorialNotes: z.string().max(6_000).nullable(),
-    editorialOverrides: EditorialOverridesSchema,
-  })
-  .strict();
+const ReviewUpdateSchema = z.discriminatedUnion('action', [
+  z
+    .object({ id: z.uuid(), action: z.literal('review'), reviewStatus: InDepthReviewStatusSchema })
+    .strict(),
+  z
+    .object({
+      id: z.uuid(),
+      action: z.literal('notes'),
+      editorialNotes: z.string().max(6_000).nullable(),
+    })
+    .strict(),
+  z
+    .object({ id: z.uuid(), action: z.literal('editorial'), ...EditorialIntroductionSchema.shape })
+    .strict(),
+]);
 
 export type InDepthReviewUpdate = z.infer<typeof ReviewUpdateSchema>;
 
@@ -43,6 +48,7 @@ export type InDepthReviewItem = {
   originalTitle: string | null;
   titleZh: string | null;
   author: string | null;
+  publishedAt?: string | null;
   publication: string | null;
   contentType: string | null;
   estimatedDurationMinutes: number | null;
@@ -79,17 +85,30 @@ export type PublishedInDepthRead = Pick<
 
 type Queryable = Pick<Pool, 'query'>;
 
+const DAILY_SOURCE_COLUMN = `(select s.name from processed_contents pc
+     join raw_articles ra on ra.id = pc.raw_article_id
+     join sources s on s.id = ra.source_id
+    where pc.id = dc.source_content_id and dc.source_content_type = 'processed_content') as "dailySource"`;
+
+// Preserve the existing admin response shape; persistence uses three independent TEXT columns.
+const EDITORIAL_COLUMNS = `jsonb_build_object(
+  'summary', idc.editorial_summary,
+  'whyWorthReading', idc.editorial_why_worth_reading,
+  'extra_info', idc.editorial_extra_info
+) as "editorialOverrides"`;
+
 const REVIEW_COLUMNS = `
   idc.id, idc.discovery_candidate_id as "candidateId", dc.run_id as "runId",
   idc.review_status as "reviewStatus", idc.editorial_notes as "editorialNotes",
-  idc.editorial_overrides as "editorialOverrides", idc.reviewed_at::text as "reviewedAt",
+  ${EDITORIAL_COLUMNS}, idc.reviewed_at::text as "reviewedAt",
   idc.created_at::text as "createdAt", dc.created_at::text as "candidateCreatedAt",
   dc.discovery_path as "discoveryPath", dc.url,
-  dc.title as "originalTitle", dc.title_zh as "titleZh", dc.author,
+  dc.title as "originalTitle", dc.title_zh as "titleZh", dc.author, dc.published_at::text as "publishedAt",
   dc.publication, dc.content_type as "contentType",
   dc.estimated_duration_minutes as "estimatedDurationMinutes",
   dc.summary, dc.why_worth_reading as "whyWorthReading",
-  dc.evidence, dc.evaluation, dc.extra_info as "extraInfo"`;
+  dc.evidence, dc.evaluation, dc.extra_info as "extraInfo",
+  ${DAILY_SOURCE_COLUMN}`;
 
 export async function listInDepthReviewItems(
   db: Queryable,
@@ -103,7 +122,7 @@ export async function listInDepthReviewItems(
       order by dc.created_at desc, dc.id desc`,
     [status],
   );
-  return result.rows;
+  return normalizePublications(db, result.rows);
 }
 
 export async function getInDepthReviewItem(
@@ -117,25 +136,58 @@ export async function getInDepthReviewItem(
       where idc.id = $1::uuid`,
     [id],
   );
-  return result.rows[0] ?? null;
+  return (await normalizePublications(db, result.rows))[0] ?? null;
 }
 
 /** The only public In-depth Reads query: approval is the publication boundary. */
 export async function listPublishedInDepthReads(db: Queryable): Promise<PublishedInDepthRead[]> {
-  const result = await db.query<PublishedInDepthRead>(
-    `select idc.id, idc.editorial_overrides as "editorialOverrides",
+  const result = await db.query<
+    PublishedInDepthRead & { evidence?: Record<string, unknown>; dailySource?: string }
+  >(
+    `select idc.id, ${EDITORIAL_COLUMNS},
             idc.reviewed_at::text as "reviewedAt", dc.url,
             dc.discovery_path as "discoveryPath", dc.title as "originalTitle",
             dc.title_zh as "titleZh", dc.author, dc.publication,
             dc.content_type as "contentType",
             dc.estimated_duration_minutes as "estimatedDurationMinutes",
-            dc.summary, dc.why_worth_reading as "whyWorthReading"
+            dc.summary, dc.why_worth_reading as "whyWorthReading", dc.evidence,
+            ${DAILY_SOURCE_COLUMN}
        from in_depth_candidates idc
        join discovery_candidates dc on dc.id = idc.discovery_candidate_id
       where idc.review_status = 'approved'
       order by idc.reviewed_at desc nulls last, dc.created_at desc, dc.id desc`,
   );
-  return result.rows;
+  const normalized = await normalizePublications(db, result.rows);
+  return normalized.map((row) => {
+    const fields = { ...row };
+    delete fields.evidence;
+    return fields;
+  });
+}
+
+async function normalizePublications<
+  T extends {
+    url: string;
+    publication: string | null;
+    evidence?: Record<string, unknown> | null;
+    dailySource?: string;
+  },
+>(db: Queryable, rows: T[]): Promise<T[]> {
+  const sources = rows.length ? await loadDiscoverySources(db) : [];
+  return rows.map((row) => {
+    const fields = { ...row };
+    delete fields.dailySource;
+    return {
+      ...fields,
+      publication: resolveDiscoveryPublication({
+        url: row.url,
+        metadata: discoveryEvidenceMetadata(row.evidence),
+        dailySource: row.dailySource,
+        publication: row.publication,
+        sources,
+      }),
+    } as T;
+  });
 }
 
 export async function updateInDepthReviewItem(
@@ -143,28 +195,48 @@ export async function updateInDepthReviewItem(
   value: InDepthReviewUpdate,
 ): Promise<InDepthReviewItem | null> {
   const input = parseInDepthReviewUpdate(value);
-  const overrides = Object.fromEntries(
-    Object.entries(input.editorialOverrides)
-      .map(([key, text]) => [key, text?.trim()])
-      .filter((entry): entry is [string, string] => Boolean(entry[1])),
-  );
+  if (input.action === 'editorial') {
+    return (await saveInDepthEditorial(db, input.id, input))
+      ? getInDepthReviewItem(db, input.id)
+      : null;
+  }
+  const result =
+    input.action === 'notes'
+      ? await db.query<{ id: string }>(
+          `update in_depth_candidates set editorial_notes = $2, updated_at = now()
+        where id = $1::uuid returning id`,
+          [input.id, input.editorialNotes?.trim() || null],
+        )
+      : await db.query<{ id: string }>(
+          `update in_depth_candidates set review_status = $2,
+          reviewed_at = case when $2 = 'pending' then null else now() end,
+          updated_at = now() where id = $1::uuid returning id`,
+          [input.id, input.reviewStatus],
+        );
+  return result.rows[0] ? getInDepthReviewItem(db, result.rows[0].id) : null;
+}
+
+/** Write only the three introduction columns; never touch approval, notes or Agent fields. */
+export async function saveInDepthEditorial(
+  db: Queryable,
+  id: string,
+  value: EditorialIntroduction,
+): Promise<boolean> {
+  const parsed = EditorialIntroductionSchema.parse({
+    extra_info: value.extra_info,
+    summary: value.summary,
+    whyWorthReading: value.whyWorthReading,
+  });
   const result = await db.query<{ id: string }>(
     `update in_depth_candidates
-        set review_status = $2,
-            editorial_notes = $3,
-            editorial_overrides = $4::jsonb,
-            reviewed_at = case when $2 = 'pending' then null else now() end,
-            updated_at = now()
-      where id = $1::uuid
-      returning id`,
-    [
-      input.id,
-      input.reviewStatus,
-      input.editorialNotes?.trim() || null,
-      Object.keys(overrides).length > 0 ? JSON.stringify(overrides) : null,
-    ],
+      set editorial_summary = $2,
+          editorial_why_worth_reading = $3,
+          editorial_extra_info = $4,
+          updated_at = now()
+      where id = $1::uuid returning id`,
+    [id, parsed.summary, parsed.whyWorthReading, parsed.extra_info],
   );
-  return result.rows[0] ? getInDepthReviewItem(db, result.rows[0].id) : null;
+  return Boolean(result.rows[0]);
 }
 
 /** Editorial values affect presentation only; original Candidate fields stay intact. */
@@ -175,14 +247,35 @@ export function displayInDepthFields(
   >,
 ): InDepthDisplayFields {
   const overrides = item.editorialOverrides;
-  const edited = (key: keyof InDepthDisplayFields): string | null => {
+  const edited = (key: 'summary' | 'whyWorthReading'): string | null => {
     const value = overrides?.[key];
     return typeof value === 'string' && value.trim() ? value.trim() : null;
   };
   return {
-    title: edited('title') ?? item.titleZh ?? item.originalTitle ?? 'Untitled work',
-    author: edited('author') ?? item.author,
+    title: item.titleZh ?? item.originalTitle ?? 'Untitled work',
+    author: item.author,
     summary: edited('summary') ?? item.summary,
     whyWorthReading: edited('whyWorthReading') ?? item.whyWorthReading,
+  };
+}
+
+/** Explicit public allowlist; never serialize Review notes, evidence or arbitrary JSONB. */
+export function toPublicInDepthRead(item: PublishedInDepthRead) {
+  const display = displayInDepthFields(item);
+  return {
+    id: item.id,
+    url: item.url,
+    discoveryPath: item.discoveryPath,
+    title: display.title,
+    originalTitle: item.originalTitle,
+    titleZh: item.titleZh,
+    author: display.author,
+    publication: item.publication,
+    contentType: item.contentType,
+    estimatedDurationMinutes: item.estimatedDurationMinutes,
+    extra_info: readEditorialIntroduction(item.editorialOverrides).extra_info,
+    summary: display.summary,
+    whyWorthReading: display.whyWorthReading,
+    reviewedAt: item.reviewedAt,
   };
 }

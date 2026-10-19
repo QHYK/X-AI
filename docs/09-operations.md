@@ -139,7 +139,7 @@ npm run eval:stage3:long-form -- --run-id=UUID
 | `OPENAI_MODEL` / `DEEPSEEK_MODEL` / `KIMI_MODEL` / `CODEX_MODEL` | 对应 Provider model | 未设置使用 `llm-client.ts` 的 provider 默认值 |
 | `LLM_PROVIDER` | generic LLM client / provider diagnostics | 默认 `openai` |
 | `LLM_MODEL` | generic LLM model override | 覆盖 Provider model 解析 |
-| `DISCOVERY_LLM_PROVIDER` | Discovery D2 / D4 shared Provider | 覆盖既有 `LLM_PROVIDER`；模型、Base URL 与 API Key 均由该 Provider 的既有配置解析 |
+| `DISCOVERY_LLM_PROVIDER` | Discovery D2 / D4 与 Editorial Generate shared Provider | 覆盖既有 `LLM_PROVIDER`；模型、Base URL 与 API Key 均由该 Provider 的既有配置解析 |
 | `DISCOVERY_D2_PROVIDER` / `DISCOVERY_D4_PROVIDER` | Discovery D2 / D4 stage Provider | 优先级最高；覆盖 `DISCOVERY_LLM_PROVIDER` |
 | `DISCOVERY_LLM_TIMEOUT_MS` | Discovery D2 / D4 shared request timeout | 正整数毫秒；被对应 stage timeout 覆盖；未设置则使用共享 LLM Client 的 SDK 默认值 |
 | `DISCOVERY_D2_TIMEOUT_MS` / `DISCOVERY_D4_TIMEOUT_MS` | Discovery D2 / D4 stage request timeout | 正整数毫秒；优先级最高；未设置时回退至 `DISCOVERY_LLM_TIMEOUT_MS`，再回退 SDK 默认值 |
@@ -229,6 +229,8 @@ Representative long-lived checks:
 
 后台目录与导航匹配回归使用 `npm run test:admin-navigation`；认证边界回归使用 `npm run test:admin-auth`。导航架构见 [Technical Spec](04-technical-spec.md#7-internal-dashboard)。
 
+Discovery 数据增强的本地 Mock 回归：`npm run test:discovery-metadata`（双语 Tags、Cover 提取及历史兼容）、`npm run test:discovery-dashboard`（Dashboard 所选业务日期的 Run 选择）、`npm run test:discovery-presentation`（Review 只读展示）。这些测试不访问真实 Provider、Firecrawl 或数据库；Tags / Cover 复用既有 JSONB，无需历史回填。原文 Cache 的 Migration 见本节「完善介绍」。
+
 ```bash
 npm run test:daily-scope
 npm run test:pre-stage1-duplicates
@@ -251,6 +253,17 @@ npm run test:discovery-phase3
 npm run test:discovery-orchestrator
 npm run test:discovery-d5
 ```
+
+### In-depth「完善介绍」
+
+本地无付费回归：`npm run test:in-depth-introduction` 验证模型 Mock、证据不足、自动保存及保存失败文本恢复；`npm run test:in-depth-introduction-ui` 验证人工编辑、Regenerate 确认、重复提交及异步输入保护；`npm run test:in-depth-review` 验证独立控制和公开读取边界。
+
+Generate / Regenerate 通过共享 Structured Output Client 调用一次介绍模型。正文已存时不抓取；Cache / Daily 全文均未命中时，需要 `FIRECRAWL_API_KEY`，对固定 Original URL 调用一次 Firecrawl（不自动重试），写入 Cache 后再调用模型。没有 Web Search 或 Agent Loop。D3 / D5 也使用该 Cache，缓存命中不消耗 Firecrawl Credit；错误 / 不完整正文不会作为完整内容复用。
+
+模型请求超时 120 秒，单次输入正文上限仍为 60,000 字符；超出时明确失败并保留已缓存原文，不截断后假称阅读全文。输出预算 8,000 tokens，每段 Markdown 存储 / 传输安全上限为 32,000 字符；这些是资源边界，不是写作字数要求。日志记录 Provider / Model / Prompt version / Usage、正文来源和 Cache 写入异常，不输出凭据。实际费用取决于配置模型和 Token 用量；Save changes 与 Save notes 不调用模型或 Firecrawl。
+
+新增本地无付费回归：`npm run test:discovery-fetch-cache`，覆盖成功正文保存、Candidate 选择前持久化、Daily 复用、并发去重及失败恢复。`npm run test:in-depth-introduction` 还覆盖三条路径的原文复用、固定 URL 抓取、三字段输出及公开响应；UI 回归覆盖第三个字段的确认与异步编辑保护。
+
 
 ### Discovery D2–D5 Workflow
 

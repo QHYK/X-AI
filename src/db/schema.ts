@@ -388,6 +388,33 @@ export const discoveryTraceSpans = pgTable(
   ],
 );
 
+/** Successful paid reads, independent of whether a discovered URL becomes a Candidate. */
+export const discoveryFetchCache = pgTable(
+  'discovery_fetch_cache',
+  {
+    normalizedUrl: text('normalized_url').primaryKey(),
+    normalizedFinalUrl: text('normalized_final_url').notNull(),
+    originalUrl: text('original_url').notNull(),
+    finalUrl: text('final_url').notNull(),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull(),
+    status: text('status').notNull().default('success'),
+    markdown: text('markdown').notNull(),
+    isComplete: boolean('is_complete').notNull(),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  },
+  (table) => [
+    index('discovery_fetch_cache_final_url_idx').on(table.normalizedFinalUrl),
+    check(
+      'discovery_fetch_cache_success_check',
+      sql`${table.status} = 'success' and length(trim(${table.markdown})) > 0`,
+    ),
+    check(
+      'discovery_fetch_cache_metadata_object_check',
+      sql`jsonb_typeof(${table.metadata}) = 'object'`,
+    ),
+  ],
+);
+
 /** Works inspected by Discovery, including candidates that are later rejected. */
 export const discoveryCandidates = pgTable(
   'discovery_candidates',
@@ -465,7 +492,9 @@ export const inDepthCandidates = pgTable(
       .references(() => discoveryCandidates.id, { onDelete: 'cascade' }),
     reviewStatus: text('review_status').notNull(),
     editorialNotes: text('editorial_notes'),
-    editorialOverrides: jsonb('editorial_overrides').$type<Record<string, unknown>>(),
+    editorialSummary: text('editorial_summary'),
+    editorialWhyWorthReading: text('editorial_why_worth_reading'),
+    editorialExtraInfo: text('editorial_extra_info'),
     reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
     ...timestamps,
   },

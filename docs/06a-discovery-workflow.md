@@ -106,6 +106,10 @@ Selection 完成后，两条路径可以并发：
 1. **Direct Candidate Verification（D4）**：优先读取 Daily 已入库的 `raw_articles.full_content_text`，为空时使用 `raw_articles.content_text`，标注 `content_source`；Code 检查 URL、历史重复及可核查的时长信息；普通 LLM 按 D2 优先级逐篇串行评价，每篇独立请求，不负责排名或控制最终提交数量。默认不重新抓取；正文不足返回 `unverifiable` 并说明缺失证据。
 2. **Topic Discovery（D3）**：一个 Agent Run 接收全部 Topic Leads，通过 Agents SDK 的 Web Search 和自定义 `fetch_content` 自主搜索、读取 Daily 之外的作品；整个 D3 最多输出 3 篇，不要求覆盖全部 Topic。
 
+D4 在原有逐篇评价调用中同步生成合格作品的读者介绍，校验成功后与评价一并持久化；字段缺失走现有 Candidate 失败诊断与 Resume，不增加补全调用。具体输出契约见 `07-prompt-spec.md` 的 D4 章节。
+
+候选 Tags 由各路径最终阅读评价阶段一次生成：Direct 使用 D4，Topic 使用 D3，Open 使用 D5；不在 D2 从新闻线索推断最终作品 Tags，也不增加补标签调用。输出契约见 `07-prompt-spec.md`。
+
 并发只是执行组织方式，不意味着必须使用多个 Agent 或复杂协调器。两条路径独立报告成功、空结果或失败；其中一条失败不应自动抹去另一条已经得到的有效候选。
 
 ### 4.2 Discovery Agent Loop
@@ -138,6 +142,10 @@ Agent 可按观察结果自主决定：
 - 是否已找到最多 3 篇达到编辑标准且有实际阅读证据的作品，如果是应提前结束探索。
 
 **不强制生成或维护完整多步 Plan**，也不固定搜索与阅读顺序。Agent 的 Tool Call 必须通过真实工具执行；不能把自己描述的“已阅读 / 已核实”当作事实。
+
+`fetch_content` 在工具返回前保存成功获取的原文，不等最终 Candidate 选择或 Run 完成；已存全文优先复用，持久化与并发边界由 `04a-discovery-technical-spec.md` §4.3 定义。
+
+`fetch_content` 同时保留 Code 从该次真实响应提取的可选 Cover，关联到同 URL 的 Candidate 阅读证据。无图片或图片解析失败不改变正文获取状态与分支结果；不得为了封面重新执行 Discovery。具体提取边界见 `04a-discovery-technical-spec.md` §4.3。
 
 Topic Agent 自行完成编辑评价，找到最多 3 篇值得推荐且有实际阅读证据的作品即可停止；不要求排序或凑满。Code 随后核查，淘汰不合格作品后无需为补足数量重新启动 Agent。
 

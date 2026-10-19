@@ -1,7 +1,15 @@
-// D4	
+import { loadDiscoverySources } from '../lib/discovery-source-list.js';
+import { publicationFromMetadata, resolveDiscoveryPublication } from '../lib/discovery-source.js';
+// D4
 // 验证 D2 选出的 Direct Leads，判断 qualified/rejected/unverifiable，并持久化结果
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
+import {
+  DiscoveryTagsSchema,
+  discoveryTagsJsonSchema,
+  type DiscoveryTag,
+} from '../lib/discovery-content-metadata.js';
+import { coverFromRawArticle } from './article-cover.js';
 import {
   createLlmClient,
   resolveProviderLlmModel,
@@ -41,8 +49,12 @@ export type DiscoveryD4Evaluation = {
   candidateId: string;
   decision: DiscoveryD4Decision;
   reason: string;
+  titleZh: string;
+  summary: string;
+  whyWorthReading: string;
   evidence: string[];
   limitations: string[];
+  tags: DiscoveryTag[];
   extraInfo: Record<string, unknown>;
 };
 
@@ -110,6 +122,7 @@ type DirectSourceRow = {
   content_text: string | null;
   full_content_text: string | null;
   metadata: Record<string, unknown> | null;
+  image_url?: string | null;
   source_name: string;
   source_type: string | null;
 };
@@ -138,16 +151,31 @@ export const discoveryD4OutputJsonSchema = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['candidateId', 'decision', 'reason', 'evidence', 'limitations', 'extra_info'],
+        required: [
+          'candidateId',
+          'decision',
+          'reason',
+          'title_zh',
+          'summary',
+          'whyWorthReading',
+          'evidence',
+          'limitations',
+          'tags',
+          'extra_info',
+        ],
         properties: {
           candidateId: { type: 'string', minLength: 1 },
           decision: {
             type: 'string',
             enum: ['qualified', 'rejected', 'unverifiable'],
           },
+          title_zh: { type: 'string' },
+          summary: { type: 'string' },
+          whyWorthReading: { type: 'string' },
           reason: { type: 'string', minLength: 1 },
           evidence: { type: 'array', items: { type: 'string' } },
           limitations: { type: 'array', items: { type: 'string' } },
+          tags: discoveryTagsJsonSchema,
           extra_info: {
             type: 'string',
             description: 'A JSON-serialized object. Use "{}" when no extra information applies.',
@@ -335,7 +363,11 @@ async function executeDiscoveryD4(
         candidateId,
         title: source.title,
         author: source.author,
-        publication: source.source_name,
+        publication: resolveDiscoveryPublication({
+          url: source.database_url,
+          metadata: source.metadata,
+          dailySource: source.source_name,
+        }),
         publishedAt: toIso(source.published_at),
         url: lead.url,
         contentSource: selectedContent.source,
@@ -498,8 +530,29 @@ export function parseAndValidateDiscoveryD4Output(
   const evaluations = root.evaluations.map((item, index) => {
     const evaluation = requireAllowedObject(
       item,
-      ['candidateId', 'decision', 'reason', 'evidence', 'limitations', 'extra_info'],
-      ['candidateId', 'decision', 'reason', 'evidence', 'limitations'],
+      [
+        'candidateId',
+        'decision',
+        'reason',
+        'evidence',
+        'limitations',
+        'tags',
+        'extra_info',
+        'title_zh',
+        'summary',
+        'whyWorthReading',
+      ],
+      [
+        'candidateId',
+        'decision',
+        'reason',
+        'evidence',
+        'limitations',
+        'tags',
+        'title_zh',
+        'summary',
+        'whyWorthReading',
+      ],
       `D4 evaluation ${index + 1}`,
     );
     const candidateId = requireNonEmptyString(evaluation.candidateId, 'candidateId');
@@ -514,12 +567,24 @@ export function parseAndValidateDiscoveryD4Output(
     if (decision !== 'qualified' && decision !== 'rejected' && decision !== 'unverifiable') {
       throw new Error(`D4 evaluation ${candidateId} has an invalid decision.`);
     }
+    const readerField = (field: string): string => {
+      const text = evaluation[field];
+      if (typeof text !== 'string') throw new Error(`D4 ${field} must be a string.`);
+      if (decision === 'qualified' && (!text.trim() || !/[\p{Script=Han}]/u.test(text))) {
+        throw new Error(`D4 qualified ${candidateId} requires Chinese ${field}.`);
+      }
+      return text.trim();
+    };
     return {
+      titleZh: readerField('title_zh'),
+      summary: readerField('summary'),
+      whyWorthReading: readerField('whyWorthReading'),
       candidateId,
       decision: decision as DiscoveryD4Decision,
       reason: requireNonEmptyString(evaluation.reason, 'reason'),
       evidence: requireStringArray(evaluation.evidence, 'evidence'),
       limitations: requireStringArray(evaluation.limitations, 'limitations'),
+      tags: DiscoveryTagsSchema.parse(evaluation.tags),
       extraInfo: normalizeExtraInfo(evaluation.extra_info),
     };
   });
@@ -575,6 +640,7 @@ async function loadDirectSources(pool: Pool, contentIds: string[]): Promise<Dire
         ra.content_text,
         ra.full_content_text,
         ra.metadata,
+        ra.image_url,
         s.name as source_name,
         s.source_type
       from processed_contents pc
@@ -584,7 +650,16 @@ async function loadDirectSources(pool: Pool, contentIds: string[]): Promise<Dire
         and pc.routing in ('digest', 'long_form')`,
     [contentIds],
   );
-  return result.rows;
+  const sources = result.rows.length ? await loadDiscoverySources(pool) : [];
+  return result.rows.map((source) => ({
+    ...source,
+    source_name: resolveDiscoveryPublication({
+      url: source.database_url,
+      metadata: source.metadata,
+      dailySource: source.source_name,
+      sources,
+    }),
+  }));
 }
 
 async function loadExistingCandidates(
@@ -678,11 +753,22 @@ async function insertDirectCandidate(
       input.normalizedUrl,
       input.source.title,
       input.source.author,
-      input.source.source_name,
+      resolveDiscoveryPublication({
+        url: input.lead.url,
+        metadata: input.source.metadata,
+        dailySource: input.source.source_name,
+      }),
       readContentType(input.source),
       toIso(input.source.published_at),
       input.estimatedDurationMinutes,
-      JSON.stringify(evidence),
+      JSON.stringify({
+        ...evidence,
+        coverImage: coverFromRawArticle(
+          input.source.image_url,
+          input.lead.url ?? '',
+          input.source.metadata,
+        ),
+      }),
       evaluation ? JSON.stringify(evaluation) : null,
       status,
     ],
@@ -776,21 +862,35 @@ async function persistD4Evaluations(
         contentLength: Array.from(candidate.prompt.content).length,
         durationVerification:
           candidate.prompt.estimatedDurationMinutes === null ? 'unavailable' : 'source_metadata',
+        sourceMetadata: { publication: publicationFromMetadata(candidate.source.metadata) },
         details: evaluation.evidence,
         limitations: evaluation.limitations,
+        coverImage: coverFromRawArticle(
+          candidate.source.image_url,
+          candidate.prompt.url,
+          candidate.source.metadata,
+        ),
       };
       const status = evaluation.decision === 'qualified' ? 'evaluated' : evaluation.decision;
       await client.query(
         `update discovery_candidates
           set evaluation = $2::jsonb, evidence = $3::jsonb,
-              extra_info = $4::jsonb, status = $5, updated_at = now()
+              extra_info = $4::jsonb, status = $5,
+              title_zh = $6, summary = $7, why_worth_reading = $8, updated_at = now()
           where id = $1::uuid and status = 'discovered'`,
         [
           evaluation.candidateId,
-          JSON.stringify({ decision: evaluation.decision, reason: evaluation.reason }),
+          JSON.stringify({
+            decision: evaluation.decision,
+            reason: evaluation.reason,
+            tags: evaluation.tags,
+          }),
           JSON.stringify(evidence),
           JSON.stringify(evaluation.extraInfo),
           status,
+          evaluation.titleZh || null,
+          evaluation.summary || null,
+          evaluation.whyWorthReading || null,
         ],
       );
     }

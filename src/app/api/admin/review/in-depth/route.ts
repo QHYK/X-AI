@@ -1,3 +1,7 @@
+import {
+  generateAndSaveInDepthIntroduction,
+  IntroductionError,
+} from '@/lib/in-depth-introduction.js';
 import { adminApiError } from '@/lib/admin-auth.js';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
@@ -64,5 +68,39 @@ export async function PATCH(request: Request): Promise<Response> {
   } catch (error) {
     console.error('Failed to save In-depth Review.', error);
     return Response.json({ error: 'Failed to save In-depth Review.' }, { status: 500 });
+  }
+}
+
+/** Auth and origin checks happen before DB access or any potentially paid request. */
+export async function POST(request: Request): Promise<Response> {
+  const authError = await adminApiError(request);
+  if (authError) return authError;
+  if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json'))
+    return Response.json({ error: 'Expected JSON.' }, { status: 400 });
+  let id: string;
+  try {
+    id = z
+      .object({ id: z.uuid() })
+      .strict()
+      .parse(await request.json()).id;
+  } catch {
+    return Response.json({ error: 'Invalid candidate ID or JSON body.' }, { status: 400 });
+  }
+  try {
+    const introduction = await generateAndSaveInDepthIntroduction(getDatabasePool(), id);
+    revalidatePath('/in-depth');
+    revalidatePath('/review/in-depth');
+    return Response.json(
+      { introduction, saved: true },
+      { headers: { 'Cache-Control': 'no-store' } },
+    );
+  } catch (error) {
+    if (error instanceof IntroductionError)
+      return Response.json(
+        { error: error.message, introduction: error.introduction, saved: false },
+        { status: error.status, headers: { 'Cache-Control': 'no-store' } },
+      );
+    console.error('Failed to generate In-depth introduction.', error);
+    return Response.json({ error: 'Failed to generate introduction.' }, { status: 500 });
   }
 }

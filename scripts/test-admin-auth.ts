@@ -130,7 +130,7 @@ try {
     ['review/events/ranking', ['PATCH']],
     ['review/long-form', ['GET']],
     ['review/long-form/ranking', ['PATCH']],
-    ['review/in-depth', ['GET', 'PATCH']],
+    ['review/in-depth', ['GET', 'PATCH', 'POST']],
     ['evaluation', ['GET']],
     ['evaluation/run', ['POST']],
     ['evaluation/cancel', ['POST']],
@@ -146,6 +146,21 @@ try {
       const request = new Request(`${origin}/ai/api/admin/${route}`, { method });
       assert.equal((await handler[method](request)).status, 401, `${method} ${route}`);
     }
+  }
+  const inDepth = await import('../src/app/api/admin/review/in-depth/route.js');
+  for (const method of ['POST', 'PATCH'] as const) {
+    assert.equal(
+      (
+        await inDepth[method](
+          new Request(`${origin}/ai/api/admin/review/in-depth`, {
+            method,
+            headers: { cookie, origin: 'http://evil.test', 'content-type': 'application/json' },
+            body: '{}',
+          }),
+        )
+      ).status,
+      403,
+    );
   }
   const evaluation = await import('../src/app/api/admin/evaluation/route.js');
   assert.equal(
