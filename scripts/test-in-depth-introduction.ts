@@ -283,7 +283,7 @@ publicRows[0]!.editorialOverrides = {
 };
 assert.equal((await (await publicGet()).json()).items[0].summary, '已上架后的更新');
 publicRows[0]!.editorialOverrides = { summary: '', whyWorthReading: '', extra_info: '' };
-assert.equal((await (await publicGet()).json()).items[0].summary, 'Agent summary');
+assert.equal((await (await publicGet()).json()).items[0].summary, 'Summary');
 assert.equal((await (await publicGet()).json()).items[0].extra_info, '');
 console.log(
   'Anonymous public API: approval boundary, immediate Editorial updates, legacy fallback and private-field exclusion passed.',

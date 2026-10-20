@@ -124,7 +124,7 @@ export function InDepthReviewClient(props: {
           ) : null}
           {items.map((item) => {
             const fields = {
-              title: item.originalTitle ?? item.titleZh ?? 'Untitled work',
+              title: item.titleZh ?? item.originalTitle ?? 'Untitled work',
               author: item.author,
             };
             return (
@@ -167,11 +167,9 @@ export function InDepthReviewClient(props: {
                 <div>
                   <p className={styles.eyebrow}>Discovery · {capitalize(selected.discoveryPath)}</p>
                   <h2>
-                    {selected.originalTitle ?? selected.titleZh ?? 'Original title unavailable'}
+                    {selected.titleZh ?? selected.originalTitle ?? 'Original title unavailable'}
                   </h2>
-                  {selected.titleZh && selected.titleZh !== selected.originalTitle ? (
-                    <p>{selected.titleZh}</p>
-                  ) : null}
+                  <p>{selected.originalTitle}</p>
                 </div>
                 <span className={styles.inDepthBadge}>{capitalize(selected.reviewStatus)}</span>
               </div>
@@ -258,7 +256,7 @@ export function InDepthReviewClient(props: {
               </div>
 
               <section className={styles.inDepthCopy}>
-                <h3>Agent summary</h3>
+                <h3>Summary</h3>
                 <p>{selected.summary ?? 'No summary provided.'}</p>
                 <h3>Why worth reading</h3>
                 <p>{selected.whyWorthReading ?? 'No reason provided.'}</p>
