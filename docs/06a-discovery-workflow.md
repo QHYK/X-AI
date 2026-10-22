@@ -269,16 +269,16 @@ Discovery 分支失败后不自动重跑。是否复用原 Run，以 D2 的持�
 
 ### 8.4 人工补充执行
 
-人工可在审核页面选择原 D2 的 `leadId` 单独执行，或启动 Open；这属于新的人工补充执行，不是原 Run Resume。每次创建新 Run、关联原 Run 与所选 Lead，独立保存执行结果和 Trace。Discovery 不要求相同输入产生相同输出。
+- **Implemented**：通过 Dashboard Retry Open 或 CLI 人工 Open 创建关联原 Regular Run 的新 Open Run；这不是原 Run Resume，独立保存结果和 Trace，不覆盖原候选。操作入口见 `09-operations.md`。
+- **Planned**：从原 D2 中选择一个 `leadId` 单独执行，创建关联原 Run 与所选 Lead 的新 Run。当前 CLI、Admin API 和审核页面尚未提供此入口；保留的技术约定见 `04a-discovery-technical-spec.md` §6.3。
+
+Discovery 不要求相同输入产生相同输出。
 
 ---
 
-## 9. 待确认事项
+## 9. 后续验证边界
 
-1. **Daily 查询复用**：核实当前 API 的业务日期、Event 全量与 Digest / Long-form 展示选择规则，提取可复用查询函数。
-2. **SDK 工具实验**：验证选定 GPT 模型的 `webSearchTool()`、`fetch_content` 配合及真实阅读证据。
-3. **Tracing 实验**：验证 SDK TracingProcessor 写入 PostgreSQL、父子 Span 关联、结束时刷新与失败记录。
-4. **内容验证**：核实视频 / 播客的字幕、时长获取；无法核查时保留限制，不伪装为已阅读。
-5. **运行预算**：通过首轮真实运行确定并发、超时、轮数与 Token 预算。
+Daily 查询复用、SDK 工具与数据库 Trace 已实现，状态及部署核验见 `04a-discovery-technical-spec.md` §9；不再将其列为首次实现前的实验。
 
-这些实验的技术细节属于 `04a` 和 `09`，本文件不重复实现设计。
+- 视频 / 播客的字幕、时长仍需按实际取得的证据核查；无法核查时保留限制，不伪装为已阅读。
+- 已有运行预算不代表质量与成本验证已结束；实际配置见 `09-operations.md`，后续根据真实运行评估，不在本文件重复定义数值。

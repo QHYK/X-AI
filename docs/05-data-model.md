@@ -322,13 +322,13 @@ source_id + date
 ```
 等组合索引。不要提前优化。
 
-## 11 Discovery 数据模型（设计稿 v0.2）
+## 11 Discovery 数据模型
 
-Discovery 与 Daily Production 独立。首版新增以下四张表，不修改既有 `feedback`、`pipeline_runs` 或 `raw_articles`。执行流程见 `06a-discovery-workflow.md`，技术边界见 `04a-discovery-technical-spec.md`。
+Discovery 与 Daily Production 独立，不修改既有 `feedback`、`pipeline_runs` 或 `raw_articles`。**Implemented**：本节各业务表、Trace 表及 Fetch Cache 已有 Schema 与 Migration。**Planned**：`single_lead` 的执行入口尚未实现，其数据库预留字段与约束仍保留。执行流程见 `06a-discovery-workflow.md`，技术边界见 `04a-discovery-technical-spec.md`。
 
 ### 11.1 `discovery_runs`
 
-每次独立执行创建 Run；人工补充执行的 Open Discovery 与单条 Lead 执行创建子 Run，并通过 `parent_run_id` 关联原 Regular Run。自动 Fallback Open 若属于 Regular Run 的内部执行阶段，不额外创建子 Run。相同输入允许不同输出。
+每次独立执行创建 Run；人工补充 Open Discovery 创建子 Run，并通过 `parent_run_id` 关联原 Regular Run。Planned 的单条 Lead 执行沿用该父子设计，当前没有执行入口。自动 Fallback Open 若属于 Regular Run 的内部执行阶段，不额外创建子 Run。相同输入允许不同输出。
 
 | Field | Type | Constraint / Notes |
 |---|---|---|
@@ -357,10 +357,10 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
   - `open`：`source_lead_id` 为 NULL；人工补充执行时 `parent_run_id` 为 NOT NULL 并指向原 `regular` Run，并保存继承的 `window_start_date` / `window_end_date`。自动 Fallback Open 作为 `regular` Run 的内部阶段执行，不创建 `run_type = 'open'` 的子 Run。
 - 使用 CHECK 约束上述空值组合：`regular` 只能是无父 Run，`single_lead` 必须同时提供父 Run 和 Lead，独立的 `open` Run 必须提供父 Run 且不能提供 Lead。
 - `CHECK(parent_run_id IS NULL OR parent_run_id <> id)` 防止 Run 自引用；父 Run 的类型与 Lead 归属由应用层验证。
-- 日期字段记录**计划输入窗口**，不从实际执行时间推导；`input_content_ids` 记录当次选入的 Event / Digest / Long-form 内容成员 ID，避免复制 Daily 正文。它不保证当时的完整模型输入文本可复现；本版不增加 `input_snapshot`，D2 实现时再决定模型输入文本的持久化方式。
+- 日期字段记录**计划输入窗口**，不从实际执行时间推导；`input_content_ids` 记录当次选入的 Event / Digest / Long-form 内容成员 ID，避免复制 Daily 正文。当前没有 `input_snapshot`，不得将成员 ID 记录视为完整模型输入文本快照。
 - 上游 Daily 未就绪可记录 `blocked` 和 `upstream_not_ready`，不冒充已完成 Discovery。
-- 人工 Open 或 `single_lead` 均不重新执行 Topic Selection；单条执行通过 `parent_run_id + source_lead_id` 定位原线索，Direct 复用 D4、Topic 复用 D3；原运行结果不覆盖。Lead ID 由应用代码在 D2 输出校验后生成，不能由 LLM 自由生成。
-- 各 Lead 的执行状态及关联结果首版通过 Run 的 `selection_output`、关联的 `single_lead` Run 和候选记录查询计算，不新增 Lead 表或冗余状态字段。
+- 人工 Open 不重新执行 Topic Selection；**Planned** 的 `single_lead` 也不重新执行 Topic Selection，单条执行通过 `parent_run_id + source_lead_id` 定位原线索，Direct 复用 D4、Topic 复用 D3；原运行结果不覆盖。Lead ID 由应用代码在 D2 输出校验后生成，不能由 LLM 自由生成。
+- **Planned**：单条 Lead 执行入口实现后，各 Lead 的执行状态及关联结果通过 Run 的 `selection_output`、关联的 `single_lead` Run 和候选记录查询计算，不新增 Lead 表或冗余状态字段。
 - 自动 Open 仅在常规 Direct / Topic 均正常完成且合计 0 篇合格作品时触发；分支失败不自动重跑、不自动 Open。
 - `status` 与 `end_reason` 分开：例如 `partial + timeout`、`completed + candidates_found` 与 `completed + no_candidates` 的业务含义不同；`end_reason` 只在运行结束时填写。
 - `execution_state` 仅接受 JSON 对象。已执行阶段以 `d2` / `d3` / `d4` / `d5` 键保存 `status`、`endReason`、`completedAt`、错误摘要、Provider / Model / API mode、累计 `elapsedMs` 与 `usage`；更新单个阶段时不得覆盖其他阶段。`running` 或字段缺失均不表示完成，历史 Run 不从缺失状态推断成功。D3 / D5 正常空结果也写入对应 `status = 'completed'` 与 `endReason = 'no_candidates'`，供 Resume 作确定性判断。
@@ -466,7 +466,7 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 - 人工触发 Open 后，新增 Run 和审核候选，不覆盖原有记录。
 - In-depth Reads 以 `review_status = 'approved'` 作为上架与前台可见条件；`pending` / `rejected` 不可见。`approved` 改为 `rejected` 即撤下。标题和作者使用 Candidate 客观字段。
 - 「完善介绍」独立保存到以上三个 TEXT 列；Generate 自动保存与 Save changes 写入同一组列，不覆盖 Candidate 原始 Agent 字段。非空 Editorial summary / why worth reading 优先于 Candidate 原字段；NULL / 空字符串按无覆盖处理。Editorial extra_info 缺失时返回空字符串，禁止回退到内部 `discovery_candidates.extra_info`。
-- 管理 API 继续以 `editorialOverrides` 对象返回这三个值，仅作为传输结构，由查询从独立列组装；数据库不再保存该 JSONB。公开 API 字段名不变。
+- 管理 API 继续以 `editorialOverrides` 对象返回这三个值，仅作为传输结构，由查询从独立列组装；公开 API 字段名不变。
 - 介绍、Notes、审核状态独立写入：介绍仅更新三列，Notes 仅更新 `editorial_notes`；只有审核操作改变 `review_status` / `reviewed_at`。均更新 `updated_at`，不维护版本历史。
 - 本轮不改 `feedback`；明确要求长期记住的偏好由独立 Memory 流程处理。
 
@@ -489,7 +489,7 @@ Discovery 与 Daily Production 独立。首版新增以下四张表，不修改�
 
 同一规范化 URL 使用 UPSERT 更新，不维护正文版本历史；不完整结果不能覆盖已有完整正文。成功结果在工具返回前独立提交，后续 Agent / Candidate / Editorial 失败不回滚原文 Cache。并发和错误处理见 `04a-discovery-technical-spec.md` §4.3；部署 Migration 见 `09-operations.md`。
 
-### 11.6 初始索引与实现前核实项
+### 11.6 索引与实现边界
 
 ```text
 discovery_runs(parent_run_id)
@@ -503,9 +503,8 @@ in_depth_candidates(discovery_candidate_id) UNIQUE
 in_depth_candidates(review_status, created_at DESC)
 ```
 
-实现前核实：
+当前实现边界：
 
-1. Daily API 实际使用的 Event / Digest / Long-form 标识及 `input_content_ids` 的分类结构；Event 可覆盖窗口内全部 Event。
-2. SDK Trace / Span 原生字段与 `TracingProcessor` 生命周期；上述列名是**业务持久化设计**，不代表 SDK 已提供完全相同字段。
-3. 人工审核 UI 是否需要独立的审核批次；首版优先通过 Candidate → Run → Parent Run 关联，不额外建表。
-4. 最终上架的目标数据表和审核状态迁移；当前只定义进入待审核队列，不擅自改动既有内容库。
+1. **Implemented**：Daily 输入适配和 Trace 持久化已有代码；执行与技术边界分别见 `06a-discovery-workflow.md` 和 `04a-discovery-technical-spec.md`。Trace 列是业务持久化字段，不代表 SDK 提供完全相同字段。
+2. **Implemented**：审核通过 Candidate → Run → Parent Run 关联，不额外建立审核批次表。上架及公开读取使用 §11.4 的审核状态，无需迁移到另一张内容库表。
+3. **Planned**：单条 Lead 执行保留 §11.1 的字段和约束，不能据此认定已有 CLI / API / UI 支持。

@@ -1,8 +1,8 @@
-# In-depth Discovery 技术规范（设计稿 v0.3）
+# In-depth Discovery 技术规范
 
 本文档只定义 X-AI-field Discovery 的**技术实现边界与关键决策**。通用架构见 `04-technical-spec.md`；AI 语义见 `03-ai-workflow-spec.md`；执行分支、人工触发与失败语义见 `06a-discovery-workflow.md`；字段定义见 `05-data-model.md`；Prompt 与输出契约见 `07-prompt-spec.md`；运行命令见 `09-operations.md`。
 
-> 状态：Discovery Agent 技术 Spike 已通过（Codex Responses endpoint）；本文档其余部分为待实现的生产方案，不能将 Spike 视为正式 Workflow 已上线。
+> **Implemented**：D2–D5 生产执行路径、候选持久化、原文 Cache、数据库 Trace、人工审核及 Worker 异步执行已实现。**Planned** 能力单独标注，不能视为已有入口。**Historical**：旧的“仅完成 Spike、生产方案待实现”状态说明已失效；Spike 仅保留为历史验证记录，不作为生产运行入口。代码已实现不等于特定服务器已部署或外部 Provider 始终可用。
 
 ## 1. 技术目标与边界
 
@@ -14,7 +14,7 @@
 
 ## 2. 模块与依赖
 
-遵循现有仓库 `src/app`、`src/collectors`、`src/db`、`src/lib`、`src/processing`、`src/prompts` 的结构；新增 `src/discovery/`，在 `scripts/` 增加独立运行入口。内部文件按实际实现逐步拆分，不预设复杂层级。
+`src/discovery/` 承载独立 Discovery 模块，`scripts/` 提供运行入口。内部文件按实际职责拆分，不预设复杂层级。
 
 ```text
 scripts / app (CLI、人工触发入口)
@@ -117,12 +117,12 @@ D4 本身不抓取，继续通过现有 Daily 关联读取 `raw_articles.full_co
 
 ## 6. 数据持久化与执行追踪
 
-首版使用 PostgreSQL 保存业务对象与执行 Trace，不为 Discovery 新建 `runtime/` 文件日志。**优先复用 Agents SDK 原生 Tracing 与 Processor 扩展接口**，而不是手写一套 Agent Loop 事件采集器。Spike 已验证 `TracingProcessor`、`setTraceProcessors` 和 `forceFlush`；生产实现仍需验证 PostgreSQL 写入、异常隔离和可靠 flush。
+当前使用 PostgreSQL 保存业务对象与执行 Trace，不为 Discovery 新建 `runtime/` 文件日志。**优先复用 Agents SDK 原生 Tracing 与 Processor 扩展接口**，而不是手写一套 Agent Loop 事件采集器。生产适配器 `src/discovery/agent-tracing.ts` 已实现 PostgreSQL 写入、敏感数据过滤及结束刷新；部署环境的写入、异常与退出场景仍需持续验证。
 
 | 对象 | 技术职责 |
 |---|---|
 | `discovery_runs` | 运行 ID、触发方式、计划输入窗口、输入快照、运行状态与结束原因；人工触发 Open 能关联原运行 |
-| `discovery_trace_spans`（暂定） | 保存 SDK Trace / Span 的关联 ID、父子关系、类型、时间、状态及原始结构化数据，关联业务 Run |
+| `discovery_trace_spans` | 保存 SDK Trace / Span 的关联 ID、父子关系、类型、时间、状态及原始结构化数据，关联业务 Run |
 | `discovery_candidates` | 候选作品、发现路径、证据、验证结论及筛选状态 |
 | `in_depth_candidates` | 通过机器筛选、提交人工审核的作品及审核状态 |
 
@@ -149,7 +149,9 @@ D4 本身不抓取，继续通过现有 Daily 关联读取 `raw_articles.full_co
 
 具体字段、关联、索引与约束由 `05-data-model.md` 定义。本轮不修改 `feedback`；显式 Memory 写入由后续独立能力负责。
 
-### 6.3 人工单条线索执行（首版）
+### 6.3 人工单条线索执行（Planned）
+
+以下保留已确定的设计约定，当前 CLI / Admin API / Review UI 尚未提供单条 Lead 执行入口；数据库预留不等于功能已实现。当前人工补充执行边界见 `06a-discovery-workflow.md` §8.4。
 
 - D2 结构化输出在 Code 校验后，为每条线索分配稳定 `leadId`（例如 Run 内序号映射的 UUID）；`leadId` 不由 LLM 自由生成。审核页面展示全部线索、优先级、执行状态及关联候选。
 - 人工调用参数为 `sourceRunId + leadId`，Code 从已保存的 `selection_output` 读取并校验该线索，不能信任客户端重新提交的 question / sourceContentId。
@@ -163,7 +165,7 @@ D4 本身不抓取，继续通过现有 Daily 关联读取 `raw_articles.full_co
 - 人工 Open 入口：接收原 Run 或审核批次标识及可选人工意见，创建**可关联的补充运行**；不重新执行整个 Topic Selection，也不覆盖现有候选。
 - 局部分支失败时保留其他路径的有效结果；关键依赖失败、超时、正常空结果必须区分。
 - 同一输入允许多次独立运行并产生不同候选；不要求跨运行结果相同，也不以幂等性为首版目标。但单次写入仍应遵守数据库完整性约束。
-- 初版以人工诊断与按 Lead 单独执行为主，不建立复杂自动恢复系统。
+- 通过 CLI Resume 或新建 Regular / Open Run 人工处理失败；不建立复杂自动恢复系统。按 Lead 单独执行仍为 **Planned**（§6.3）。
 
 ### 7.1 Dashboard 持久化异步执行
 
@@ -185,13 +187,8 @@ Worker 不以进程内存作为任务状态；执行中断后，在取得排他�
 
 建议用少量真实 Topic 对比固定搜索 Baseline 与自适应 Agent 的作品质量、实际工具轨迹及成本，验证 Agent Loop 是否带来足够收益；不预设复杂自动评价指标。
 
-## 9. 实现前待核实
+## 9. 实现状态与部署核验
 
-- Daily Brief API / 查询层的真实复用入口，以及全部 Event 的查询方式。
-- Firecrawl Spike 已证实可复用 `extractFirecrawlContent()`，但现有生产 `scrape()` 耦合候选与限流；需将 Spike 的独立 URL adapter 整理为生产模块。
-- Agents SDK 0.20.0 + Codex Responses endpoint + GPT 模型的连通性、托管搜索及结构化输出已实测；生产部署时仍需验证目标运行环境的 Endpoint 可达性。
-- Hosted Search 的 `web_search_call` 和 query 已验证；生产候选引用仍需从实际结果中保存 URL / citation，不能仅靠 Span。
-- Processor 接口与默认导出替换已验证；待实现数据库 Span 保存、业务 `run_id` 关联、正文脱敏与保留策略。
-- 两期 Daily 的日期映射与补跑参数（默认 12:00）；完成状态判定以 `06a-discovery-workflow.md` 的上游就绪规则为准。
-
-这些事项核实后更新对应技术或运行文档；不要将未验证的假设写成既有实现事实。
+- **Implemented**：Daily 查询适配、固定 URL Fetch / Cache、业务 Run 关联及数据库 Trace 已有生产实现，边界分别见 §3、§4.3 和 §6，不再列为实现前置事项。
+- **Planned**：人工单条 Lead 执行保留 §6.3 的约定，当前没有可执行入口。
+- 目标部署环境仍须核验 Endpoint、Hosted Search / Fetch、数据库权限与 Trace 刷新；历史 Spike 成功不能替代部署验证。候选证据不能仅依靠 Span，要求见 §5、§6.1。日期与上游就绪规则见 `06a-discovery-workflow.md`，运行配置与命令见 `09-operations.md`。

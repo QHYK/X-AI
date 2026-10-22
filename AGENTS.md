@@ -23,8 +23,10 @@
 | 系统整体流程、Production / Review / Evaluation 全貌 | `docs/02-workflow-overview.md` |
 | AI Stage 的职责、判断目标、语义规则 | `docs/03-ai-workflow-spec.md` |
 | 系统架构、技术选型、模块边界、稳定架构决策 | `docs/04-technical-spec.md` |
+| Discovery 技术边界、Agent Runtime、原文复用与执行追踪 | `docs/04a-discovery-technical-spec.md` |
 | Database Schema、表关系、字段约束、Index | `docs/05-data-model.md` |
 | Production Pipeline 的执行、scope、eligibility、retry、persistence、lineage | `docs/06-processing-workflow.md` |
+| Discovery 输入窗口、执行分支、候选验证、人工触发与恢复 | `docs/06a-discovery-workflow.md` |
 | Prompt、Structured Output、LLM Input / Output Contract | `docs/07-prompt-spec.md` |
 | Source 配置 | `docs/08-source-list.md` |
 | Commands、CLI 参数、环境变量、Tests、Diagnostics、Backfill / Repair | `docs/09-operations.md` |

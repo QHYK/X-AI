@@ -11,10 +11,14 @@ X-AI-field 是一个 AI 驱动的信息筛选系统：持续收集可信信息�
 -   Stage 1--4 AI Processing
 -   Daily Workflow Orchestrator
 -   PostgreSQL Production Data
--   Daily Brief API & Page
+-   Daily Brief Public API
 -   Internal Dashboard
 -   Human Review & Feedback
 -   Manual Model Evaluation
+-   In-depth Discovery 候选审核与公开分页 API
+-   Discovery CLI、Dashboard 异步提交、Worker 与 Scheduled CLI
+
+本仓库提供 Pipeline、后台与公开 API；首页 `/` 仍为启动占位页，不提供 Daily Brief / In-depth 读者展示页。
 
 ## Daily Brief
 
@@ -51,6 +55,8 @@ Daily Brief API / Dashboard
 ```
 
 系统同时包含 Human Review 和独立的 Model Evaluation Workflow。
+Discovery 独立消费已完成的 Daily 数据，不接入 Daily Job；技术边界见
+[`04a`](docs/04a-discovery-technical-spec.md)，执行规则见 [`06a`](docs/06a-discovery-workflow.md)。
 
 完整高层工作流见
 [`docs/02-workflow-overview.md`](docs/02-workflow-overview.md)。
@@ -76,6 +82,8 @@ cp .env.example .env.local
 npm run dev
 ```
 
+项目配置 `basePath=/ai`，开发服务器默认后台入口为 `http://localhost:3000/ai/dashboard`，登录入口为 `/ai/login`。
+
 后台登录还需配置 `ADMIN_PASSWORD_HASH`（运行 `npm run admin:hash-password` 生成）及 `ADMIN_COOKIE_SECURE`；具体步骤与当前 HTTP 部署注意事项见 [`docs/09-operations.md`](docs/09-operations.md)。
 
 数据库、LLM Provider、Firecrawl 等完整环境变量说明见
@@ -98,6 +106,9 @@ npm run daily
 npm run daily -- --date=YYYY-MM-DD
 ```
 
+Discovery 的 CLI、Worker 安装与启动、Scheduled CLI / Cron 配置统一见
+[`Operations`](docs/09-operations.md)；定时入口只提交任务，需要 Worker 消费。
+
 独立 Stage、Evaluation、Regression Tests、Diagnostics、Backfill /
 Recovery 等操作入口统一见
 [`docs/09-operations.md`](docs/09-operations.md)。
@@ -113,8 +124,10 @@ Recovery 等操作入口统一见
 | [`02-workflow-overview.md`](docs/02-workflow-overview.md)     | 系统高层工作流与主要模块关系 |
 | [`03-ai-workflow-spec.md`](docs/03-ai-workflow-spec.md)       | Stage 1--4 AI Capability Semantic Contract |
 | [`04-technical-spec.md`](docs/04-technical-spec.md)           | 技术架构、模块边界与稳定技术决策 |
-| [`05-data-model.md`](docs/05-data-model.md)                   | Production / Review / Evaluation 数据模型 |
+| [`04a-discovery-technical-spec.md`](docs/04a-discovery-technical-spec.md) | Discovery 技术边界、Agent、原文复用与执行追踪 |
+| [`05-data-model.md`](docs/05-data-model.md)                   | Production / Review / Evaluation / Discovery 数据模型 |
 | [`06-processing-workflow.md`](docs/06-processing-workflow.md) | Production execution、Daily Scope、persistence、retry、lineage |
+| [`06a-discovery-workflow.md`](docs/06a-discovery-workflow.md) | Discovery 输入窗口、分支、审核与恢复流程 |
 | [`07-prompt-spec.md`](docs/07-prompt-spec.md)                 | Application ↔ LLM Prompt / Structured Output Contract |
 | [`08-source-list.md`](docs/08-source-list.md)                 | Source 配置 |
 | [`09-operations.md`](docs/09-operations.md)                   | Commands、CLI、环境变量、测试、诊断与人工操作 |
