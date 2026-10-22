@@ -134,6 +134,13 @@
       "when": 1792420000000,
       "tag": "0018_flatten_in_depth_editorial",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792670400000,
+      "tag": "0019_manual_in_depth",
+      "breakpoints": true
     }
   ]
 }

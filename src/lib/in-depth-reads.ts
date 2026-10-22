@@ -46,14 +46,14 @@ export function parseInDepthReviewUpdate(value: unknown): InDepthReviewUpdate {
 export type InDepthReviewItem = {
   id: string;
   candidateId: string;
-  runId: string;
+  runId: string | null;
   reviewStatus: InDepthReviewStatus;
   editorialNotes: string | null;
   editorialOverrides: Record<string, unknown> | null;
   reviewedAt: string | null;
   createdAt: string;
   candidateCreatedAt: string;
-  discoveryPath: 'direct' | 'topic' | 'open';
+  discoveryPath: 'direct' | 'topic' | 'open' | 'manual';
   url: string;
   originalTitle: string | null;
   titleZh: string | null;

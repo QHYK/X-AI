@@ -114,6 +114,23 @@ async function dailyArticle(
   };
 }
 
+/** Read-only reuse, also used by manual Generate: never issues a paid Fetch. */
+export async function readStoredArticle(
+  db: Pick<Pool, 'query'>,
+  url: string,
+  options: { candidateArticle?: ArticleDocument | null; sourceContentId?: string | null } = {},
+): Promise<ArticleDocument | null> {
+  const cached = await cachedArticle(db, normalizedFetchUrl(url));
+  if (cached) return cached;
+  if (
+    options.candidateArticle?.status === 'success' &&
+    options.candidateArticle.isComplete &&
+    options.candidateArticle.markdown.trim()
+  )
+    return options.candidateArticle;
+  return dailyArticle(db, url, options.sourceContentId);
+}
+
 /** A URL-keyed cache independent of Candidate selection. Complete Daily content stays in its own table. */
 export async function getOrFetchArticle(
   db: ArticleDatabase,
@@ -125,16 +142,8 @@ export async function getOrFetchArticle(
   },
 ): Promise<ArticleDocument> {
   const normalized = normalizedFetchUrl(url);
-  const cached = await cachedArticle(db, normalized);
-  if (cached) return cached;
-  if (
-    options.candidateArticle?.status === 'success' &&
-    options.candidateArticle.isComplete &&
-    options.candidateArticle.markdown.trim()
-  )
-    return options.candidateArticle;
-  const daily = await dailyArticle(db, url, options.sourceContentId);
-  if (daily) return daily;
+  const stored = await readStoredArticle(db, url, options);
+  if (stored) return stored;
 
   const client = await db.connect();
   let fetched: ArticleDocument | undefined;

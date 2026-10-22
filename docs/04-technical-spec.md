@@ -322,6 +322,8 @@ In-depth Review 保留完整标题及既有审核操作；基本信息区左侧�
 
 #### In-depth Editorial Introduction
 
+人工 URL 候选入口位于同一审核页面：`POST /api/admin/review/in-depth/manual` 获取基础信息并创建 / 返回候选，`GET` 以 Candidate ID 只读预览已存正文，不发起抓取。现有 Generate 端点对 manual 使用专用任务指令，成功后更新同一详情中的中文标题和介绍；人工编辑仍只保存三段 Editorial。产品行为见 `01-product-spec.md` §4.2，技术边界见 `04a-discovery-technical-spec.md` §6.4；manual 的 Run / Processing Stage 显示为不适用，不伪造 D4。
+
 `/review/in-depth` 的「完善介绍」复用当前 Candidate Card，只编辑「讲了什么」「为什么值得用心阅读」「其他具体评估」三段中文 Markdown；Original Title 完整展示，Title / Author 不再提供编辑输入。Notes、介绍、审核状态是三个独立控制：
 
 - `PATCH /api/admin/review/in-depth` 使用严格的 action 契约：`review` 只更新 reviewStatus / reviewedAt，`notes` 只更新 editorialNotes，`editorial` 只保存三段 Editorial；不能夹带其他控制的字段。

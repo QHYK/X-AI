@@ -276,6 +276,10 @@ Discovery 不要求相同输入产生相同输出。
 
 ---
 
+### 8.5 人工 URL 提交
+
+人工候选的创建、独立 Generate 和审核行为见 `01-product-spec.md` §4.2；技术边界见 `04a-discovery-technical-spec.md` §6.4。该入口不执行 D2–D5，不受自动候选数量或 D4 入选结论控制，不代表新的 Discovery 阶段。Pending 仅表示未审核，不表示介绍是否已生成。
+
 ## 9. 后续验证边界
 
 Daily 查询复用、SDK 工具与数据库 Trace 已实现，状态及部署核验见 `04a-discovery-technical-spec.md` §9；不再将其列为首次实现前的实验。

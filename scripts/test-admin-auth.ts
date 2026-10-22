@@ -132,6 +132,7 @@ try {
     ['review/long-form', ['GET']],
     ['review/long-form/ranking', ['PATCH']],
     ['review/in-depth', ['GET', 'PATCH', 'POST']],
+    ['review/in-depth/manual', ['GET', 'POST']],
     ['evaluation', ['GET']],
     ['evaluation/run', ['POST']],
     ['evaluation/cancel', ['POST']],

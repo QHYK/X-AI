@@ -256,6 +256,8 @@ npm run test:discovery-d5
 
 ### In-depth「完善介绍」
 
+人工 URL 候选需要先应用 `0019_manual_in_depth.sql`（使用既有 `npm run db:migrate`），再部署并按既有方式重启 Web 和正在运行的 Discovery Worker；无需回填旧候选，人工提交本身不依赖 Worker。新增无付费回归：`npm run test:manual-in-depth`、`npm run test:manual-in-depth-ui`，验证查重、并发、正文复用、生成保存和公开边界。人工 Generate 使用 `DISCOVERY_LLM_PROVIDER`（回退 `LLM_PROVIDER`）及该 Provider 的模型配置，单次调用、不自动重试；只读已有正文，不追加 Firecrawl。Step 1 缓存未命中时才使用已有 `FIRECRAWL_API_KEY` 抓取，且不调用模型。
+
 本地无付费回归：`npm run test:in-depth-introduction` 验证模型 Mock、证据不足、自动保存及保存失败文本恢复；`npm run test:in-depth-introduction-ui` 验证人工编辑、Regenerate 确认、重复提交及异步输入保护；`npm run test:in-depth-review` 验证独立控制和公开读取边界。
 
 Generate / Regenerate 通过共享 Structured Output Client 调用一次介绍模型。正文已存时不抓取；Cache / Daily 全文均未命中时，需要 `FIRECRAWL_API_KEY`，对固定 Original URL 调用一次 Firecrawl（不自动重试），写入 Cache 后再调用模型。没有 Web Search 或 Agent Loop。D3 / D5 也使用该 Cache，缓存命中不消耗 Firecrawl Credit；错误 / 不完整正文不会作为完整内容复用。

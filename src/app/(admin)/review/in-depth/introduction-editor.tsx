@@ -7,11 +7,14 @@ import {
   type EditorialIntroduction,
 } from '@/lib/in-depth-editorial.js';
 import styles from '../review.module.css';
+import type { InDepthReviewItem } from '@/lib/in-depth-reads.js';
 
 export function IntroductionEditor(props: {
   id: string;
   overrides: Record<string, unknown> | null;
   apiUrl: () => string;
+  manual?: boolean;
+  onGenerated?: (item: InDepthReviewItem) => void;
 }) {
   const initial = readEditorialIntroduction(props.overrides);
   const [draft, setDraft] = useState(initial);
@@ -67,12 +70,14 @@ export function IntroductionEditor(props: {
         method: generate ? 'POST' : 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
-          generate ? { id: props.id } : { id: props.id, action: 'editorial', ...submitted },
+          generate
+            ? { id: props.id, ...(props.manual ? { regenerate: hasContent } : {}) }
+            : { id: props.id, action: 'editorial', ...submitted },
         ),
       });
       const payload = (await response.json()) as {
         introduction?: unknown;
-        item?: { editorialOverrides: Record<string, unknown> | null };
+        item?: InDepthReviewItem;
         error?: string;
         saved?: boolean;
       };
@@ -91,6 +96,7 @@ export function IntroductionEditor(props: {
         throw new Error('生成接口未返回已保存的有效介绍。');
       if (response.ok && !generate && !payload.item) throw new Error('保存接口未返回有效结果。');
       if (!response.ok) throw new Error(payload.error ?? '保存失败。');
+      if (generate && payload.item) props.onGenerated?.(payload.item);
       if (!generate) {
         setSaved(submitted);
         setRecovery(null);

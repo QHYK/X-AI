@@ -689,7 +689,7 @@ async function loadHistoricalNormalizedUrls(
   const result = await pool.query<{ normalized_url: string }>(
     `select distinct normalized_url
       from discovery_candidates
-      where run_id <> $1::uuid
+      where run_id is distinct from $1::uuid
         and normalized_url = any($2::text[])`,
     [runId, urls],
   );

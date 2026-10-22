@@ -124,7 +124,7 @@ D4 本身不抓取，继续通过现有 Daily 关联读取 `raw_articles.full_co
 | `discovery_runs` | 运行 ID、触发方式、计划输入窗口、输入快照、运行状态与结束原因；人工触发 Open 能关联原运行 |
 | `discovery_trace_spans` | 保存 SDK Trace / Span 的关联 ID、父子关系、类型、时间、状态及原始结构化数据，关联业务 Run |
 | `discovery_candidates` | 候选作品、发现路径、证据、验证结论及筛选状态 |
-| `in_depth_candidates` | 通过机器筛选、提交人工审核的作品及审核状态 |
+| `in_depth_candidates` | 通过机器筛选或人工 URL 提交进入审核的作品及审核状态 |
 
 `discovery_runs.execution_state` 保存已执行 D2–D5 阶段的动态完成状态与执行诊断。它与不可变的 `config_snapshot` 分离；阶段更新必须使用局部 JSONB 更新，缺失或遗留 `running` 不视为完成。字段与 Usage 完整性语义由 `05-data-model.md` 定义。
 
@@ -158,6 +158,16 @@ D4 本身不抓取，继续通过现有 Daily 关联读取 `raw_articles.full_co
 - `direct` 只执行选定作品的 D4 评价；`topic` 只执行选定问题的 D3 Agent；复用既有 Prompt、Schema、URL 去重和证据检查，不重新执行 D2。人工 Open 沿用既有入口。
 - 每次人工执行创建新 `discovery_runs` 记录，`parent_run_id` 指向原常规 Run，`source_lead_id` 记录目标线索；不覆盖原候选或原执行结果。保留审核候选的历史 URL 去重规则。
 - 某个分支失败时记录 `partial` / `failed` 和原因，不自动重跑，也不自动触发 Open；人工决定执行单条线索或 Open。
+
+### 6.4 人工 URL 候选（Phase B1）
+
+人工提交不调用 Discovery 编排、不创建 Run / Lead 或伪造 D4 评价。共用 `discovery_candidates` 元数据与 `in_depth_candidates` 审核存储，manual 的无 Run 约束由 `05-data-model.md` 定义。Admin API 在 Session / 同源校验后按规范化 URL 查重，已有审核记录原样返回；重复人工创建以 URL 事务锁串行复查。历史无规范化键的审核候选按同一规范化函数兼容匹配。
+
+正文复用 §4.3 的统一 Fetch Cache / Daily 读取器，读取成功后才创建候选；Candidate 只保存关联 URL 和必要元数据，不复制大段正文。Fetch 成功而创建失败时保留独立 Cache，重试复用。人工生成只读取已有完整正文，不重新 Fetch；对同一 Candidate 使用事务级执行锁，防止并发付费生成。完整生成结果默认直接返回，只有显式 Regenerate 才重新调用模型。生成与保存失败明确区分，生成文本在保存失败时返回供人工保存。
+
+Manual Generate 使用共享 LLM Client、Editorial 写作指令、D4 共享编辑标准及 Tags 规则，单次结构化调用生成介绍，不执行 qualified / rejected / unverifiable 判断。输出校验后在一个事务内保存中文标题、候选介绍与三段 Editorial；不改 Review status、Notes 或 Discovery Run。人工输入 Tags 不被模型覆盖。
+
+既有 Discovery 历史 URL 去重继续包含人工候选；D4 的跨 Run 排除使用 NULL 安全比较，兼容 manual 的空 Run ID，其余路径的判断不变。
 
 ## 7. 运行入口、人工触发与失败处理
 

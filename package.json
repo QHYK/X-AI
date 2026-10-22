@@ -91,7 +91,9 @@
     "test:in-depth-load-more": "tsx scripts/test-in-depth-load-more.ts",
     "test:discovery-actions": "tsx scripts/test-discovery-actions.ts",
     "discovery:scheduled": "tsx scripts/run-discovery-scheduled.ts",
-    "test:discovery-scheduled": "tsx scripts/test-discovery-scheduled.ts"
+    "test:discovery-scheduled": "tsx scripts/test-discovery-scheduled.ts",
+    "test:manual-in-depth": "tsx scripts/test-manual-in-depth.ts",
+    "test:manual-in-depth-ui": "tsx scripts/test-manual-in-depth-ui.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

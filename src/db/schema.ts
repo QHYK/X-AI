@@ -415,14 +415,12 @@ export const discoveryFetchCache = pgTable(
   ],
 );
 
-/** Works inspected by Discovery, including candidates that are later rejected. */
+/** Discovery works and manually submitted works share metadata and human review. */
 export const discoveryCandidates = pgTable(
   'discovery_candidates',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    runId: uuid('run_id')
-      .notNull()
-      .references(() => discoveryRuns.id, { onDelete: 'cascade' }),
+    runId: uuid('run_id').references(() => discoveryRuns.id, { onDelete: 'cascade' }),
     discoveryPath: text('discovery_path').notNull(),
     sourceContentType: text('source_content_type'),
     sourceContentId: uuid('source_content_id'),
@@ -451,7 +449,12 @@ export const discoveryCandidates = pgTable(
     index('discovery_candidates_normalized_url_idx').on(table.normalizedUrl),
     check(
       'discovery_candidates_path_check',
-      sql`${table.discoveryPath} in ('direct', 'topic', 'open')`,
+      sql`${table.discoveryPath} in ('direct', 'topic', 'open', 'manual')`,
+    ),
+    check(
+      'discovery_candidates_run_check',
+      sql`(${table.discoveryPath} = 'manual' and ${table.runId} is null)
+        or (${table.discoveryPath} <> 'manual' and ${table.runId} is not null)`,
     ),
     check(
       'discovery_candidates_source_check',
@@ -464,7 +467,7 @@ export const discoveryCandidates = pgTable(
       'discovery_candidates_lead_check',
       sql`(
         (${table.discoveryPath} in ('direct', 'topic') and ${table.sourceLeadId} is not null)
-        or (${table.discoveryPath} = 'open' and ${table.sourceLeadId} is null)
+        or (${table.discoveryPath} in ('open', 'manual') and ${table.sourceLeadId} is null)
       )`,
     ),
     check(

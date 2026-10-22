@@ -400,8 +400,8 @@ Discovery 与 Daily Production 独立，不修改既有 `feedback`、`pipeline_r
 | Field | Type | Constraint / Notes |
 |---|---|---|
 | `id` | uuid | Primary Key |
-| `run_id` | uuid | NOT NULL, FK → `discovery_runs.id` |
-| `discovery_path` | text | NOT NULL；`direct` / `topic` / `open` |
+| `run_id` | uuid | FK → `discovery_runs.id`；仅 manual 为 NULL，其余路径 NOT NULL |
+| `discovery_path` | text | NOT NULL；`direct` / `topic` / `open` / `manual` |
 | `source_content_type` | text | nullable；明确 Daily 来源存在时为 `event` / `processed_content` |
 | `source_content_id` | uuid | nullable；来源内容 ID；按 `source_content_type` 解释为 `events.id` 或 `processed_contents.id` |
 | `source_lead_id` | text | nullable；候选所来自的 D2 Lead；由应用代码生成并校验，不由 LLM 生成 |
@@ -436,7 +436,8 @@ Discovery 与 Daily Production 独立，不修改既有 `feedback`、`pipeline_r
   - `open` 路径候选：为 NULL。
   Lead 存在 JSONB 中，因此不建立数据库 FK，由应用层校验归属。Lead ID 由应用代码稳定生成，不能由 LLM 自由生成。
 - D3 Final Output 的每篇 Candidate 必须显式提供一个 `sourceLeadId`，且必须属于本次输入的 Topic Leads。Agent 选择作品的主要归属 Lead，Code 严格校验并映射到 `source_lead_id`；首版不猜测默认 Lead，也不建立多对多来源关系。
-- Candidate 使用 CHECK 将 `discovery_path` 限定为 `direct` / `topic` / `open`，并约束 `direct` / `topic` 必须提供 `source_lead_id`、`open` 必须保持 `source_lead_id` 为 NULL。
+- Candidate 使用 CHECK 将 `discovery_path` 限定为 `direct` / `topic` / `open` / `manual`，并约束 `direct` / `topic` 必须提供 `source_lead_id`、`open` / `manual` 必须保持 `source_lead_id` 为 NULL。manual 的 `run_id` 必须为 NULL，其余路径必须非 NULL；既有 Run / Lead 关系不变。
+- manual 候选初始 `status = discovered`，直接创建 pending 审核记录；生成后为 evaluated，不写入 D4 decision。`evaluation.tags` 保存人工或模型 Tags，`manualTags` 标记是否有人工标签，`manualGenerated` 标记已完成生成；正文通过关联 URL 读取既有 Fetch Cache / Daily。`evidence` 只保存抓取诊断、来源与 Cover，不伪造机器筛选证据。Generate 同时保存 `title_zh`、`summary`、`why_worth_reading` 及 §11.4 三段 Editorial；人工修改继续只更新 Editorial，原始生成介绍保留。无需新增表，Migration 放宽 Run 必填并增加 manual 路径及对应 CHECK，历史记录不回填或重写。
 - D3 / D4 / D5 的 `title_zh`、`summary`、`whyWorthReading` 分别映射为已有列 `title_zh`、`summary`、`why_worth_reading`。D4 的 `decision` / `reason` 保存于 `evaluation`，内容证据 / `limitations` 保存于 `evidence`，不挪作读者介绍。历史 Direct 未生成介绍时允许 NULL，不重写历史输出。归一化后的 Source 写入已有 `publication`；Topic / Open 的 Fetch 来源元数据随 `evidence.fetch.metadata.publication` 保存，Direct 可用元数据摘要保存在 `evidence.sourceMetadata.publication`。这些字段映射复用既有列；独立原文 Cache 的新增表见 §11.5。
 - D3 / D4 / D5 的 `extra_info` 统一保存于 `extra_info` JSONB；缺失时规范化为 `{}`，只允许 JSON 对象，禁止数组、字符串等非对象值。应用层应限制序列化大小并过滤敏感、重复、无关内容；`extra_info` 不得替代固定字段、证据或业务校验。
 - `evidence` 保存实际获取的内容证据及其来源，不把 Agent 的自然语言声明当成已阅读证据。

@@ -676,3 +676,16 @@
   .modelColumns { flex-direction: column; }
   .stage1Item .modelColumns > section { border-right: 0; border-bottom: 1px solid #e7ebe9; }
 }
+
+.manualTagRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+}
+
+.savedArticleContent {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 32rem;
+  overflow-y: auto;
+}

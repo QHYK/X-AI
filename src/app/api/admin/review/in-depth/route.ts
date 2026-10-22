@@ -3,6 +3,7 @@ import {
   IntroductionError,
 } from '@/lib/in-depth-introduction.js';
 import { adminApiError } from '@/lib/admin-auth.js';
+import { generateManualInDepthIntroduction } from '@/lib/manual-in-depth.js';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { getDatabasePool } from '@/db/index.js';
@@ -76,20 +77,30 @@ export async function POST(request: Request): Promise<Response> {
   if (authError) return authError;
   if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json'))
     return Response.json({ error: 'Expected JSON.' }, { status: 400 });
-  let id: string;
+  let input: { id: string; regenerate?: boolean };
   try {
-    id = z
-      .object({ id: z.uuid() })
+    input = z
+      .object({ id: z.uuid(), regenerate: z.boolean().optional() })
       .strict()
-      .parse(await request.json()).id;
+      .parse(await request.json());
   } catch {
     return Response.json({ error: 'Invalid candidate ID or JSON body.' }, { status: 400 });
   }
   try {
-    const introduction = await generateAndSaveInDepthIntroduction(getDatabasePool(), id);
+    const db = getDatabasePool();
+    const item = await getInDepthReviewItem(db, input.id);
+    if (!item) return Response.json({ error: 'Candidate not found.' }, { status: 404 });
+    const manual = item.discoveryPath === 'manual';
+    const introduction = manual
+      ? await generateManualInDepthIntroduction(db, input.id, { regenerate: input.regenerate })
+      : await generateAndSaveInDepthIntroduction(db, input.id);
     revalidatePath('/review/in-depth');
     return Response.json(
-      { introduction, saved: true },
+      {
+        introduction,
+        saved: true,
+        ...(manual ? { item: await getInDepthReviewItem(db, input.id) } : {}),
+      },
       { headers: { 'Cache-Control': 'no-store' } },
     );
   } catch (error) {

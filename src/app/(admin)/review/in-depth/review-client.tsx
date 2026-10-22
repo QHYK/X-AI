@@ -1,6 +1,7 @@
 'use client';
 
 import { IntroductionEditor } from './introduction-editor.js';
+import { ManualCandidateForm, SavedArticleContent } from './manual-candidate-form.js';
 
 import { resolveDiscoveryPublication, discoveryEvidenceMetadata } from '@/lib/discovery-source.js';
 import { useRef, useState } from 'react';
@@ -100,6 +101,20 @@ export function InDepthReviewClient(props: {
 
   return (
     <section className={styles.inDepthSection}>
+      <ManualCandidateForm
+        apiUrl={apiUrl}
+        disabled={saving}
+        onCreated={(item) => {
+          selectionRequest.current++;
+          selectedId.current = item.id;
+          setSelected(item);
+          setNotes(item.editorialNotes ?? '');
+          setError(null);
+          setMessage(null);
+          if (item.reviewStatus === props.status)
+            setItems((current) => [item, ...current.filter((entry) => entry.id !== item.id)]);
+        }}
+      />
       <nav
         className={styles.inDepthFilters}
         aria-label="In-depth review status"
@@ -152,7 +167,7 @@ export function InDepthReviewClient(props: {
                 <small>
                   {capitalize(item.reviewStatus)} · {item.estimatedDurationMinutes ?? '—'} min
                 </small>
-                <small>Run {item.runId}</small>
+                <small>{item.runId ? `Run ${item.runId}` : 'Manual · No Discovery Run'}</small>
               </button>
             );
           })}
@@ -197,14 +212,20 @@ export function InDepthReviewClient(props: {
                   <dt>Discovery Path</dt>
                   <dd>{capitalize(selected.discoveryPath)}</dd>
                   <dt>Processing Stage</dt>
-                  <dd>{{ direct: 'D4', topic: 'D3', open: 'D5' }[selected.discoveryPath]}</dd>
+                  <dd>
+                    {
+                      { direct: 'D4', topic: 'D3', open: 'D5', manual: 'Manual' }[
+                        selected.discoveryPath
+                      ]
+                    }
+                  </dd>
                   <dt>Candidate ID</dt>
                   <dd>
                     <code>{selected.candidateId}</code>
                   </dd>
                   <dt>Run ID</dt>
                   <dd>
-                    <code>{selected.runId}</code>
+                    <code>{selected.runId ?? 'N/A · Manual'}</code>
                   </dd>
                   <dt>Original URL</dt>
                   <dd>
@@ -317,6 +338,19 @@ export function InDepthReviewClient(props: {
                 key={selected.id}
                 id={selected.id}
                 overrides={selected.editorialOverrides}
+                apiUrl={apiUrl}
+                manual={selected.discoveryPath === 'manual'}
+                onGenerated={(item) => {
+                  if (selectedId.current !== item.id) return;
+                  setSelected(item);
+                  setItems((current) =>
+                    current.map((entry) => (entry.id === item.id ? item : entry)),
+                  );
+                }}
+              />
+              <SavedArticleContent
+                key={`content:${selected.id}`}
+                id={selected.id}
                 apiUrl={apiUrl}
               />
               <div className={styles.inDepthActions}>

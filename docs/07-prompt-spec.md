@@ -292,6 +292,10 @@ Do not manufacture significance. Straightforward Events whose significance is al
 - This is generated only after an explicit Read More request. It is not part of Stage 1–4, is not pre-generated, and a validated result is persisted for later requests.
 ---
 
+## Manual In-depth Generate
+
+人工候选共用 In-depth Editorial Introduction 的写作指令、D4 的共享编辑标准和 Discovery Tags 指令，另加人工任务说明，不复制完整 Prompt。只接收实际保存的完整正文、Original URL 和可靠元数据；不搜索、不运行 D4 入选判断，不生成时长或作者。一次 Structured Output 返回五个字段：`title_zh`、`summary`、`whyWorthReading`、`extra_info` 均为字符串，`tags` 为最多三对双语标签。`summary`、`whyWorthReading`、`extra_info` 使用中文 Markdown，标题忠实翻译；Tags 复用现有应用层校验和去重。人工已有 Tags 保留。正文不足返回明确失败，不保存貌似完整的介绍；模型输出不包含审核状态或 Notes。运行 Prompt 位于 `src/prompts/manual-in-depth.ts`。
+
 ## In-depth Editorial Introduction
 
 Runtime Prompt：`src/prompts/in-depth-introduction.ts`，版本 `v2`，独立于 Daily 长文摘要 Prompt。沿用下方 D0 每周长文推荐的内容研究标准，应用先取得选定作品的原文，模型不进行开放搜索或发现新候选。

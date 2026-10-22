@@ -54,6 +54,12 @@ X-AI-field 是一个面向主动学习者的 **AI Editor（AI 编辑）与优质
 优先推荐文章、视频和播客，目标阅读、观看或收听时长原则上不超过 30 分钟；不为凑数降低标准。
 In-depth Reads 经人工审核后展示：`approved` 即上架，`pending` 与 `rejected` 不向读者展示。审核者可以生成、编辑和保存「讲了什么」「为什么值得用心阅读」「其他具体评估」三段 Editorial 内容。展示与存储规则见 `04-technical-spec.md` §7.3 和 `05-data-model.md` §11.4。
 
+#### 人工添加候选（Phase B1）
+
+编辑人员可提交原始 URL 和最多三组可选双语 Tags。先查找相同作品的现有审核候选：命中时展示完整已有记录，不新增、不改状态、不覆盖 Tags 或介绍、不自动生成。未命中时优先复用已有元数据与完整正文；必要时只抓取该 URL，成功后创建 manual / pending 候选。正文无法获取或不完整时明确失败，不创建无正文的候选。
+
+Generate 由编辑人员另行触发，基于已保存正文生成中文标题、内容概要、推荐理由、补充评价及适用 Tags；不做 D4 的入选判断，不改变审核状态。完整生成结果默认直接复用，Regenerate 必须显式请求。人工 Tags 优先保留。三段介绍仍可人工编辑保存，Approve / Reject 与 Notes 独立；只有 Approved 才公开。本功能不恢复标题、作者人工编辑。技术与数据边界见 `04a` §6.4、`05` §11，Prompt 契约见 `07` 的 Manual In-depth Generate。
+
 ## 5. Design Principles
 
 - **Quality over quantity**
