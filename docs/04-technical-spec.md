@@ -308,7 +308,7 @@ Dashboard 不是 Production Source of Truth。它读取 Production 数据与 Run
 
 查看指定日期的 Daily Job 运行情况与各 Processing Step 的结果，用于判断该次运行是否正常完成以及定位问题。
 
-`/dashboard` 的 Discovery Run Card 以当前 Dashboard 选中的业务日期匹配 `discovery_runs.window_end_date = selectedDate`（PostgreSQL `date` 直接比较，不作时区转换），不按服务器当天或启动日期过滤。该日期所有状态的 Run 均计入总次数；详细展示实际 `started_at` 最新的一次（NULL 排最后，同时间按 ID 降序），没有 Run 时隐藏。读取 `discovery_runs.execution_state` 和关联 Candidate / 审核记录显示真实状态、耗时与数量，历史缺失指标显示未知，不从 Trace 或候选反推阶段成功；完整 Retry 位于 Discovery 区域标题旁，独立 Retry Open 位于 D5 卡片；即使该日期没有 Run，仍可提交完整 Retry。按钮展示窗口 / 阶段及付费确认，Admin API 迅速返回任务 ID 并轮询状态；执行方式见 `04a-discovery-technical-spec.md` §7.1。CLI Resume 保留。缓存 Token 与命中率汇总实际阶段 Usage，缺失值显示 `—`；Selected 统计定义见 `05-data-model.md` §11.1。
+`/dashboard` 的 Discovery Run Card 以当前 Dashboard 选中的业务日期匹配 `discovery_runs.window_end_date = selectedDate`（PostgreSQL `date` 直接比较，不作时区转换），不按服务器当天或启动日期过滤。汇总信息（包括运行次数、整体状态、Candidates、审核数量和缓存指标）及 D2–D4 仅取该日期的 Regular Run：不筛选状态，展示 `started_at` 最新的一次（NULL 排最后，同时间按 ID 降序），明确标记 Regular Run。D5 独立取该日期实际执行记录最新的一次，可来自 Regular 或 Open Run，并展示所属 Run ID / 类型；按阶段 `completedAt` 排序，正在运行或历史缺少完成时间时使用 Run 的 `updated_at`（阶段状态写入时更新），再回退 `started_at`，同时间按 ID 降序。不将 Open Run 指标并入 Regular 汇总。只有 Open Run 时汇总及 D2–D4 显示 N/A，D5 正常显示；既无 Regular Run 也无 D5 执行记录时隐藏。读取 `discovery_runs.execution_state` 和关联 Candidate / 审核记录显示真实状态、耗时与数量，历史缺失指标显示未知，不从 Trace 或候选反推阶段成功；完整 Retry 位于 Discovery 区域标题旁，独立 Retry Open 位于 D5 卡片；即使该日期没有 Run，仍可提交完整 Retry。按钮展示窗口 / 阶段及付费确认，Admin API 迅速返回任务 ID 并轮询状态；执行方式见 `04a-discovery-technical-spec.md` §7.1。CLI Resume 保留。缓存 Token 与命中率汇总实际阶段 Usage，缺失值显示 `—`；Selected 统计定义见 `05-data-model.md` §11.1。
 
 ### 7.3 Human Review
 

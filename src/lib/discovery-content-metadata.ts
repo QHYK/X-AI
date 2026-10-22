@@ -7,7 +7,8 @@ export const DiscoveryTagSchema = z
       .trim()
       .min(1)
       .max(80)
-      .regex(/\p{Script=Han}/u, 'Chinese tag must include Chinese text.'),
+      // Keep Unicode validation at runtime; providers reject this JSON Schema pattern.
+      .refine((value) => /\p{Script=Han}/u.test(value), 'Chinese tag must include Chinese text.'),
     en: z
       .string()
       .trim()

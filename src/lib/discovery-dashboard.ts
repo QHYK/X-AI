@@ -46,8 +46,58 @@ export type DiscoveryDashboardRun = {
   stages: Partial<Record<DiscoveryStage, Partial<DiscoveryBranchExecutionState>>>;
 };
 
-/** Business date belongs to the input window; timestamps only order attempts and show timing. */
+export type DiscoveryDashboard = {
+  regularRun: DiscoveryDashboardRun | null;
+  d5: {
+    runId: string;
+    runType: string;
+    executedAt: string | null;
+    state: Partial<DiscoveryBranchExecutionState>;
+  } | null;
+};
+
+/** Keep Regular summaries separate from independently retried D5 executions. */
 export async function getDiscoveryRunForDate(
+  db: Pick<Pool, 'query'>,
+  selectedDate: string,
+  now = new Date(),
+): Promise<DiscoveryDashboard | null> {
+  if (!parseBriefDate(selectedDate)) throw new Error('Invalid Dashboard date.');
+  const [regularRun, result] = await Promise.all([
+    getLatestRegularRun(db, selectedDate, now),
+    db.query<{
+      id: string;
+      run_type: string;
+      d5: Partial<DiscoveryBranchExecutionState>;
+      executed_at: Date | string | null;
+    }>(
+      `select id, run_type, execution_state->'d5' as d5,
+              coalesce((execution_state->'d5'->>'completedAt')::timestamptz,
+                       updated_at, started_at) as executed_at
+         from discovery_runs
+        where window_end_date = $1::date
+          and execution_state->'d5'->>'status' in ('running', 'completed', 'failed')
+        order by executed_at desc nulls last, id desc limit 1`,
+      [selectedDate],
+    ),
+  ]);
+  const row = result.rows[0];
+  if (!regularRun && !row) return null;
+  return {
+    regularRun,
+    d5: row
+      ? {
+          runId: row.id,
+          runType: row.run_type,
+          executedAt: row.executed_at ? new Date(row.executed_at).toISOString() : null,
+          state: row.d5,
+        }
+      : null,
+  };
+}
+
+/** Business date belongs to the input window; timestamps only order attempts and show timing. */
+async function getLatestRegularRun(
   db: Pick<Pool, 'query'>,
   selectedDate: string,
   now = new Date(),
@@ -68,7 +118,7 @@ export async function getDiscoveryRunForDate(
   }>(
     `with date_runs as (
        select *, count(*) over () as run_count from discovery_runs
-       where window_end_date = $1::date
+       where window_end_date = $1::date and run_type = 'regular'
      )
      select r.id, r.run_type, r.status, r.end_reason, r.error_summary, r.started_at, r.finished_at,
             r.execution_state, r.run_count,

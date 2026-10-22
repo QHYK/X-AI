@@ -4,7 +4,7 @@
  * 作为 Server Component 加载数据库业务统计，以及 DB-first 的 Stage execution summary；日期详情不会改变顶部最近七期数据。
  */
 import { getDatabasePool } from '@/db/index.js';
-import { getDiscoveryRunForDate, type DiscoveryDashboardRun } from '@/lib/discovery-dashboard.js';
+import { getDiscoveryRunForDate, type DiscoveryDashboard } from '@/lib/discovery-dashboard.js';
 import {
   discoveryRunCacheMetrics,
   getDiscoveryActiveRunForDate,
@@ -263,11 +263,12 @@ function DiscoveryRunCard({
   date,
   active,
 }: {
-  run: DiscoveryDashboardRun;
+  run: DiscoveryDashboard;
   date: string;
   active: { id: string; status: string; errorSummary: string | null } | null;
 }) {
-  const cache = discoveryRunCacheMetrics(run.runType, run.stages);
+  const regular = run.regularRun;
+  const cache = regular ? discoveryRunCacheMetrics('regular', regular.stages) : null;
   const time = (value: string | null) =>
     value
       ? new Intl.DateTimeFormat('zh-CN', {
@@ -290,57 +291,60 @@ function DiscoveryRunCard({
           <p className={styles.kicker}>Discovery · Selected business date</p>
           <h2>Latest Discovery Run</h2>
           <p className={styles.subtitle}>
-            所选业务日期共 {run.runCount} 次运行，展示最新启动的一次（{run.runType}）。
+            {regular
+              ? `所选业务日期共 ${regular.runCount} 次 Regular Run，汇总及 D2–D4 展示最新 Regular Run。`
+              : '所选业务日期没有 Regular Run，汇总及 D2–D4 为 N/A。'}
+            D5 独立展示最近执行的一次。
           </p>
         </div>
-        <StatusBadge status={run.status} />
+        <StatusBadge status={regular?.status ?? null} />
       </div>
-      {run.errorSummary ? <p role="alert">{run.errorSummary}</p> : null}
+      {regular?.errorSummary ? <p role="alert">{regular.errorSummary}</p> : null}
       <div className={styles.stageGrid}>
         <article className={`${styles.stageCard} ${styles.discoverySummary}`}>
           <dl className={styles.metricList}>
             <Metric
-              label="Run ID"
-              value={run.id}
+              label="Regular Run ID"
+              value={regular?.id ?? 'N/A'}
             />
             <Metric
               label="Started · Shanghai"
-              value={time(run.startedAt)}
+              value={time(regular?.startedAt ?? null)}
             />
             <Metric
               label="Finished · Shanghai"
-              value={time(run.finishedAt)}
+              value={time(regular?.finishedAt ?? null)}
             />
             <Metric
               label="Duration"
-              value={formatDuration(run.durationMs)}
+              value={formatDuration(regular?.durationMs)}
             />
             <Metric
               label="End reason"
-              value={run.endReason ?? 'N/A'}
+              value={regular?.endReason ?? 'N/A'}
             />
             <Metric
               label="Candidates"
-              value={formatNumber(run.candidateCount)}
+              value={regular ? formatNumber(regular.candidateCount) : 'N/A'}
             />
             <Metric
               label="Selected Articles · submitted for review"
-              value={formatNumber(run.reviewCount)}
+              value={regular ? formatNumber(regular.reviewCount) : 'N/A'}
             />
             <Metric
               label="Cached input tokens"
-              value={cache.cachedInputTokens === null ? '—' : formatNumber(cache.cachedInputTokens)}
+              value={cache?.cachedInputTokens == null ? '—' : formatNumber(cache.cachedInputTokens)}
             />
             <Metric
               label="Cache hit rate"
               value={
-                cache.cacheHitRate === null ? '—' : `${(cache.cacheHitRate * 100).toFixed(1)}%`
+                cache?.cacheHitRate == null ? '—' : `${(cache.cacheHitRate * 100).toFixed(1)}%`
               }
             />
           </dl>
         </article>
         {(['d2', 'd3', 'd4', 'd5'] as const).map((stage) => {
-          const state = run.stages[stage];
+          const state = stage === 'd5' ? run.d5?.state : regular?.stages[stage];
           return (
             <article
               key={stage}
@@ -359,6 +363,18 @@ function DiscoveryRunCard({
                 />
               ) : null}
               <dl className={styles.metricList}>
+                {stage === 'd5' && run.d5 ? (
+                  <>
+                    <Metric
+                      label={run.d5.runType === 'open' ? 'Open Run ID' : 'Regular Run ID'}
+                      value={run.d5.runId}
+                    />
+                    <Metric
+                      label="Executed · Shanghai"
+                      value={time(run.d5.executedAt)}
+                    />
+                  </>
+                ) : null}
                 <Metric
                   label="Model"
                   value={state?.model ?? 'N/A'}

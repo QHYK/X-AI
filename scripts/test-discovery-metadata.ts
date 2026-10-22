@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { z } from 'zod';
 import {
   DiscoveryTagsSchema,
   readDiscoveryContentMetadata,
@@ -36,8 +35,26 @@ for (const tags of [
   assert.equal(DiscoveryTagsSchema.safeParse(tags).success, false);
 }
 // The schemas delivered to Agents must remain convertible to strict Structured Output.
-assert.ok(z.toJSONSchema(DiscoveryD3OutputSchema));
-assert.ok(z.toJSONSchema(DiscoveryD5OutputSchema));
+// Exercise the Agents SDK's actual serializer used immediately before model requests.
+const { convertAgentOutputTypeToSerializable } = await import(
+  new URL('./utils/tools.mjs', import.meta.resolve('@openai/agents-core')).href
+);
+for (const schema of [DiscoveryD3OutputSchema, DiscoveryD5OutputSchema]) {
+  const transport = convertAgentOutputTypeToSerializable(schema);
+  assert.doesNotMatch(JSON.stringify(transport), /\\[pP]\{/);
+  const json = JSON.parse(JSON.stringify(transport.schema));
+  assert.equal(json.properties.candidates.maxItems, 3);
+  const tags = json.properties.candidates.items.properties.tags;
+  assert.equal(tags.maxItems, 3);
+  assert.deepEqual(tags.items.required, ['zh', 'en']);
+  assert.equal(tags.items.additionalProperties, false);
+  assert.equal(tags.items.properties.zh.minLength, 1);
+  assert.equal(tags.items.properties.zh.maxLength, 80);
+  assert.equal(tags.items.properties.zh.pattern, undefined);
+  assert.equal(tags.items.properties.en.minLength, 1);
+  assert.equal(tags.items.properties.en.maxLength, 120);
+  assert.ok(tags.items.properties.en.pattern);
+}
 const work = {
   url: 'https://example.test/work',
   title: 'Work',
@@ -55,6 +72,11 @@ const work = {
   tags: [tag],
 };
 assert.deepEqual(validateDiscoveryD5Output({ candidates: [work] })[0]?.tags, [tag]);
+assert.throws(() =>
+  validateDiscoveryD5Output({
+    candidates: [{ ...work, tags: [{ zh: 'Science', en: 'Science' }] }],
+  }),
+);
 const topicWork = Object.fromEntries(Object.entries(work).filter(([key]) => key !== 'publication'));
 const lead = {
   leadId: 'lead-1',
@@ -69,6 +91,16 @@ assert.deepEqual(
     lead,
   ])[0]?.tags,
   [tag],
+);
+assert.throws(() =>
+  validateDiscoveryD3Output(
+    {
+      candidates: [
+        { ...topicWork, sourceLeadId: lead.leadId, tags: [{ zh: 'Science', en: 'Science' }] },
+      ],
+    },
+    [lead],
+  ),
 );
 const evaluation = {
   candidateId: 'candidate',
