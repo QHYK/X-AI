@@ -78,6 +78,8 @@ Gmail Message ID
 }
 ```
 
+`raw_articles.metadata.put_back_preparation` 保存小型、经 Schema 校验的恢复准备结果（dailyDate、fields、ignoreType），不是新的 Pipeline 状态；独立于最终恢复事务提交，最终写入失败时可复用已付费生成结果。成功恢复保留该来源记录。准备缓存本身保存失败时返回生成字段并明确报错，不声称已经恢复；不保存重复正文。
+
 #### stage1_status
 建议值：
 ```text
@@ -90,7 +92,7 @@ failed
 
 ## 3 `processed_contents`
 
-保存 Stage 1 保留内容：(Ignore 内容不入此表)
+保存 Stage 1 保留内容，以及人工 Put Back 恢复的 Digest；自动 Ignore 不创建此表记录。
 
 ```text
 id, raw_article_id, daily_date, routing, category,
@@ -116,6 +118,7 @@ created_at, updated_at
 | `event_id`       | uuid        | nullable, FK → `events.id`；仅兼容 convenience backlink |
 | `ai_rank`        | integer     | nullable                       |
 | `display_rank`   | integer     | nullable                       |
+| `put_back_at`    | timestamptz | nullable；人工追加时间；Stage3 排名 / 过期清理后清空，不作为永久恢复历史 |
 | `created_at`     | timestamptz | NOT NULL                       |
 | `updated_at`     | timestamptz | NOT NULL                       |
 
@@ -128,6 +131,8 @@ event | digest | long_form | inspiration
 `daily_date` 表示该内容首次进入 Production Workflow 时所属的 Daily attribution date；具体归属与 late-arrival 规则见 `06-processing-workflow.md`。
 
 `ai_rank` 保存 AI 排序；`display_rank` 是页面最终顺序。人工调整只改 `display_rank`。
+
+Put Back 保持 `raw_article_id` 唯一约束；在同一事务中创建 / 更新原处理记录并将 Raw 标记 selected，不创建新的 Raw 或修改原 Source / URL。已有其他 Daily attribution 或已关联 Event 的非 Digest 记录不得被静默迁移 / 解绑。恢复时 `routing = digest`、`ai_rank = NULL`；后续 Stage3 清空追加标记并更新排名，原恢复准备记录保留在 Raw metadata。排名维护规则见 `06-processing-workflow.md` 的 Put Back。
 
 ### `content_read_more`
 

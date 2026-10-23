@@ -2,6 +2,10 @@
 
 本文档定义 Application 与 LLM 的接口合同。Runtime Prompt 应与本文件保持一致；修改 Runtime Prompt 或 Structured Output Contract 时，应同步更新本文件。
 
+## Ignored Article Put Back
+
+Runtime Prompt 位于 `src/prompts/digest-put-back.ts`。这是独立的展示字段补齐任务，不使用 Stage1 的保留 / 路由判断指令。输入为已存原文 / 摘要、原标题、原 URL、来源及原分类；不搜索、不抓取、不执行 Event Merge 或 Ranking。输出严格包含 `category`（既有 Digest 分类）、`title_zh`、`summary`（英文）、`summary_zh`（中文）和最多 `MAX_STAGE1_TAGS` 个字符串 Tags；复用 Stage1 的分类枚举和标签上限。不得输出 Ignore / keep / routing 判断，不编造正文没有提供的内容。中文字段在模型返回后校验；正文不足返回明确失败，不持久化伪完整摘要。Provider / Model 复用 Stage1 配置，单次请求不自动重试。
+
 ## Stage 1 — Content Understanding & Selection
 
 **Goal:** Understand each article and decide whether it should be included in today's Daily Brief.

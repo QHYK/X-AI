@@ -312,6 +312,8 @@ Dashboard 不是 Production Source of Truth。它读取 Production 数据与 Run
 
 ### 7.3 Human Review
 
+Analytics 的 Ignored Articles 提供 Put Back，调用 `POST /api/admin/dashboard/analytics/ignored-articles/put-back`，复用 Admin Session / 同源保护。列表同时保留尚未被 Stage3 重排的恢复记录，以便刷新后确认结果；统计继续按实际 Raw 状态计数。交互与错误状态在原列表内完成，不另建编辑页面。业务规则见 `06-processing-workflow.md` 的 Put Back，生成契约见 `07-prompt-spec.md`。
+
 提供人工 Review 界面：
 - Review Event Ranking；
 - Review Long-form Ranking；

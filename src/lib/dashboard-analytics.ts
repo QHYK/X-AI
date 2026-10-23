@@ -25,6 +25,9 @@ export type IgnoredArticle = {
   sourceName: string;
   url: string | null;
   ignoreType: "AI Ignored" | "Duplicate";
+  putBackAt?: string | null;
+  inDigest?: boolean;
+  dailyDate?: string | null;
 };
 
 type CountRow = {
@@ -118,17 +121,22 @@ export async function loadIgnoredArticles(
   const offset = (page - 1) * pageSize;
   const result = await pool.query<IgnoredArticle & { total_count: number | string }>(`
     select ra.id, ra.title, s.name as "sourceName", ra.url,
-      case when ra.processing_error = 'duplicate' then 'Duplicate' else 'AI Ignored' end as "ignoreType",
+      coalesce(ra.metadata->'put_back_preparation'->>'ignoreType',
+        case when ra.processing_error = 'duplicate' then 'Duplicate' else 'AI Ignored' end) as "ignoreType",
+      pc.put_back_at::text as "putBackAt", pc.daily_date::text as "dailyDate",
+      coalesce(pc.routing = 'digest' and coalesce(pc.display_rank, pc.ai_rank) is not null, false) as "inDigest",
       count(*) over()::int as total_count
     from raw_articles ra join sources s on s.id = ra.source_id
+    left join processed_contents pc on pc.raw_article_id = ra.id
     where ra.source_id = $1::uuid
       and ra.published_at >= $2::timestamptz and ra.published_at < $3::timestamptz
-      and ra.stage1_status = 'ignored'
+      and (ra.stage1_status = 'ignored' or pc.put_back_at is not null)
     order by ra.stage1_processed_at desc nulls last, ra.id
     limit $4 offset $5
   `, [sourceId, scope.startAt, scope.endAt, pageSize, offset]);
   return {
-    items: result.rows.map((row) => ({ id: row.id, title: row.title, sourceName: row.sourceName, url: row.url, ignoreType: row.ignoreType })),
+    items: result.rows.map((row) => ({ id: row.id, title: row.title, sourceName: row.sourceName, url: row.url, ignoreType: row.ignoreType,
+      ...(row.putBackAt !== undefined ? { putBackAt: row.putBackAt, inDigest: row.inDigest, dailyDate: row.dailyDate } : {}) })),
     total: Number(result.rows[0]?.total_count ?? 0),
   };
 }

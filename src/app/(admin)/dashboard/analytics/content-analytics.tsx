@@ -9,6 +9,7 @@ import type {
 } from '@/lib/dashboard-analytics.js';
 import { sortSourceRows } from '@/lib/source-analytics-sort.js';
 import styles from '../dashboard.module.css';
+import { PutBackButton } from './put-back-button.js';
 
 type Range = '7' | '30' | 'custom';
 type SortDirection = 'ascending' | 'descending';
@@ -351,13 +352,17 @@ function SourceDetail({
       {date ? (
         <div className={styles.analyticsIgnored}>
           <h3>Ignored articles · {date}</h3>
+          <p>
+            Put Back 恢复到所属 Daily 的 Digest
+            分类末尾；必要时调用一次模型。已恢复记录保留状态标记。
+          </p>
           {articles.length === 0 ? (
             <p className={styles.empty}>No ignored articles.</p>
           ) : (
             <ul>
               {articles.map((item) => (
                 <li key={item.id}>
-                  <strong>{item.ignoreType}</strong>
+                  <strong>{item.putBackAt ? 'Restored' : item.ignoreType}</strong>
                   <span>
                     {item.title}
                     <small>{item.sourceName}</small>
@@ -371,6 +376,26 @@ function SourceDetail({
                       Open
                     </a>
                   ) : null}
+                  <PutBackButton
+                    key={`${item.id}:${item.dailyDate ?? date}`}
+                    id={item.id}
+                    date={item.dailyDate ?? date}
+                    inDigest={item.inDigest || Boolean(item.putBackAt)}
+                    onRestored={(restored) =>
+                      setArticles((current) =>
+                        current.map((row) =>
+                          row.id === item.id
+                            ? {
+                                ...row,
+                                inDigest: true,
+                                putBackAt: restored.putBackAt,
+                                dailyDate: restored.dailyDate,
+                              }
+                            : row,
+                        ),
+                      )
+                    }
+                  />
                 </li>
               ))}
             </ul>

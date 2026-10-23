@@ -2,9 +2,10 @@
  * Stage 3 排名写入规则。
  * AI rank 可更新，而人工改写过的 display rank 必须保留，避免 workflow 覆盖人工排序。
  */
-import type { Pool, PoolClient } from "pg";
+import type { Pool, PoolClient } from 'pg';
+import { lockDigestOrder } from '../lib/digest-order.js';
 
-type Queryable = Pick<Pool | PoolClient, "query">;
+type Queryable = Pick<Pool | PoolClient, 'query'>;
 
 export type RankingPersistenceUpdate = {
   processedContentId: string;
@@ -59,6 +60,7 @@ export async function persistStage3Ranks(
 ): Promise<Stage3PersistenceResult> {
   let rankedUpdated = 0;
   let staleCleared = 0;
+  await lockDigestOrder(client);
 
   for (const update of plan.ranked) {
     const result = await client.query(
@@ -67,10 +69,12 @@ export async function persistStage3Ranks(
         set
           ai_rank = $2,
           display_rank = case
+            when put_back_at is not null and ai_rank is null then $2
             when display_rank is null then $2
             when ai_rank is not null and display_rank = ai_rank then $2
             else display_rank
           end,
+          put_back_at = null,
           updated_at = now()
         where id = $1::uuid
       `,
@@ -86,10 +90,12 @@ export async function persistStage3Ranks(
         set
           ai_rank = null,
           display_rank = case
+            when put_back_at is not null and ai_rank is null then null
             when display_rank is null then null
             when ai_rank is not null and display_rank = ai_rank then null
             else display_rank
           end,
+          put_back_at = null,
           updated_at = now()
         where id = any($1::uuid[])
       `,

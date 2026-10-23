@@ -691,3 +691,9 @@
     width: 100%;
   }
 }
+
+.analyticsPutBack {
+  grid-column: 2 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

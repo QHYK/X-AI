@@ -240,6 +240,7 @@ export const processedContents = pgTable(
     eventId: uuid('event_id').references(() => events.id),
     aiRank: integer('ai_rank'),
     displayRank: integer('display_rank'),
+    putBackAt: timestamp('put_back_at', { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
@@ -251,6 +252,10 @@ export const processedContents = pgTable(
     check(
       'processed_contents_routing_check',
       sql`${table.routing} in ('event', 'digest', 'long_form', 'inspiration')`,
+    ),
+    check(
+      'processed_contents_put_back_check',
+      sql`${table.putBackAt} is null or (${table.routing} = 'digest' and ${table.aiRank} is null and ${table.displayRank} is not null)`,
     ),
   ],
 );

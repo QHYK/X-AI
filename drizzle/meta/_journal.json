@@ -141,6 +141,13 @@
       "when": 1792670400000,
       "tag": "0019_manual_in_depth",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792674000000,
+      "tag": "0020_digest_put_back",
+      "breakpoints": true
     }
   ]
 }

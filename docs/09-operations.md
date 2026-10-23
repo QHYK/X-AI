@@ -223,6 +223,8 @@ Stage 1 的逻辑 Batch 1–15 使用已有 Codex 配置；Codex retry 耗尽后
 
 ## 6. Regression Tests
 
+Ignored Article Put Back 需要先通过 `npm run db:migrate` 应用 `0020_digest_put_back.sql`，再部署新代码并按现有流程重启服务；不回填历史记录，不运行 Daily Pipeline。无新增依赖或环境变量。接口复用管理员 Session / 同源校验，模型使用现有 Stage1 Provider / Model 配置，单次请求无自动重试；不会调用 Firecrawl。回归入口：`npm run test:digest-put-back`、`npm run test:digest-put-back-ui`，均使用 Mock，不连接真实数据库或付费服务。业务与字段定义见 `06-processing-workflow.md` §6.4.1、`05-data-model.md` §3。
+
 Regression tests validate stable correctness contracts; they are not Production pipeline commands. The complete executable inventory is `package.json`'s `scripts`, which is the source of truth.
 
 Representative long-lived checks:

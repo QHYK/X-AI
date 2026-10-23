@@ -93,7 +93,9 @@
     "discovery:scheduled": "tsx scripts/run-discovery-scheduled.ts",
     "test:discovery-scheduled": "tsx scripts/test-discovery-scheduled.ts",
     "test:manual-in-depth": "tsx scripts/test-manual-in-depth.ts",
-    "test:manual-in-depth-ui": "tsx scripts/test-manual-in-depth-ui.ts"
+    "test:manual-in-depth-ui": "tsx scripts/test-manual-in-depth-ui.ts",
+    "test:digest-put-back": "tsx scripts/test-digest-put-back.ts",
+    "test:digest-put-back-ui": "tsx scripts/test-digest-put-back-ui.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -133,6 +133,7 @@ try {
     ['review/long-form/ranking', ['PATCH']],
     ['review/in-depth', ['GET', 'PATCH', 'POST']],
     ['review/in-depth/manual', ['GET', 'POST']],
+    ['dashboard/analytics/ignored-articles/put-back', ['POST']],
     ['evaluation', ['GET']],
     ['evaluation/run', ['POST']],
     ['evaluation/cancel', ['POST']],
