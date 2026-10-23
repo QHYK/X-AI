@@ -2,9 +2,12 @@
 
 本文档定义 Application 与 LLM 的接口合同。Runtime Prompt 应与本文件保持一致；修改 Runtime Prompt 或 Structured Output Contract 时，应同步更新本文件。
 
-## Prompt Registry 与生产加载契约（B3.1 / B3.2）
+## Prompt Registry 与生产加载契约（B3.1–B3.4）
 
-**Implemented**：`src/lib/prompts/contracts.ts` 定义 15 个正式 Request key 与 3 个 Shared Fragment key；导入器 `production-seeds.ts` 从现有静态 builder 获取基线，保留文本、空行、原版本标签和 Git 来源。Stage4 External Context Decision 无旧标签，其原字面量文本原样保留在 `src/prompts/stage4-context-decision.ts` 作为导入基线。历史 Repair、D0、Spike、测试 Prompt 不注册。
+**Implemented（B3.4）**：`src/lib/prompts/contracts.ts` 定义 15 个正式 Request key 与 3 个 Shared Fragment key。`production-seeds.ts` 只读取冻结的 `seed-baseline.json` 用于新环境初始化；保留原文本、空行、版本编号、稳定 ID、条件变体与精确 Fragment 引用，不参与生产 Runtime。Seed 记录捕获时的 Git Commit，正式导入另记录已提交 Seed 的来源 Commit。历史 Repair、D0、Spike、测试 Prompt 不注册。
+
+历史请求文本独立固定在 `scripts/fixtures/legacy-prompt-baseline.json`，仅由测试 helper `legacy-prompts.ts` 读取；Parity 基线不从数据库或当前 Seed 动态生成。`src/prompts/` 中的旧静态 Instructions 与无调用入口的 Digest Repair 已删除，动态输入构造与类型仍由代码管理。已有 `*_PROMPT_VERSION` 常量仅用于历史元数据标签，不是实际绑定版本或文本来源。
+
 
 数据库模板只支持 `{{input}}`、Digest 的 `{{category}}` 和 System 中的 `{{fragment.slot}}`，禁止表达式。`input` 必须由调用方沿用当前字段映射与 JSON 序列化构造，非序列化对象不进入 renderer；模板不递归解析替换值。System / User 可为空；空角色不发占位。User 未引用 input 时，渲染器将必需业务输入作为 User 内容保留，已有自定义 User 文本与输入用两个换行连接。System 不允许引用正文 input。未知 / 缺失变量、非法 Fragment、未支持的变体或 Provider/API 组合明确失败。
 
@@ -16,7 +19,7 @@
 
 ## Ignored Article Put Back
 
-静态导入基线位于 `src/prompts/digest-put-back.ts`，生产 key 为 `daily.editorial.digest_put_back`。这是独立的展示字段补齐任务，不使用 Stage1 的保留 / 路由判断指令。输入为已存原文 / 摘要、原标题、原 URL、来源及原分类；不搜索、不抓取、不执行 Event Merge 或 Ranking。输出严格包含 `category`（既有 Digest 分类）、`title_zh`、`summary`（英文）、`summary_zh`（中文）和最多 `MAX_STAGE1_TAGS` 个字符串 Tags；复用 Stage1 的分类枚举和标签上限。不得输出 Ignore / keep / routing 判断，不编造正文没有提供的内容。中文字段在模型返回后校验；正文不足返回明确失败，不持久化伪完整摘要。Provider / Model 复用 Stage1 配置，单次请求不自动重试。
+初始化基线见本节顶部 Seed 说明，生产 key 为 `daily.editorial.digest_put_back`。这是独立的展示字段补齐任务，不使用 Stage1 的保留 / 路由判断指令。输入为已存原文 / 摘要、原标题、原 URL、来源及原分类；不搜索、不抓取、不执行 Event Merge 或 Ranking。输出严格包含 `category`（既有 Digest 分类）、`title_zh`、`summary`（英文）、`summary_zh`（中文）和最多 `MAX_STAGE1_TAGS` 个字符串 Tags；复用 Stage1 的分类枚举和标签上限。不得输出 Ignore / keep / routing 判断，不编造正文没有提供的内容。中文字段在模型返回后校验；正文不足返回明确失败，不持久化伪完整摘要。Provider / Model 复用 Stage1 配置，单次请求不自动重试。
 
 ## Stage 1 — Content Understanding & Selection
 
@@ -310,11 +313,11 @@ Do not manufacture significance. Straightforward Events whose significance is al
 
 ## Manual In-depth Generate
 
-人工候选共用 In-depth Editorial Introduction 的写作指令、D4 的共享编辑标准和 Discovery Tags 指令，另加人工任务说明，不复制完整 Prompt。只接收实际保存的完整正文、Original URL 和可靠元数据；不搜索、不运行 D4 入选判断，不生成时长或作者。一次 Structured Output 返回五个字段：`title_zh`、`summary`、`whyWorthReading`、`extra_info` 均为字符串，`tags` 为最多三对双语标签。`summary`、`whyWorthReading`、`extra_info` 使用中文 Markdown，标题忠实翻译；Tags 复用现有应用层校验和去重。人工已有 Tags 保留。正文不足返回明确失败，不保存貌似完整的介绍；模型输出不包含审核状态或 Notes。静态导入基线位于 `src/prompts/manual-in-depth.ts`，生产 key 为 `in_depth.manual.generate`。
+人工候选共用 In-depth Editorial Introduction 的写作指令、D4 的共享编辑标准和 Discovery Tags 指令，另加人工任务说明，不复制完整 Prompt。只接收实际保存的完整正文、Original URL 和可靠元数据；不搜索、不运行 D4 入选判断，不生成时长或作者。一次 Structured Output 返回五个字段：`title_zh`、`summary`、`whyWorthReading`、`extra_info` 均为字符串，`tags` 为最多三对双语标签。`summary`、`whyWorthReading`、`extra_info` 使用中文 Markdown，标题忠实翻译；Tags 复用现有应用层校验和去重。人工已有 Tags 保留。正文不足返回明确失败，不保存貌似完整的介绍；模型输出不包含审核状态或 Notes。初始化基线见本节顶部 Seed 说明，生产 key 为 `in_depth.manual.generate`。
 
 ## In-depth Editorial Introduction
 
-静态导入基线：`src/prompts/in-depth-introduction.ts`（原标签 `v2`），生产 key 为 `in_depth.editorial.introduction`，独立于 Daily 长文摘要 Prompt。沿用下方 D0 每周长文推荐的内容研究标准，应用先取得选定作品的原文，模型不进行开放搜索或发现新候选。
+初始化基线见本节顶部 Seed 说明（原标签 `v2`），生产 key 为 `in_depth.editorial.introduction`，独立于 Daily 长文摘要 Prompt。沿用下方 D0 每周长文推荐的内容研究标准，应用先取得选定作品的原文，模型不进行开放搜索或发现新候选。
 
 输入必须包含 Original URL、实际读取的完整正文及可用元数据（标题、作者、来源、发布时间）；已有 Agent Summary、Evidence 和 Limitations 仅作上下文，不能替代原文。外部文本是资料而非指令，不能因收到 URL 就声明已阅读。原文读取策略由 `04-technical-spec.md` §7.3 定义。
 
@@ -373,7 +376,7 @@ Discovery 与 Daily Stage 1–4 分开执行。以下为**中文正式 Runtime P
 
 最终评价输出包含 `tags: [{ "zh": "科学方法", "en": "Scientific Method" }]`：最多 3 对，每项必须有中文名称 `zh` 和对应英文名称 `en`；允许空数组或少于 3 对。延续 Stage1 的具体主题原则，补充和细化类别，避免宽泛、重复、无意义标签，不把作品类型作为主题；证据不足时输出 `[]`。Code 验证数量与双语完整性，并按任一语言名称忽略大小写去重。Stage1 现有 `string[]` 契约保持不变，Discovery 使用配对结构避免双语错位。
 
-该要求由共享 Runtime Prompt `src/prompts/discovery-tags.ts` 注入 D3 / D4 / D5；只在各自路径的最终阅读评价中生成，不在其他阶段复制。图片 URL 不属于 Agent 输出，禁止模型猜测封面。
+该要求由数据库 Shared Fragment `shared.discovery.tags` 的精确版本引用注入 D3 / D4 / D5；只在各自路径的最终阅读评价中生成，不在其他阶段复制。图片 URL 不属于 Agent 输出，禁止模型猜测封面。
 
 ### D2. Topic Selection（普通 LLM 调用）
 

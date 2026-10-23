@@ -1,11 +1,11 @@
+import { STAGE4_CONTEXT_DECISION_INSTRUCTIONS } from './fixtures/legacy-prompts.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import ts from 'typescript';
 import { Pool, type PoolClient } from 'pg';
-import {
-  buildProductionPromptSeeds,
-  extractStage4DecisionInstructions,
-} from '../src/lib/prompts/production-seeds.js';
+import { buildProductionPromptSeeds } from '../src/lib/prompts/production-seeds.js';
 import {
   PROMPT_CONTRACTS,
   FRAGMENT_KEYS,
@@ -31,50 +31,30 @@ import {
   withFragmentVersions,
   promptContentHash,
 } from '../src/lib/prompts/registry.js';
-import {
-  buildStage1Instructions,
-  buildStage1UserPrompt,
-} from '../src/prompts/stage1-content-understanding.js';
-import {
-  buildStage2Instructions,
-  buildStage2UserPrompt,
-} from '../src/prompts/stage2-event-merge.js';
-import {
-  buildStage3EventRankingInstructions,
-  buildStage3EventRankingUserPrompt,
-} from '../src/prompts/stage3-event-ranking.js';
-import {
-  buildStage3DigestRankingInstructions,
-  buildStage3DigestRankingUserPrompt,
-} from '../src/prompts/stage3-digest-ranking.js';
-import {
-  buildStage3LongFormRankingInstructions,
-  buildStage3LongFormRankingUserPrompt,
-} from '../src/prompts/stage3-long-form-ranking.js';
-import {
-  buildStage4EventEnrichmentInstructions,
-  buildStage4EventEnrichmentUserPrompt,
-} from '../src/prompts/stage4-event-enrichment.js';
-import {
-  buildDiscoveryD2Instructions,
-  buildDiscoveryD2UserPrompt,
-} from '../src/prompts/discovery-topic-selection.js';
-import {
-  buildDiscoveryD3Instructions,
-  buildDiscoveryD3UserPrompt,
-} from '../src/prompts/discovery-topic-agent.js';
-import {
-  buildDiscoveryD4Instructions,
-  buildDiscoveryD4UserPrompt,
-} from '../src/prompts/discovery-direct-verification.js';
-import {
-  buildDiscoveryD5Instructions,
-  buildDiscoveryD5UserPrompt,
-} from '../src/prompts/discovery-open-agent.js';
-import { IN_DEPTH_INTRODUCTION_PROMPT } from '../src/prompts/in-depth-introduction.js';
-import { buildManualInDepthInstructions } from '../src/prompts/manual-in-depth.js';
-import { DIGEST_PUT_BACK_PROMPT } from '../src/prompts/digest-put-back.js';
-import { buildReadMoreInstructions, buildReadMoreUserPrompt } from '../src/prompts/read-more.js';
+import { buildStage1UserPrompt } from '../src/prompts/stage1-content-understanding.js';
+import { buildStage1Instructions } from './fixtures/legacy-prompts.js';
+import { buildStage2UserPrompt } from '../src/prompts/stage2-event-merge.js';
+import { buildStage2Instructions } from './fixtures/legacy-prompts.js';
+import { buildStage3EventRankingUserPrompt } from '../src/prompts/stage3-event-ranking.js';
+import { buildStage3EventRankingInstructions } from './fixtures/legacy-prompts.js';
+import { buildStage3DigestRankingUserPrompt } from '../src/prompts/stage3-digest-ranking.js';
+import { buildStage3DigestRankingInstructions } from './fixtures/legacy-prompts.js';
+import { buildStage3LongFormRankingUserPrompt } from '../src/prompts/stage3-long-form-ranking.js';
+import { buildStage3LongFormRankingInstructions } from './fixtures/legacy-prompts.js';
+import { buildStage4EventEnrichmentUserPrompt } from '../src/prompts/stage4-event-enrichment.js';
+import { buildStage4EventEnrichmentInstructions } from './fixtures/legacy-prompts.js';
+import { buildDiscoveryD2UserPrompt } from '../src/prompts/discovery-topic-selection.js';
+import { buildDiscoveryD2Instructions } from './fixtures/legacy-prompts.js';
+import { buildDiscoveryD3UserPrompt } from '../src/prompts/discovery-topic-agent.js';
+import { buildDiscoveryD3Instructions } from './fixtures/legacy-prompts.js';
+import { buildDiscoveryD4UserPrompt } from '../src/prompts/discovery-direct-verification.js';
+import { buildDiscoveryD4Instructions } from './fixtures/legacy-prompts.js';
+import { buildDiscoveryD5UserPrompt } from '../src/prompts/discovery-open-agent.js';
+import { buildDiscoveryD5Instructions } from './fixtures/legacy-prompts.js';
+import { IN_DEPTH_INTRODUCTION_PROMPT } from './fixtures/legacy-prompts.js';
+import { buildManualInDepthInstructions } from './fixtures/legacy-prompts.js';
+import { DIGEST_PUT_BACK_PROMPT } from './fixtures/legacy-prompts.js';
+import { buildReadMoreInstructions, buildReadMoreUserPrompt } from './fixtures/legacy-prompts.js';
 
 const seeds = await buildProductionPromptSeeds('a'.repeat(40));
 assert.equal(seeds.length, 18);
@@ -108,13 +88,13 @@ const versions = new Map(seeds.map((s) => [s.key, asVersion(s)]));
 const fragments = new Map(
   [...versions.values()].filter((v) => v.kind === 'fragment').map((v) => [v.id, v]),
 );
-const source = await readFile(new URL('../src/processing/stage4-llm.ts', import.meta.url), 'utf8');
+
 const expected: Record<string, string> = {
   'daily.stage1.content_understanding': buildStage1Instructions(),
   'daily.stage2.event_merge': buildStage2Instructions(),
   'daily.stage3.event_ranking': buildStage3EventRankingInstructions(),
   'daily.stage3.long_form_ranking': buildStage3LongFormRankingInstructions(),
-  'daily.stage4.external_context_decision': extractStage4DecisionInstructions(source),
+  'daily.stage4.external_context_decision': STAGE4_CONTEXT_DECISION_INSTRUCTIONS,
   'discovery.d2.topic_selection': buildDiscoveryD2Instructions(),
   'discovery.d3.topic_discovery': buildDiscoveryD3Instructions(),
   'discovery.d4.direct_verification': buildDiscoveryD4Instructions(),
@@ -253,12 +233,6 @@ assert.throws(() =>
   validatePromptBody(FRAGMENT_KEYS[0], 'fragment', { ...base.body, fragments: d3.body.fragments }),
 );
 assert.throws(() => withFragmentVersions(d3.body, { unknown: randomUUID() }));
-assert.throws(() =>
-  extractStage4DecisionInstructions(
-    source.replaceAll('determineWhetherExternalContextIsNeeded', 'removedDecisionFunction'),
-  ),
-);
-
 // Database seam Mock: exercise actual service queries, transaction rollback and immutable-version references.
 class Store {
   registries = new Map<
@@ -603,6 +577,65 @@ await assert.rejects(
 );
 console.log(
   'PASS management: 18 registries, history, Draft CAS, Publish/Activate/rollback, pinned fragments, Stage4 variants',
+);
+
+// Architectural regression: production dependency graphs cannot reach Seed or legacy Fixture text.
+const inspected = new Set<string>();
+async function checkRuntimeDependencies(path: string): Promise<void> {
+  const file = resolve(path);
+  if (inspected.has(file)) return;
+  inspected.add(file);
+  assert.doesNotMatch(
+    file,
+    /(?:production-seeds\.ts|seed-baseline\.json|scripts\/fixtures\/legacy-)/,
+    'Runtime must not depend on static Prompt text',
+  );
+  const source = await readFile(file, 'utf8');
+  const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  for (const statement of ast.statements) {
+    if (!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) continue;
+    if (ts.isImportDeclaration(statement) && statement.importClause?.isTypeOnly) continue;
+    if (ts.isExportDeclaration(statement) && statement.isTypeOnly) continue;
+    const specifier = statement.moduleSpecifier;
+    if (!specifier || !ts.isStringLiteral(specifier)) continue;
+    const name = specifier.text;
+    if (!name.startsWith('.') && !name.startsWith('@/')) continue;
+    const dependency = name.startsWith('@/')
+      ? resolve('src', name.slice(2))
+      : resolve(dirname(file), name);
+    if (/\.js$/.test(dependency))
+      await checkRuntimeDependencies(dependency.replace(/\.js$/, '.ts'));
+  }
+  if (file.includes('/src/prompts/')) {
+    for (const statement of ast.statements) {
+      if (ts.isFunctionDeclaration(statement))
+        assert.match(
+          statement.name?.text ?? '',
+          /UserPrompt$/,
+          'Only dynamic business input builders remain',
+        );
+    }
+  }
+}
+for (const path of [
+  'src/lib/model-evaluation.ts',
+  'src/lib/read-more.ts',
+  'src/lib/in-depth-introduction.ts',
+  'src/lib/manual-in-depth.ts',
+  'src/lib/digest-put-back.ts',
+  'src/discovery/topic-selection.ts',
+  'src/discovery/topic-discovery.ts',
+  'src/discovery/direct-verification.ts',
+  'src/discovery/open-discovery.ts',
+  'scripts/process-stage1.ts',
+  'scripts/process-stage2.ts',
+  'scripts/process-stage3.ts',
+  'scripts/process-stage4.ts',
+  'scripts/test-stage1-chat-structured.ts',
+])
+  await checkRuntimeDependencies(path);
+console.log(
+  'PASS production Prompt dependency boundary: no Seed/Fixture/static instruction builders',
 );
 
 // Optional real PostgreSQL gate: isolated schema, all DDL/data rolled back; never loads .env / production URL.

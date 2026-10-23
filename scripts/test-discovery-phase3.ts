@@ -18,7 +18,7 @@ import {
   type DiscoveryD3Runtime,
 } from '../src/discovery/topic-discovery.js';
 import type { DiscoverySelectionOutput } from '../src/discovery/topic-selection.js';
-import { buildDiscoveryD3Instructions } from '../src/prompts/discovery-topic-agent.js';
+import { buildDiscoveryD3Instructions } from './fixtures/legacy-prompts.js';
 
 const RUN_ID = '00000000-0000-4000-8000-000000000301';
 

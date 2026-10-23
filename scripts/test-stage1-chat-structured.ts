@@ -1,21 +1,19 @@
-import { config } from "dotenv";
-import OpenAI from "openai";
-import { Pool } from "pg";
+import { config } from 'dotenv';
+import OpenAI from 'openai';
+import { Pool } from 'pg';
 import {
   buildStage1BatchInput,
   parseAndValidateStage1BatchOutput,
   stage1BatchOutputJsonSchema,
   validateStage1Assignments,
   type Stage1ArticleRow,
-} from "../src/processing/stage1-contract.js";
-import {
-  buildStage1Instructions,
-  buildStage1UserPrompt,
-} from "../src/prompts/stage1-content-understanding.js";
-import { resolveLlmConfig } from "../src/processing/llm-client.js";
+} from '../src/processing/stage1-contract.js';
+import { buildStage1UserPrompt } from '../src/prompts/stage1-content-understanding.js';
+import { productionPrompt, withPromptBindings } from '../src/lib/prompts/runtime.js';
+import { resolveLlmConfig } from '../src/processing/llm-client.js';
 
-config({ path: ".env" });
-config({ path: ".env.local", override: true });
+config({ path: '.env' });
+config({ path: '.env.local', override: true });
 
 const RUN_COUNT = 3;
 const ARTICLE_LIMIT = 2;
@@ -23,44 +21,54 @@ const ARTICLE_LIMIT = 2;
 async function main() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
-    throw new Error("DATABASE_URL is required for the Stage 1 Chat smoke test.");
+    throw new Error('DATABASE_URL is required for the Stage 1 Chat smoke test.');
   }
 
   const pool = new Pool({
     connectionString: databaseUrl,
-    ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : undefined,
+    ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
   });
-  const llm = resolveLlmConfig({ provider: "openai" });
+  const llm = resolveLlmConfig({ provider: 'openai' });
   const client = new OpenAI({ apiKey: llm.apiKey, baseURL: llm.baseUrl, maxRetries: 0 });
 
   try {
     const articles = await loadRecentArticles(pool);
     if (articles.length === 0) {
-      throw new Error("No raw articles with content were available for the Stage 1 Chat smoke test.");
+      throw new Error(
+        'No raw articles with content were available for the Stage 1 Chat smoke test.',
+      );
     }
 
     const input = buildStage1BatchInput(articles);
+    const prompt = await withPromptBindings(
+      pool,
+      (_key, active) => active(),
+      () => productionPrompt('daily.stage1.content_understanding', buildStage1UserPrompt(input)),
+      { binding: 'active' },
+    );
     const runs = [];
     for (let iteration = 1; iteration <= RUN_COUNT; iteration += 1) {
       const startedAt = Date.now();
       const response = await client.chat.completions.create({
         model: llm.model,
         messages: [
-          { role: "system", content: buildStage1Instructions() },
-          { role: "user", content: buildStage1UserPrompt(input) },
+          ...(prompt.instructions
+            ? [{ role: 'system' as const, content: prompt.instructions }]
+            : []),
+          { role: 'user', content: prompt.input },
         ],
         max_tokens: 1_200 * input.articles.length,
         response_format: {
-          type: "json_schema",
+          type: 'json_schema',
           json_schema: {
-            name: "stage1_content_understanding_batch",
-            description: "Independent Stage 1 results for a batch of articles.",
+            name: 'stage1_content_understanding_batch',
+            description: 'Independent Stage 1 results for a batch of articles.',
             schema: stage1BatchOutputJsonSchema,
             strict: true,
           },
         },
       });
-      const rawOutputText = response.choices[0]?.message.content ?? "";
+      const rawOutputText = response.choices[0]?.message.content ?? '';
       const validation = parseAndValidateStage1BatchOutput(rawOutputText);
       const assignment = validation.success
         ? validateStage1Assignments(validation.output, input)
@@ -70,7 +78,7 @@ async function main() {
           `Stage 1 Chat smoke test failed on iteration ${iteration}: ${[
             ...(validation.success ? [] : validation.errors),
             ...(assignment?.errors ?? []),
-          ].join("; ")}`,
+          ].join('; ')}`,
         );
       }
 
@@ -95,16 +103,22 @@ async function main() {
       });
     }
 
-    console.log(JSON.stringify({
-      ok: true,
-      provider: "openai",
-      baseUrl: llm.baseUrl,
-      model: llm.model,
-      apiMode: "chat-completions",
-      articleCount: input.articles.length,
-      tempIds: input.articles.map((article) => article.temp_id),
-      runs,
-    }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          provider: 'openai',
+          baseUrl: llm.baseUrl,
+          model: llm.model,
+          apiMode: 'chat-completions',
+          articleCount: input.articles.length,
+          tempIds: input.articles.map((article) => article.temp_id),
+          runs,
+        },
+        null,
+        2,
+      ),
+    );
   } finally {
     await pool.end();
   }

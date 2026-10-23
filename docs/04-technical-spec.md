@@ -207,7 +207,7 @@ flowchart LR
     CLIENT --> KIMI["Kimi"]
 ```
 
-**Implemented（B3.2）**：15 类生产请求通过 `src/lib/prompts/runtime.ts` 加载数据库中的精确 Published Version，按请求上下文缓存；没有静态 fallback。`src/prompts/` 保留原静态文本作为导入与一致性验收参考，动态业务输入 builder 继续由代码管理。LLM Client、Provider、Schema、工具和执行算法保持原样。Prompt / 角色契约见 `07-prompt-spec.md`，存储位置见 `05-data-model.md` §12，Daily / Discovery 的绑定与恢复边界分别见对应 Workflow。
+**Implemented（B3.2）**：15 类生产请求通过 `src/lib/prompts/runtime.ts` 加载数据库中的精确 Published Version，按请求上下文缓存；没有静态 fallback。**B3.4**：数据库是生产 Prompt 文本的唯一权威来源。`src/prompts/` 仅保留动态业务输入 builder、类型及现有历史日志标签，不含静态指令或 fallback；Evaluation 复用同一生产调用链。初始化 Seed 与独立历史测试 Fixture 的职责见 `07-prompt-spec.md`，运行模块不得依赖它们。LLM Client、Provider、Schema、工具和执行算法保持原样。Prompt / 角色契约见 `07-prompt-spec.md`，存储位置见 `05-data-model.md` §12，Daily / Discovery 的绑定与恢复边界分别见对应 Workflow。
 
 
 Discovery 的 Agent 工具调用、模型兼容性与 Trace 细节由 `04a-discovery-technical-spec.md` 定义。
@@ -362,7 +362,7 @@ X-AI-field/
 │   ├── lib/
 │   ├── processing/
 │   ├── discovery/     # In-depth Discovery 独立模块
-│   └── prompts/
+│   └── prompts/         # 动态输入 builder / 类型 / 历史日志标签，无静态指令
 ├── scripts/
 ├── drizzle/
 ├── runtime/

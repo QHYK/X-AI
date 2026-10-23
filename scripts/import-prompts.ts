@@ -15,11 +15,22 @@ async function main() {
   // A commit label must describe the actual source text being imported.
   const changed = execFileSync(
     'git',
-    ['diff', 'HEAD', '--', 'src/prompts', 'src/processing/stage4-llm.ts'],
+    [
+      'status',
+      '--porcelain',
+      '--',
+      'src/lib/prompts/production-seeds.ts',
+      'src/lib/prompts/seed-baseline.json',
+    ],
     { encoding: 'utf8' },
   );
-  if (changed.trim())
-    throw new Error('Commit production Prompt changes before importing their baseline.');
+  if (changed.trim()) {
+    if (!args.includes('--dry-run'))
+      throw new Error('Commit Prompt Seed changes before importing their baseline.');
+    console.error(
+      'Preview only: Seed changes are uncommitted; formal import requires a clean committed Seed.',
+    );
+  }
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const seeds = await buildProductionPromptSeeds(commit);
   if (args.includes('--dry-run')) {

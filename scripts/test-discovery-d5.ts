@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildDiscoveryD5Instructions } from '../src/prompts/discovery-open-agent.js';
+import { buildDiscoveryD5Instructions } from './fixtures/legacy-prompts.js';
 import {
   resolveDiscoveryD5RuntimeConfig,
   validateDiscoveryD5Output,

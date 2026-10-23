@@ -73,7 +73,7 @@ curl --fail --max-time 10 http://127.0.0.1:5260/ai >/dev/null || echo 'Old HTTP 
 
 旧构建完整时，切换后失败会尝试恢复原分支及 Commit、旧 `.next`、`node_modules` 并重新验证服务。旧构建不完整或不存在时仍可部署，但没有自动回滚：激活失败会保留当前源码、`.next`、依赖及暂存目录现场，并提示人工恢复，不会声称旧服务已恢复。无法安全恢复分支时会明确报错；按 Action 输出的暂存目录人工处理，不要仅恢复 `.next`。当前服务器 `ubuntu` 用户具有广泛免密 sudo 权限，这是现有部署账户的安全风险，建议后续收窄为服务管理所需命令。
 
-### 2.3 Prompt 基线导入与生产接入（B3.1 / B3.2）
+### 2.3 Prompt 基线导入与生产接入（B3.1–B3.4）
 
 先提交并部署经过验收的基线源码，`npm run db:migrate` 应用 `0021_prompt_registry.sql`（两表及保护 Trigger）及 `0022_stage4_prompt_versions.sql`（Stage4 映射列）。在启动新 Web / Worker / CLI 前完成导入；尚无 Active 的请求会明确失败。随后可运行：
 
@@ -86,11 +86,13 @@ npm run test:prompt-requests
 npm run test:prompt-management
 ```
 
-Dry-run 只读当前 Git / Prompt 源码，输出 18 项 key、拟导入的 `vN` 编号、来源和 Hash，不连接数据库。测试默认使用 Mock；若显式提供 `PROMPT_REGISTRY_TEST_DATABASE_URL`（独立测试数据库），同一测试还会创建隔离 Schema 并在事务结束时回滚全部 DDL / 数据，用于验证真实 PostgreSQL 约束。不要填生产连接。正式导入使用现有环境加载顺序与 DATABASE_URL，单事务导入 3 个 Fragment 和 15 个 Request；已有任意版本的 Registry 全部跳过，不覆盖人工 Draft / Published / Active。正式文本源文件须与 HEAD 一致，否则拒绝标注不真实的来源 Commit。无新环境变量、依赖或付费调用。
+Dry-run 只读当前 Git / 冻结 Seed 数据，输出 18 项 key、拟导入的 `vN` 编号、来源和 Hash，不连接数据库。测试默认使用 Mock；若显式提供 `PROMPT_REGISTRY_TEST_DATABASE_URL`（独立测试数据库），同一测试还会创建隔离 Schema 并在事务结束时回滚全部 DDL / 数据，用于验证真实 PostgreSQL 约束。不要填生产连接。正式导入使用现有环境加载顺序与 DATABASE_URL，单事务导入 3 个 Fragment 和 15 个 Request；已有任意版本的 Registry 全部跳过，不覆盖人工 Draft / Published / Active。正式导入要求 `production-seeds.ts` 和 `seed-baseline.json` 已提交且无未提交修改，否则拒绝标注不真实的来源 Commit；未提交时 dry-run 允许预览，但会明确警告，不能作为已提交来源验收。无新环境变量、依赖或付费调用。
 
 B3.2 已切换数据库读取，部署顺序必须是 Migration → 幂等导入 → 切换调用方；导入脚本不会激活或覆盖已有 Registry，需在启用前确认 15 个 Request 及其精确 Fragment 均有有效 Published 版本。数据库不可用 / Active 缺失不允许回退代码文本。回滚优先回退调用方代码，保留两表、Stage4 映射列及已发布版本；不要自动删表、重置 Active 或覆盖人工版本。
 
 Mock / 请求一致性测试不连接生产或调用模型；B3.1 **真实 PostgreSQL 约束验收尚未完成**，未提供独立测试 URL 时测试会明确 skip，不算通过。Stage4 行锁并发首次绑定也仍需独立 PostgreSQL 验收；不得把 Mock 结果等同真实事务验证。
+
+B3.4 无新增 Migration，也不需要对已有环境重新导入或重置 Active。Seed 仅用于初始化，具体职责与冻结 Parity 基线见 `07-prompt-spec.md`。数据库 Prompt 缺失时应修复 Registry / Active 配置，不得通过静态文本恢复运行。`test:prompt-registry` 同时检查生产依赖图不能加载 Seed 或历史 Fixture；`test:prompt-requests` 继续比较实际请求。`test:stage1:chat` 冒烟入口现在使用数据库 Prompt，仅在明确授权付费测试时执行。
 
 B3.3 无新增 Migration 或环境变量。启动 Web 后登录 `/ai/prompts`（也可由 Sidebar 进入）；页面只读加载，不自动导入或更改 Active。`test:prompt-management` 使用 JSDOM 与 Mock HTTP 验证编辑、冲突保留、发布 / 切换及相对 URL，不访问数据库或 LLM。Service Mock 仍由 `test:prompt-registry` 覆盖，认证 / 导航回归分别运行 `test:admin-auth` 与 `test:admin-navigation`。手动验收保存和 Activate 会写入 Web 当前连接的数据库，应在测试环境进行，并在切换前核对起止版本。
 
