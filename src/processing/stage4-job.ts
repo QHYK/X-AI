@@ -447,6 +447,7 @@ async function processStage4FromDb(
     const candidateIds = selected.flatMap((item) => item.processedContentIds);
     const sourceCandidates = await loadStage4SourceCandidates(pool, candidateIds);
     const failures: string[] = [];
+    const promptLogs = new Set<string>();
     for (const item of selected) {
       const eventDir = join(eventsDir, item.eventGroupId);
       await mkdir(eventDir, { recursive: true });
@@ -475,6 +476,7 @@ async function processStage4FromDb(
             observe: observeRunPrompts(join(runDir, 'run.json'), pool),
           }),
           () => enrichStage4Event(prepared, { model }),
+          { logged: promptLogs },
         );
         llmCalls += enriched.llm.llmCallCount;
         retryCount += enriched.llm.attempts - 1;

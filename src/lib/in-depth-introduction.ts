@@ -132,6 +132,7 @@ export async function generateAndSaveInDepthIntroduction(
           evidence: row.evidence,
         }),
       ),
+    { binding: 'active' },
   );
   const provider = resolveLlmProvider(
     process.env.DISCOVERY_LLM_PROVIDER?.trim() || process.env.LLM_PROVIDER,

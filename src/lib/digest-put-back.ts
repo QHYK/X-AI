@@ -4,6 +4,7 @@ import {
   claimManualPrompt,
   finishManualPrompt,
   PromptAttemptBusyError,
+  logPromptError,
 } from './prompts/runtime.js';
 import { z } from 'zod';
 import { normalizeArticleUrl } from '../processing/url-normalization.js';
@@ -256,6 +257,8 @@ export async function putBackIgnoredArticle(
         throw new PutBackError('没有足够的已存正文，未调用模型、未恢复文章。', 422);
       const contentTruncated = content.length > 60_000;
       if (contentTruncated) content = content.slice(0, 60_000);
+      const previousVersions = row.metadata?.promptVersions as Record<string, unknown> | undefined;
+      const binding = previousVersions?.['daily.editorial.digest_put_back'] ? 'reused' : 'new';
       const boundVersion = await claimManualPrompt(
         client,
         'raw',
@@ -263,7 +266,12 @@ export async function putBackIgnoredArticle(
         'daily.editorial.digest_put_back',
         true,
       );
-      await client.query('commit');
+      try {
+        await client.query('commit');
+      } catch (error) {
+        logPromptError('daily.editorial.digest_put_back', 'binding');
+        throw error;
+      }
       claimed = true;
       client.release();
       released = true;
@@ -284,6 +292,7 @@ export async function putBackIgnoredArticle(
                 contentTruncated,
               }),
             ),
+          { binding },
         );
         const provider = resolveStageLlmProvider('stage1');
         const name = resolveStageLlmModel('stage1');

@@ -61,6 +61,7 @@ export async function generateReadMoreSummary(
         pool,
         databasePromptBinder(pool, 'raw', result.rows[0]!.rawId!, { fresh: true }),
         () => generateReadMoreWithLlm(sourceText),
+        { binding: 'active' },
       ));
   const persisted = await pool.query<CachedSummaryRow>(
     `insert into content_read_more (content_id, summary_zh) values ($1::uuid, $2)

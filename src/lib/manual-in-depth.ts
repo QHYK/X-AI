@@ -4,6 +4,7 @@ import {
   claimManualPrompt,
   finishManualPrompt,
   PromptAttemptBusyError,
+  logPromptError,
 } from './prompts/runtime.js';
 import { z } from 'zod';
 import type { Pool } from 'pg';
@@ -322,7 +323,12 @@ export async function generateManualInDepthIntroduction(
       'in_depth.manual.generate',
       false,
     );
-    await client.query('commit');
+    try {
+      await client.query('commit');
+    } catch (error) {
+      logPromptError('in_depth.manual.generate', 'binding');
+      throw error;
+    }
     claimedId = row.candidate_id;
     client.release();
     released = true;
@@ -343,6 +349,7 @@ export async function generateManualInDepthIntroduction(
             tags: readDiscoveryContentMetadata(row).tags,
           }),
         ),
+      { binding: 'active' },
     );
     const provider = resolveLlmProvider(
       process.env.DISCOVERY_LLM_PROVIDER?.trim() || process.env.LLM_PROVIDER,

@@ -41,12 +41,17 @@ export async function PATCH(request: Request): Promise<Response> {
           Math.min(EVENT_DISPLAY_CUTOFF, input.orderedIds.length),
         )
       : null;
+    const promptLogs = new Set<string>();
     for (const item of enrichmentRequests) {
       enrichedEvents.push(
-        await withPromptBindings(pool, databasePromptBinder(pool, 'stage4', stage4Run!.id), () =>
-          enrichStage4Event(
-            prepareStage4Event(item, sourceCandidates, new Date(), input.dailyDate),
-          ),
+        await withPromptBindings(
+          pool,
+          databasePromptBinder(pool, 'stage4', stage4Run!.id),
+          () =>
+            enrichStage4Event(
+              prepareStage4Event(item, sourceCandidates, new Date(), input.dailyDate),
+            ),
+          { logged: promptLogs },
         ),
       );
     }

@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from 'pg';
 import { getActivePrompt, getPromptVersion, resolvePromptFragments } from './registry.js';
 import { renderResolvedPrompt, type PromptKey, type PromptVersion } from './contracts.js';
 
+export type PromptBindingState = 'new' | 'reused' | 'active';
 export type PromptBindings = Partial<Record<PromptKey, string>>;
 export type PromptDb = Pick<Pool | PoolClient, 'query'>;
 export type BindPrompt = (
@@ -12,10 +13,13 @@ export type BindPrompt = (
 type Scope = {
   db: PromptDb;
   bind: BindPrompt;
+  binding?: PromptBindingState;
+  logged: Set<string>;
   versions: Map<
     PromptKey,
     Promise<{
       version: PromptVersion;
+      binding: PromptBindingState;
       fragments: Awaited<ReturnType<typeof resolvePromptFragments>>;
     }>
   >;
@@ -26,11 +30,32 @@ export function withPromptBindings<T>(
   db: PromptDb,
   bind: BindPrompt,
   work: () => Promise<T>,
+  logging: { binding?: PromptBindingState; logged?: Set<string> } = {},
 ): Promise<T> {
-  return scopes.run({ db, bind, versions: new Map() }, work);
+  return scopes.run(
+    {
+      db,
+      bind,
+      binding: logging.binding,
+      logged: logging.logged ?? new Set(),
+      versions: new Map(),
+    },
+    work,
+  );
 }
 export function hasPromptBindings(): boolean {
   return !!scopes.getStore();
+}
+export function logPromptError(
+  key: PromptKey,
+  phase: 'context' | 'binding' | 'load' | 'render',
+  logged?: Set<string>,
+) {
+  const marker = `error:${key}:${phase}`;
+  if (logged?.has(marker)) return;
+  logged?.add(marker);
+  // Never forward error messages/objects: database and template errors can contain private data.
+  console.error(`[prompt] key=${key} event=error phase=${phase}`);
 }
 export async function productionPrompt(
   key: PromptKey,
@@ -41,30 +66,53 @@ export async function productionPrompt(
   } = {},
 ) {
   const scope = scopes.getStore();
-  if (!scope) throw new Error(`Missing persistent Prompt binding context: ${key}`);
+  if (!scope) {
+    logPromptError(key, 'context');
+    throw new Error(`Missing persistent Prompt binding context: ${key}`);
+  }
   let pending = scope.versions.get(key);
   if (!pending) {
     pending = (async () => {
-      const id = await scope.bind(
-        key,
-        async (db = scope.db) => (await getActivePrompt(db, key)).id,
-      );
-      const version = await getPromptVersion(scope.db, id);
-      if (version.key !== key || version.kind !== 'request' || version.status !== 'published')
-        throw new Error(`Invalid bound Prompt version for ${key}: ${id}`);
-      const fragments = await resolvePromptFragments(scope.db, version);
-      console.info('Prompt version bound', { key, versionId: id });
-      return { version, fragments };
+      let phase: 'binding' | 'load' = 'binding';
+      let selectedActive = false;
+      try {
+        const id = await scope.bind(key, async (db = scope.db) => {
+          selectedActive = true;
+          return (await getActivePrompt(db, key)).id;
+        });
+        // BindPrompt returns only after its persistence/mirror work succeeds.
+        const binding = scope.binding ?? (selectedActive ? 'new' : 'reused');
+        phase = 'load';
+        const version = await getPromptVersion(scope.db, id);
+        if (version.key !== key || version.kind !== 'request' || version.status !== 'published')
+          throw new Error(`Invalid bound Prompt version for ${key}: ${id}`);
+        const fragments = await resolvePromptFragments(scope.db, version);
+        return { version, fragments, binding };
+      } catch (error) {
+        logPromptError(key, phase, scope.logged);
+        throw error;
+      }
     })();
     scope.versions.set(key, pending);
   }
-  const { version, fragments } = await pending;
-  const rendered = renderResolvedPrompt(
-    version,
-    fragments,
-    { input, ...(options.category !== undefined ? { category: options.category } : {}) },
-    options.variant,
-  );
+  const { version, fragments, binding } = await pending;
+  let rendered: ReturnType<typeof renderResolvedPrompt>;
+  try {
+    rendered = renderResolvedPrompt(
+      version,
+      fragments,
+      { input, ...(options.category !== undefined ? { category: options.category } : {}) },
+      options.variant,
+    );
+  } catch (error) {
+    logPromptError(key, 'render', scope.logged);
+    throw error;
+  }
+  const marker = `${key}:${version.id}`;
+  if (!scope.logged.has(marker)) {
+    scope.logged.add(marker);
+    console.info(`[prompt] key=${key} version=${version.id} binding=${binding}`);
+  }
   return { versionId: version.id, ...rendered, input: rendered.user! };
 }
 
@@ -177,38 +225,43 @@ export async function claimManualPrompt(
   key: PromptKey,
   reuse: boolean,
 ) {
-  const { table, column } = CARRIERS[carrier];
-  const result = await client.query<{ value: Record<string, unknown> | null }>(
-    `select ${column} as value from ${table} where id = $1::uuid for update`,
-    [id],
-  );
-  if (!result.rows[0]) throw new Error('Prompt operation owner not found.');
-  const value = result.rows[0].value ?? {};
-  const state = value.promptAttempt as { status?: string; key?: string } | undefined;
-  if (state?.status === 'running')
-    throw new PromptAttemptBusyError(
-      'Another generation attempt is still running; no model request was sent.',
+  try {
+    const { table, column } = CARRIERS[carrier];
+    const result = await client.query<{ value: Record<string, unknown> | null }>(
+      `select ${column} as value from ${table} where id = $1::uuid for update`,
+      [id],
     );
-  const previous = (value.promptVersions as PromptBindings | undefined)?.[key];
-  const version =
-    reuse && previous
-      ? await getPromptVersion(client, previous)
-      : await getActivePrompt(client, key);
-  if (version.key !== key || version.status !== 'published')
-    throw new Error('Invalid manual Prompt binding.');
-  await resolvePromptFragments(client, version);
-  const updated = await client.query(
-    `update ${table} set ${column} = coalesce(${column}, '{}'::jsonb) || $2::jsonb where id = $1::uuid`,
-    [
-      id,
-      JSON.stringify({
-        promptVersions: { ...(value.promptVersions as PromptBindings), [key]: version.id },
-        promptAttempt: { key, status: 'running' },
-      }),
-    ],
-  );
-  if (updated.rowCount !== 1) throw new Error('Manual Prompt binding was not saved.');
-  return version.id;
+    if (!result.rows[0]) throw new Error('Prompt operation owner not found.');
+    const value = result.rows[0].value ?? {};
+    const state = value.promptAttempt as { status?: string; key?: string } | undefined;
+    if (state?.status === 'running')
+      throw new PromptAttemptBusyError(
+        'Another generation attempt is still running; no model request was sent.',
+      );
+    const previous = (value.promptVersions as PromptBindings | undefined)?.[key];
+    const version =
+      reuse && previous
+        ? await getPromptVersion(client, previous)
+        : await getActivePrompt(client, key);
+    if (version.key !== key || version.status !== 'published')
+      throw new Error('Invalid manual Prompt binding.');
+    await resolvePromptFragments(client, version);
+    const updated = await client.query(
+      `update ${table} set ${column} = coalesce(${column}, '{}'::jsonb) || $2::jsonb where id = $1::uuid`,
+      [
+        id,
+        JSON.stringify({
+          promptVersions: { ...(value.promptVersions as PromptBindings), [key]: version.id },
+          promptAttempt: { key, status: 'running' },
+        }),
+      ],
+    );
+    if (updated.rowCount !== 1) throw new Error('Manual Prompt binding was not saved.');
+    return version.id;
+  } catch (error) {
+    logPromptError(key, 'binding');
+    throw error;
+  }
 }
 export async function finishManualPrompt(
   db: PromptDb,

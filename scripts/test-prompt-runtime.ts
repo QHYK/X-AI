@@ -22,6 +22,177 @@ import {
 import { promptContentHash } from '../src/lib/prompts/registry.js';
 import { mapPromptRoles, PROMPT_CONTRACTS, type PromptKey } from '../src/lib/prompts/contracts.js';
 
+/** Capture only runtime logs; all connections and failures below are in-memory mocks. */
+async function testPromptLogging() {
+  const memory = new PromptMemory();
+  const key = 'daily.read_more.detailed_summary' as const;
+  const originalInfo = console.info,
+    originalError = console.error;
+  const info: unknown[][] = [],
+    errors: unknown[][] = [];
+  const secret = 'PRIVATE_PROMPT_OR_ARTICLE_OR_API_KEY';
+  const clear = () => {
+    info.length = 0;
+    errors.length = 0;
+  };
+  const line = (id: string, binding: string) =>
+    `[prompt] key=${key} version=${id} binding=${binding}`;
+  console.info = (...args) => {
+    info.push(args);
+  };
+  console.error = (...args) => {
+    errors.push(args);
+  };
+  try {
+    const initialId = memory.active.get(key)!;
+    const initial = memory.versions.get(initialId)!;
+    initial.body = { ...initial.body, systemInstructions: secret };
+    initial.contentHash = promptContentHash(initial.body);
+    const load = (owner: string) =>
+      withPromptBindings(memory.db, databasePromptBinder(memory.db, 'discovery', owner), () =>
+        productionPrompt(key, secret),
+      );
+    await load('log-run');
+    assert.deepEqual(info, [[line(initialId, 'new')]]);
+    assert.ok(memory.calls.includes('commit'));
+    const changed = { ...initial, id: randomUUID(), version: initial.version + 1 };
+    memory.versions.set(changed.id, changed);
+    memory.active.set(key, changed.id);
+    clear();
+    await load('log-run');
+    assert.deepEqual(
+      info,
+      [[line(initialId, 'reused')]],
+      'Resume reports the original version after Active changes',
+    );
+    clear();
+    await withPromptBindings(
+      memory.db,
+      databasePromptBinder(memory.db, 'raw', 'single', { fresh: true }),
+      () => productionPrompt(key, secret),
+      { binding: 'active' },
+    );
+    assert.deepEqual(info, [[line(changed.id, 'active')]]);
+    clear();
+    await withPromptBindings(memory.db, databasePromptBinder(memory.db, 'discovery', 'batch'), () =>
+      Promise.all(Array.from({ length: 8 }, () => productionPrompt(key, secret))),
+    );
+    assert.deepEqual(
+      info,
+      [[line(changed.id, 'new')]],
+      'One log per Request Type in a Stage, including concurrent calls',
+    );
+    clear();
+    const logged = new Set<string>();
+    for (let i = 0; i < 2; i++)
+      await withPromptBindings(
+        memory.db,
+        databasePromptBinder(memory.db, 'stage4', 'event-scope'),
+        () => productionPrompt(key, secret),
+        { logged },
+      );
+    assert.equal(info.length, 1, 'Stage4 Event scopes share Stage-local log deduplication');
+    clear();
+    let release!: () => void, selected!: () => void;
+    const selectedPromise = new Promise<void>((resolve) => {
+      selected = resolve;
+    });
+    const commitPromise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const delayed = withPromptBindings(
+      memory.db,
+      async (_key, active) => {
+        const id = await active();
+        selected();
+        await commitPromise;
+        return id;
+      },
+      () => productionPrompt(key, secret),
+    );
+    await selectedPromise;
+    assert.equal(info.length, 0, 'Reading Active alone is not a successful binding');
+    release();
+    await delayed;
+    assert.deepEqual(info, [[line(changed.id, 'new')]]);
+    clear();
+    const privateError = new Error(secret);
+    await assert.rejects(
+      withPromptBindings(
+        memory.db,
+        async () => {
+          throw privateError;
+        },
+        () => productionPrompt(key, secret),
+      ),
+      (error) => error === privateError,
+    );
+    assert.equal(info.length, 0);
+    assert.deepEqual(errors, [[`[prompt] key=${key} event=error phase=binding`]]);
+    assert.doesNotMatch(JSON.stringify(errors), new RegExp(secret));
+    clear();
+    memory.failWrite = true;
+    await assert.rejects(load('failed-save'));
+    memory.failWrite = false;
+    assert.equal(info.length, 0);
+    assert.deepEqual(errors, [[`[prompt] key=${key} event=error phase=binding`]]);
+    clear();
+    await assert.rejects(
+      withPromptBindings(
+        memory.db,
+        async () => randomUUID(),
+        () => productionPrompt(key, secret),
+      ),
+    );
+    assert.equal(info.length, 0);
+    assert.deepEqual(errors, [[`[prompt] key=${key} event=error phase=load`]]);
+    clear();
+    await assert.rejects(
+      withPromptBindings(
+        memory.db,
+        databasePromptBinder(memory.db, 'discovery', 'bad-template'),
+        () => productionPrompt(key, secret, { variant: 'invalid' }),
+      ),
+    );
+    assert.equal(info.length, 0, 'Rendering must succeed before a success log');
+    assert.deepEqual(errors, [[`[prompt] key=${key} event=error phase=render`]]);
+    clear();
+    const fragmentKey = 'discovery.d3.topic_discovery' as const;
+    const d3 = memory.versions.get(memory.active.get(fragmentKey)!)!;
+    memory.versions.delete(d3.body.fragments[0].versionId);
+    await assert.rejects(
+      withPromptBindings(
+        memory.db,
+        databasePromptBinder(memory.db, 'discovery', 'bad-fragment'),
+        () => productionPrompt(fragmentKey, secret),
+      ),
+    );
+    assert.equal(info.length, 0);
+    assert.deepEqual(errors, [[`[prompt] key=${fragmentKey} event=error phase=load`]]);
+    clear();
+    await assert.rejects(productionPrompt(key, secret));
+    assert.deepEqual(errors, [[`[prompt] key=${key} event=error phase=context`]]);
+    clear();
+    memory.owners.set('raw_articles:busy-log', { promptAttempt: { status: 'running' } });
+    const client = await memory.db.connect();
+    try {
+      await assert.rejects(claimManualPrompt(client, 'raw', 'busy-log', key, true));
+    } finally {
+      client.release();
+    }
+    assert.equal(info.length, 0);
+    assert.deepEqual(errors, [[`[prompt] key=${key} event=error phase=binding`]]);
+    clear();
+    await load('privacy');
+    assert.equal(info.length, 1);
+    assert.doesNotMatch(JSON.stringify([info, errors]), new RegExp(secret));
+    assert.equal(info[0].length, 1, 'No raw Prompt, input or error object is added to logs');
+  } finally {
+    console.info = originalInfo;
+    console.error = originalError;
+  }
+}
+
 const store = new PromptMemory();
 const root = await mkdtemp(join(tmpdir(), 'prompt-runtime-'));
 const path = join(root, 'run.json');
@@ -30,6 +201,7 @@ const input = JSON.stringify({
   url: 'https://example.test/a',
 });
 try {
+  await testPromptLogging();
   for (const key of Object.keys(PROMPT_CONTRACTS) as PromptKey[]) {
     const isDigest = key === 'daily.stage3.digest_ranking';
     const variants =
@@ -293,7 +465,7 @@ try {
     /conflicting/,
   );
   console.log(
-    'Prompt runtime: 15 keys, lazy binding, concurrent reuse, failed persistence, Resume, Stage4 authority/new runs, optional roles, invalid versions/DB/variants, manual fresh attempts/failed retries, Evaluation shared binding/conflicts and atomic files passed.',
+    'Prompt runtime: 15 keys, lazy binding, concurrent reuse, failed persistence, Resume, Stage4 authority/new runs, optional roles, invalid versions/DB/variants, manual fresh attempts/failed retries, Evaluation shared binding/conflicts, atomic files and safe structured binding/error logs passed.',
   );
   client.release();
 } finally {
