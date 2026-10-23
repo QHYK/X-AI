@@ -870,6 +870,19 @@ Stage 4
 
 ## 12. Runtime Artifacts and Lineage
 
+### 12.1 Prompt 绑定与原子运行记录（B3.2）
+
+Request Type 第一次真正发出请求前选择 Active 并持久化精确 Version ID；同一 Stage 内后续批次、分类、自动重试和 Provider fallback 固定该版本。Stage3 的 Event / Digest / Long-form 各自懒绑定；匹配现有 Resume 输入快照时继承原绑定，复用已完成结果不改写旧 Run。尚未执行的类型不提前绑定。Stage1/2 的重新启动本来就是新 Stage 执行，并不新增 Resume 模式。
+
+Stage4 先按 Review snapshot 获取唯一 Run，再锁该数据库行首次绑定 Decision / Enrichment；数据库提交后才发请求。CLI Retry 与后台 Event Review 均复用相同 Run；全新 Run 不复制其他 Run 的版本。文件镜像失败明确报错，不以镜像取代数据库权威。字段位置见 Data Model §12.1。
+
+相关 Daily / Stage 的 `run.json` 使用同目录临时文件 + rename 原子写入，同进程按路径串行合并，保留已保存的版本映射。版本编号用于阅读，精确 UUID 用于恢复；字段与旧格式兼容规则见 Data Model §12.1。Daily 父进程等待 Stage 子进程结束后才继续写；各独立执行有自己的 runtime 目录，因此不增加跨进程文件锁。
+
+Introduction / Manual Generate 的每次用户 Generate / Regenerate（含失败后再次点击）是新操作，加载当前 Active；同一 HTTP 请求内重试固定该版本，JSONB 只表示最近一次尝试。Put Back 按文章保留失败绑定；成功准备缓存优先复用，不再付费。Manual / Put Back 在模型调用前以短事务领取、提交版本和执行标记，调用期间不持有数据库事务；并发请求被拒绝，保存成功 / 失败更新标记。审核状态、Notes 和业务幂等边界不变。
+
+Evaluation 在输入行锁下为同一评测输入的 running 模型记录固定版本，后台进程 / Resume 复用已有 UUID；版本冲突直接失败。历史记录缺少可验证 UUID 时不虚构旧版本：保留原结果，下一次实际请求才首次绑定当前 Active（不承诺恢复未知历史文本）。
+
+
 `runtime/` 用于：
 
 - Debug；

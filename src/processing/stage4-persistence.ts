@@ -87,10 +87,14 @@ export async function loadOrCreateStage4Run(
     successCount: existing.rows[0].success_count,
     status: existing.rows[0].status,
   };
-  const created = await queryable.query<{ id: string; success_count: number; status: string }>(`
+  const created = await queryable.query<{ id: string; success_count: number; status: string }>(
+    `
     insert into stage4_runs (daily_date, review_run_id, status, expected_count)
     values ($1::date, $2::uuid, 'running', $3)
-    returning id, success_count, status`, [dailyDate, reviewRunId, expectedCount]);
+    on conflict (review_run_id) do update set review_run_id = excluded.review_run_id
+    returning id, success_count, status`,
+    [dailyDate, reviewRunId, expectedCount],
+  );
   const row = created.rows[0];
   if (!row) throw new Error("Failed to create Stage 4 run.");
   return { id: row.id, successCount: row.success_count, status: row.status };

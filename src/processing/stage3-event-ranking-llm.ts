@@ -1,3 +1,4 @@
+import { productionPrompt } from '../lib/prompts/runtime.js';
 /**
  * Stage 3 Event Ranking 的 LLM 调用层。
  * 将 Stage 2 事件组排序为有限的 Top 候选，并在返回前校验和去除重复 ID。
@@ -21,9 +22,7 @@ import {
   type Stage3EventRankingOutput,
 } from './stage3-contract.js';
 import {
-  buildStage3EventRankingInstructions,
   buildStage3EventRankingUserPrompt,
-  STAGE3_EVENT_RANKING_PROMPT_VERSION,
 } from '../prompts/stage3-event-ranking.js';
 import { resolveStageLlmRuntimeConfig } from './stage-llm-runtime-config.js';
 import {
@@ -86,6 +85,10 @@ export async function runStage3EventRankingLlm(
   const runtimeConfig = resolveStageLlmRuntimeConfig('stage3');
   const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
   const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
+  const prompt = await productionPrompt(
+    'daily.stage3.event_ranking',
+    buildStage3EventRankingUserPrompt(input),
+  );
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const expectedIds = input.events.map((event) => event.id);
@@ -103,14 +106,14 @@ export async function runStage3EventRankingLlm(
         const response = await client.structured.create(
           {
             model,
-            instructions: buildStage3EventRankingInstructions(),
+            ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
             input: [
               {
                 role: 'user',
                 content: [
                   {
                     type: 'input_text',
-                    text: buildStage3EventRankingUserPrompt(input),
+                    text: prompt.input,
                   },
                 ],
               },
@@ -161,7 +164,7 @@ export async function runStage3EventRankingLlm(
           assignment,
           warnings: normalized.warnings,
           model,
-          promptVersion: STAGE3_EVENT_RANKING_PROMPT_VERSION,
+          promptVersion: prompt.versionId,
           responseId: response.id,
           attempts: attempt,
           elapsedMs: Date.now() - startedAt,
@@ -187,7 +190,7 @@ export async function runStage3EventRankingLlm(
       input,
       assignment: lastAssignment,
       model,
-      promptVersion: STAGE3_EVENT_RANKING_PROMPT_VERSION,
+      promptVersion: prompt.versionId,
       attempts: attemptsUsed,
       elapsedMs: Date.now() - startedAt,
       tokenUsage: attemptsUsed > 0 ? tokenUsage : null,

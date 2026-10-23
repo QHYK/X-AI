@@ -3,7 +3,6 @@
  * 该阶段不直接写业务数据，runtime artifact 承担输入、输出和 id-map 的 lineage 载体。
  */
 import type { Pool } from "pg";
-import { STAGE2_PROMPT_VERSION } from "../prompts/stage2-event-merge.js";
 import {
   loadStage2EventCandidates,
   prepareStage2Input,
@@ -43,7 +42,7 @@ type Stage2JobBase = {
   candidateRows: Stage2CandidateRow[];
   assignment: Stage2AssignmentValidation | null;
   model: string;
-  promptVersion: string;
+  promptVersion: string | null;
   llmCallCount: number;
   retryCount: number;
   llmDurationMs: number;
@@ -96,7 +95,7 @@ export async function processStage2Merge(
       eventGroups: [],
       assignment: validateStage2Assignments(output, input),
       model,
-      promptVersion: STAGE2_PROMPT_VERSION,
+      promptVersion: null,
       llmCallCount: 0,
       retryCount: 0,
       llmDurationMs: 0,
@@ -124,7 +123,7 @@ export async function processStage2Merge(
       eventGroups: [],
       assignment: null,
       model,
-      promptVersion: STAGE2_PROMPT_VERSION,
+      promptVersion: llmResult.promptVersion,
       llmCallCount: llmResult.attempts,
       retryCount: Math.max(0, llmResult.attempts - 1),
       llmDurationMs: llmResult.elapsedMs,

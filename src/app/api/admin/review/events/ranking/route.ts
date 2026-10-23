@@ -1,21 +1,24 @@
+import { withPromptBindings, databasePromptBinder } from '@/lib/prompts/runtime.js';
+import { EVENT_DISPLAY_CUTOFF } from '@/lib/ranking-config.js';
+import { loadOrCreateStage4Run } from '@/processing/stage4-persistence.js';
 import { adminApiError } from '@/lib/admin-auth.js';
 /** Event Ranking Review 的单次事务保存 API。 */
-import { getDatabasePool } from "@/db/index.js";
-import { parseBriefDate } from "@/lib/brief-date.js";
+import { getDatabasePool } from '@/db/index.js';
+import { parseBriefDate } from '@/lib/brief-date.js';
 import {
   getEventReviewEnrichmentRequests,
   ReviewValidationError,
   saveEventReviewRanking,
-} from "@/lib/ranking-review.js";
+} from '@/lib/ranking-review.js';
 import {
   enrichStage4Event,
   loadStage4SourceCandidates,
   prepareStage4Event,
   Stage4EnrichmentError,
   type EnrichedStage4Event,
-} from "@/processing/stage4-event-processing.js";
+} from '@/processing/stage4-event-processing.js';
 
-export const runtime = "nodejs";
+export const runtime = 'nodejs';
 
 export async function PATCH(request: Request): Promise<Response> {
   const authError = await adminApiError(request);
@@ -26,18 +29,29 @@ export async function PATCH(request: Request): Promise<Response> {
     const pool = getDatabasePool();
     // 先在 transaction 外完成可能耗时的 enrichment；失败时不会写入任何 Review 或最终 Brief 排名。
     const enrichmentRequests = await getEventReviewEnrichmentRequests(pool, input);
-    const sourceCandidates = await loadStage4SourceCandidates(
-      pool,
-      [...new Set(enrichmentRequests.flatMap((item) => item.processedContentIds))],
-    );
+    const sourceCandidates = await loadStage4SourceCandidates(pool, [
+      ...new Set(enrichmentRequests.flatMap((item) => item.processedContentIds)),
+    ]);
     const enrichedEvents: EnrichedStage4Event[] = [];
+    const stage4Run = enrichmentRequests.length
+      ? await loadOrCreateStage4Run(
+          pool,
+          input.dailyDate,
+          input.reviewRunId,
+          Math.min(EVENT_DISPLAY_CUTOFF, input.orderedIds.length),
+        )
+      : null;
     for (const item of enrichmentRequests) {
       enrichedEvents.push(
-        await enrichStage4Event(prepareStage4Event(item, sourceCandidates, new Date(), input.dailyDate)),
+        await withPromptBindings(pool, databasePromptBinder(pool, 'stage4', stage4Run!.id), () =>
+          enrichStage4Event(
+            prepareStage4Event(item, sourceCandidates, new Date(), input.dailyDate),
+          ),
+        ),
       );
     }
     const result = await saveEventReviewRanking(pool, { ...input, enrichedEvents });
-    return Response.json({ status: "saved", ...result });
+    return Response.json({ status: 'saved', ...result });
   } catch (error) {
     if (error instanceof ReviewValidationError) {
       return Response.json({ error: error.message }, { status: 400 });
@@ -48,8 +62,8 @@ export async function PATCH(request: Request): Promise<Response> {
         { status: 502 },
       );
     }
-    console.error("Failed to save Event Ranking Review.", error);
-    return Response.json({ error: "Failed to save Event Ranking Review." }, { status: 500 });
+    console.error('Failed to save Event Ranking Review.', error);
+    return Response.json({ error: 'Failed to save Event Ranking Review.' }, { status: 500 });
   }
 }
 
@@ -60,32 +74,32 @@ function parseRequest(value: unknown): {
   touchedIds: string[];
 } {
   if (!isRecord(value)) {
-    throw new ReviewValidationError("Request body must be an object.");
+    throw new ReviewValidationError('Request body must be an object.');
   }
-  const dailyDate = typeof value.date === "string" ? parseBriefDate(value.date)?.date : undefined;
+  const dailyDate = typeof value.date === 'string' ? parseBriefDate(value.date)?.date : undefined;
   if (!dailyDate) {
-    throw new ReviewValidationError("date must be YYYY-MM-DD.");
+    throw new ReviewValidationError('date must be YYYY-MM-DD.');
   }
-  if (typeof value.reviewRunId !== "string" || !isUuid(value.reviewRunId)) {
-    throw new ReviewValidationError("reviewRunId must be a UUID.");
+  if (typeof value.reviewRunId !== 'string' || !isUuid(value.reviewRunId)) {
+    throw new ReviewValidationError('reviewRunId must be a UUID.');
   }
   return {
     dailyDate,
     reviewRunId: value.reviewRunId,
-    orderedIds: stringArray(value.orderedIds, "orderedIds"),
-    touchedIds: stringArray(value.touchedIds, "touchedIds"),
+    orderedIds: stringArray(value.orderedIds, 'orderedIds'),
+    touchedIds: stringArray(value.touchedIds, 'touchedIds'),
   };
 }
 
 function stringArray(value: unknown, name: string): string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !isUuid(item))) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !isUuid(item))) {
     throw new ReviewValidationError(`${name} must be an array of UUIDs.`);
   }
   return value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isUuid(value: string): boolean {

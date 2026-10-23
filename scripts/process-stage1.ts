@@ -1,3 +1,4 @@
+import { withFilePrompts, writeRunFile, readRunBindings } from '../src/lib/prompts/run-file.js';
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Pool } from 'pg';
@@ -59,31 +60,33 @@ async function main() {
       readPublishedAtScopeFromEnv(process.env);
     await mkdir(join(runDir, 'batches'), { recursive: true });
     try {
-      const summary = await processStage1Batch(pool, {
-        limit: optionalPositiveInteger(process.env.STAGE1_LIMIT),
-        concurrency: optionalPositiveInteger(process.env.STAGE1_CONCURRENCY),
-        publishedWithinHours: optionalPositiveInteger(
-          process.env.STAGE1_PUBLISHED_WITHIN_HOURS ?? process.env.STAGE1_COLLECTED_WITHIN_HOURS,
-        ),
-        publishedAtScope,
-        dailyDate,
-        batchSize: optionalPositiveInteger(process.env.STAGE1_BATCH_SIZE),
-        batchMaxContentChars: optionalPositiveInteger(process.env.STAGE1_BATCH_MAX_CONTENT_CHARS),
-        batchMaxTotalChars: optionalPositiveInteger(process.env.STAGE1_BATCH_MAX_TOTAL_CHARS),
-        onInitialBatches: async (batches) => {
-          await Promise.all(
-            batches.map((batch, index) =>
-              writeFile(
-                join(runDir, 'batches', `batch-${String(index + 1).padStart(3, '0')}.input.json`),
-                `${JSON.stringify(buildStage1BatchInput(batch), null, 2)}\n`,
+      const summary = await withFilePrompts(pool, join(runDir, 'run.json'), () =>
+        processStage1Batch(pool, {
+          limit: optionalPositiveInteger(process.env.STAGE1_LIMIT),
+          concurrency: optionalPositiveInteger(process.env.STAGE1_CONCURRENCY),
+          publishedWithinHours: optionalPositiveInteger(
+            process.env.STAGE1_PUBLISHED_WITHIN_HOURS ?? process.env.STAGE1_COLLECTED_WITHIN_HOURS,
+          ),
+          publishedAtScope,
+          dailyDate,
+          batchSize: optionalPositiveInteger(process.env.STAGE1_BATCH_SIZE),
+          batchMaxContentChars: optionalPositiveInteger(process.env.STAGE1_BATCH_MAX_CONTENT_CHARS),
+          batchMaxTotalChars: optionalPositiveInteger(process.env.STAGE1_BATCH_MAX_TOTAL_CHARS),
+          onInitialBatches: async (batches) => {
+            await Promise.all(
+              batches.map((batch, index) =>
+                writeFile(
+                  join(runDir, 'batches', `batch-${String(index + 1).padStart(3, '0')}.input.json`),
+                  `${JSON.stringify(buildStage1BatchInput(batch), null, 2)}\n`,
+                ),
               ),
-            ),
-          );
-        },
-        onAttemptRecord: async (record) => {
-          await appendFile(attemptsPath, `${JSON.stringify(record)}\n`);
-        },
-      });
+            );
+          },
+          onAttemptRecord: async (record) => {
+            await appendFile(attemptsPath, `${JSON.stringify(record)}\n`);
+          },
+        }),
+      );
       const artifact = {
         ...summary,
         initialBatchCount: summary.batchCount,
@@ -92,48 +95,43 @@ async function main() {
         durationMs: Date.parse(summary.finishedAt) - Date.parse(summary.startedAt),
       };
       await writeFile(join(runDir, 'summary.json'), `${JSON.stringify(artifact, null, 2)}\n`);
-      await writeFile(
-        join(runDir, 'run.json'),
-        `${JSON.stringify(
-          {
-            stage: 'stage1',
-            status: 'success',
-            daily_date: dailyDate,
-            started_at: summary.startedAt,
-            finished_at: summary.finishedAt,
-            scope_start_at: summary.scopeStartAt,
-            scope_end_at: summary.scopeEndAt,
-            model: summary.model,
-            provider_strategy: `logical batches 1-15: codex; subsequent batches and Codex fallback: ${resolveStageLlmProvider('stage1')}`,
-            prompt_version: STAGE1_PROMPT_VERSION,
-            duration_ms: artifact.durationMs,
-            candidate_count: summary.loadedCount,
-            selected_count: summary.selectedCount,
-            ignored_count: summary.ignoredCount,
-            failed_count: summary.failedCount,
-            batch_count: summary.batchCount,
-            fallback_batch_count: summary.fallbackBatchCount,
-            split_count: summary.splitCount,
-            singleton_batch_count: summary.singletonBatchCount,
-            llm_call_count: summary.llmCallCount,
-            retry_count: summary.retryCount,
-            llm_duration_ms: summary.llmDurationMs,
-            input_tokens: summary.tokenUsage?.inputTokens ?? null,
-            output_tokens: summary.tokenUsage?.outputTokens ?? null,
-            total_tokens: summary.tokenUsage?.totalTokens ?? null,
-            cached_input_tokens: summary.tokenUsage?.cachedInputTokens ?? null,
-            token_usage_complete: summary.tokenUsage?.usageComplete ?? null,
-          },
-          null,
-          2,
-        )}\n`,
-      );
+      await writeRunFile(join(runDir, 'run.json'), {
+        stage: 'stage1',
+        status: 'success',
+        daily_date: dailyDate,
+        started_at: summary.startedAt,
+        finished_at: summary.finishedAt,
+        scope_start_at: summary.scopeStartAt,
+        scope_end_at: summary.scopeEndAt,
+        model: summary.model,
+        provider_strategy: `logical batches 1-15: codex; subsequent batches and Codex fallback: ${resolveStageLlmProvider('stage1')}`,
+        legacy_prompt_version: STAGE1_PROMPT_VERSION,
+        duration_ms: artifact.durationMs,
+        candidate_count: summary.loadedCount,
+        selected_count: summary.selectedCount,
+        ignored_count: summary.ignoredCount,
+        failed_count: summary.failedCount,
+        batch_count: summary.batchCount,
+        fallback_batch_count: summary.fallbackBatchCount,
+        split_count: summary.splitCount,
+        singleton_batch_count: summary.singletonBatchCount,
+        llm_call_count: summary.llmCallCount,
+        retry_count: summary.retryCount,
+        llm_duration_ms: summary.llmDurationMs,
+        input_tokens: summary.tokenUsage?.inputTokens ?? null,
+        output_tokens: summary.tokenUsage?.outputTokens ?? null,
+        total_tokens: summary.tokenUsage?.totalTokens ?? null,
+        cached_input_tokens: summary.tokenUsage?.cachedInputTokens ?? null,
+        token_usage_complete: summary.tokenUsage?.usageComplete ?? null,
+      });
+      const promptVersions = await readRunBindings(join(runDir, 'run.json'));
       await writeRunPointer(runDir);
       await safelyFinishPipelineRun(pool, pipelineRunId, {
         status: 'success',
         provider: resolveStageLlmProvider('stage1'),
         model: summary.model,
         metrics: {
+          prompt_version: promptVersions['daily.stage1.content_understanding'] ?? null,
           llm_calls: summary.llmCallCount,
           retry_count: summary.retryCount,
           duration_ms: artifact.durationMs,
@@ -152,40 +150,33 @@ async function main() {
       });
       console.log(JSON.stringify({ ...summary, runtimeDir: runDir }, null, 2));
     } catch (error) {
-      await writeFile(
-        join(runDir, 'run.json'),
-        `${JSON.stringify(
-          {
-            stage: 'stage1',
-            status: 'failed',
-            daily_date: dailyDate,
-            started_at: startedAt.toISOString(),
-            finished_at: new Date().toISOString(),
-            scope_start_at: publishedAtScope?.startAt ?? null,
-            scope_end_at: publishedAtScope?.endAt ?? null,
-            model: resolveStageLlmModel('stage1'),
-            prompt_version: STAGE1_PROMPT_VERSION,
-            duration_ms: Date.now() - startedAt.getTime(),
-            candidate_count: null,
-            selected_count: null,
-            ignored_count: null,
-            failed_count: null,
-            batch_count: null,
-            fallback_batch_count: null,
-            split_count: null,
-            singleton_batch_count: null,
-            llm_call_count: null,
-            retry_count: null,
-            llm_duration_ms: null,
-            input_tokens: null,
-            output_tokens: null,
-            total_tokens: null,
-            error: error instanceof Error ? error.message : String(error),
-          },
-          null,
-          2,
-        )}\n`,
-      );
+      await writeRunFile(join(runDir, 'run.json'), {
+        stage: 'stage1',
+        status: 'failed',
+        daily_date: dailyDate,
+        started_at: startedAt.toISOString(),
+        finished_at: new Date().toISOString(),
+        scope_start_at: publishedAtScope?.startAt ?? null,
+        scope_end_at: publishedAtScope?.endAt ?? null,
+        model: resolveStageLlmModel('stage1'),
+        legacy_prompt_version: STAGE1_PROMPT_VERSION,
+        duration_ms: Date.now() - startedAt.getTime(),
+        candidate_count: null,
+        selected_count: null,
+        ignored_count: null,
+        failed_count: null,
+        batch_count: null,
+        fallback_batch_count: null,
+        split_count: null,
+        singleton_batch_count: null,
+        llm_call_count: null,
+        retry_count: null,
+        llm_duration_ms: null,
+        input_tokens: null,
+        output_tokens: null,
+        total_tokens: null,
+        error: error instanceof Error ? error.message : String(error),
+      });
       await safelyFinishPipelineRun(pool, pipelineRunId, {
         status: 'failed',
         provider: resolveStageLlmProvider('stage1'),

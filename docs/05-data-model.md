@@ -211,7 +211,7 @@ created_at, updated_at
 
 `event_groups` 是 Stage 2 按 `daily_date` 写入的可替换业务 snapshot；`event_group_items` 保存 Group 到 Event Candidate 的正式 many-to-many membership。唯一约束是 `(event_group_id, processed_content_id)`：同一 Group 内不重复，同一内容可出现在多个 Group。
 
-`stage4_runs` 记录来源 Review snapshot、`daily_date`、`expected_count`、`success_count` 和 `running` / `partial` / `success` 状态。每个 enrichment 成功后立即写入对应 Run 的 draft Event；仅在 drafts 数量等于 `expected_count` 时才原子 publish。
+`stage4_runs` 记录来源 Review snapshot、`daily_date`、`expected_count`、`success_count` 和 `running` / `partial` / `success` 状态；`prompt_versions JSONB NOT NULL DEFAULT '{}'` 保存该 Run 的 Request Key → Version UUID 映射，约束为 JSON object（Migration `0022_stage4_prompt_versions.sql`）。每个 enrichment 成功后立即写入对应 Run 的 draft Event；仅在 drafts 数量等于 `expected_count` 时才原子 publish。
 
 ## 7 `pipeline_runs`
 
@@ -514,3 +514,28 @@ in_depth_candidates(review_status, created_at DESC)
 1. **Implemented**：Daily 输入适配和 Trace 持久化已有代码；执行与技术边界分别见 `06a-discovery-workflow.md` 和 `04a-discovery-technical-spec.md`。Trace 列是业务持久化字段，不代表 SDK 提供完全相同字段。
 2. **Implemented**：审核通过 Candidate → Run → Parent Run 关联，不额外建立审核批次表。上架及公开读取使用 §11.4 的审核状态，无需迁移到另一张内容库表。
 3. **Planned**：单条 Lead 执行保留 §11.1 的字段和约束，不能据此认定已有 CLI / API / UI 支持。
+
+## 12 Prompt Registry / Versions
+
+`prompt_registry` 保存稳定唯一 key、kind（request / fragment）、workflow、step、request_type、display_name、active_version_id 与时间戳。`prompt_versions` 保存 UUID、registry_id、递增 version、draft / published、body JSONB、content_hash、source_commit、legacy_version、change_note、created_at。body 的明确 TypeScript / 校验形状见 `src/lib/prompts/contracts.ts`：System / User 可 null 或空，variants 为角色模板对象，fragments 为有序 slot / Version ID 列表。
+
+- `(registry_id, version)` 唯一；首次基线导入将代码标签 `vN` 的 N 用作初始序号，没有旧标签则从 1 开始；后续 Draft 按该 Registry 当前最大序号加 1。已导入版本不因重跑导入而重新编号。版本 ID、所属 Registry、序号及创建时间不可修改。
+- Active 由 Registry 指针确定；复合外键 `(active_version_id, id)` → `(version.id, version.registry_id)` 防跨 Registry 引用，Trigger 拒绝 Draft Active。
+- Published 版本不可 UPDATE / DELETE；编辑派生新 Draft。历史 Published 可重新 Activate。Registry key / kind / ID 不可修改。
+- Fragment 引用必须指向 Published Fragment；数据库 Trigger 拒绝不存在、指向 Request 或 Draft 的引用、重复 slot、嵌套引用。已发布目标不可删除。模板变量及占位顺序由应用层校验。
+- Content Hash 为规范序列化 body 的 SHA-256，包含有序精确版本引用；加载校验完整性，不包含动态业务输入。导入 provenance 不参与文本 Hash。
+- 新建版本和 Active 更新锁定对应 Registry 行；导入在单事务中串行执行，对已有任何版本的 Registry 不修改版本、元数据或 Active，避免覆盖后续人工编辑。无旧标签的 Prompt 保存 null，不虚构版本。
+
+发布不可变、引用校验等 Trigger 由 `0021_prompt_registry.sql` 管理，不能只依赖 ORM Schema 推断其存在。
+
+### 12.1 B3.2 版本绑定载体
+
+- Daily Stage1–3：对应 `run.json.promptVersionIds` 保存 Request Key → 精确 UUID；`promptVersions` 保存同一映射的可读编号（如 `v5`），仅用于展示。Daily Orchestrator 同步汇总，不存 Prompt 文本。读取兼容此前仅有 UUID `promptVersions` 的文件；Resume 始终用 UUID，不能只凭 `vN` 恢复。`prompt_version` 等诊断展示字段写可读编号时，精确引用保留在 `prompt_version_id` / `promptVersionIds`。原 `legacy_prompt_version(s)` 仅为静态基线标签。
+- Stage4：`stage4_runs.prompt_versions` 为权威，runtime JSON 只镜像；同一 Review snapshot 的 Run 唯一，Decision / Enrichment 分开存 UUID。
+- Discovery：`discovery_runs.config_snapshot.promptVersions`，与既有 d2–d5 配置并存。
+- Evaluation：同一 `evaluation_input_id` 的 `evaluation_runs.prompt_version` 保存同一个精确 UUID；已有字段为 text，无新列。
+- Introduction / Manual Generate：`discovery_candidates.evaluation.promptVersions` 保存最近一次相应生成尝试的版本；不是跨 HTTP 请求 Resume 或完整历史。
+- Put Back / Read More：`raw_articles.metadata.promptVersions`；Put Back 的失败重试复用文章已有绑定。
+- Manual / Put Back 的同一 JSONB 下 `promptAttempt = {key, status}` 是短事务领取后的执行标记（running / completed / failed），防止释放事务后的重复付费。既有业务数据与其他 metadata 保留。进程硬退出留下 running 时不自动接管，恢复操作见 Operations。
+
+除 Stage4 列外不新增业务字段、表或 Schema；JSONB 版本关联由服务层加载时验证所属 key、Published 状态、Hash 和精确 Fragment 引用。

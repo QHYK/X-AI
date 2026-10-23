@@ -1,3 +1,9 @@
+import {
+  withFilePrompts,
+  runPath,
+  inheritRunPrompt,
+  writeRunFile,
+} from '../lib/prompts/run-file.js';
 /**
  * Stage 3 Workflow job：消费 Stage 2 runtime，完成 Event、Digest 与 Long-form 排名及去重。
  * 该阶段把可复现的输入/诊断写入 runtime；每个独立 Ranking 在自身事务中持久化。
@@ -244,8 +250,17 @@ export async function processStage3(
   pool: Pool,
   options: Stage3JobOptions = {},
 ): Promise<Stage3JobResult> {
-  const rootDir = options.rootDir ?? process.cwd();
   const startedAt = new Date();
+  return withFilePrompts(pool, runPath('stage3', startedAt, options.rootDir), () =>
+    processStage3Bound(pool, options, startedAt),
+  );
+}
+async function processStage3Bound(
+  pool: Pool,
+  options: Stage3JobOptions = {},
+  startedAt: Date,
+): Promise<Stage3JobResult> {
+  const rootDir = options.rootDir ?? process.cwd();
   const runId = toRunTimestamp(startedAt);
   const runDir = join(rootDir, 'runtime/stage3', runId);
   const eventsDir = join(runDir, 'events');
@@ -307,6 +322,13 @@ export async function processStage3(
 
     const eventHash = snapshotHash(eventBundle.input);
     const resume = await findStage3ResumeArtifact(rootDir, dailyDate, eventHash);
+    if (resume)
+      await inheritRunPrompt(
+        join(runDir, 'run.json'),
+        join(resume.runDir, 'run.json'),
+        'daily.stage3.event_ranking',
+        pool,
+      );
     const reusableEvent =
       resume && canReuseStage3Ranking(eventHash, resume.hashes.event, resume.statuses.event)
         ? await loadReusableEventRanking(pool, resume, eventBundle.input)
@@ -419,6 +441,13 @@ export async function processStage3(
     }
     await writeJson(join(longFormDir, 'input.json'), longFormInput);
 
+    if (resume && resume.hashes.digest === inputSnapshotHashes.digest)
+      await inheritRunPrompt(
+        join(runDir, 'run.json'),
+        join(resume.runDir, 'run.json'),
+        'daily.stage3.digest_ranking',
+        pool,
+      );
     const reusableDigest =
       resume &&
       canReuseStage3Ranking(
@@ -486,6 +515,13 @@ export async function processStage3(
       rankingStatuses.digest = 'success';
     }
 
+    if (resume && resume.hashes.longForm === inputSnapshotHashes.longForm)
+      await inheritRunPrompt(
+        join(runDir, 'run.json'),
+        join(resume.runDir, 'run.json'),
+        'daily.stage3.long_form_ranking',
+        pool,
+      );
     const reusableLongForm =
       resume &&
       canReuseStage3Ranking(
@@ -1891,7 +1927,7 @@ async function writeRunJson(
     model: value.model,
     daily_date: value.dailyDate,
     event_review_run_id: value.eventReviewRunId,
-    prompt_versions: {
+    legacy_prompt_versions: {
       event: STAGE3_EVENT_RANKING_PROMPT_VERSION,
       digest: STAGE3_DIGEST_RANKING_PROMPT_VERSION,
       long_form: STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
@@ -2116,7 +2152,8 @@ async function readJson<T>(path: string): Promise<T> {
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
+  if (path.endsWith('/run.json')) await writeRunFile(path, value as Record<string, unknown>);
+  else await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function toEventId(index: number): string {

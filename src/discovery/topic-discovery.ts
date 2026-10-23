@@ -1,3 +1,5 @@
+import { withPromptBindings, databasePromptBinder } from '../lib/prompts/runtime.js';
+import { productionPrompt } from '../lib/prompts/runtime.js';
 import { resolveDiscoveryPublication } from '../lib/discovery-source.js';
 import { loadDiscoverySources } from '../lib/discovery-source-list.js';
 // D3
@@ -23,7 +25,6 @@ import {
 } from '../lib/discovery-content-metadata.js';
 import { normalizeArticleUrl } from '../processing/url-normalization.js';
 import {
-  buildDiscoveryD3Instructions,
   buildDiscoveryD3UserPrompt,
   DISCOVERY_D3_PROMPT_VERSION,
   DISCOVERY_EDITORIAL_PROMPT_VERSION,
@@ -152,6 +153,15 @@ export type RunDiscoveryD3Result = {
 };
 
 export async function runDiscoveryD3(
+  pool: Pool,
+  runId: string,
+  options: { runtime?: DiscoveryD3Runtime; environment?: NodeJS.ProcessEnv } = {},
+): Promise<RunDiscoveryD3Result> {
+  return withPromptBindings(pool, databasePromptBinder(pool, 'discovery', runId), () =>
+    runDiscoveryD3Bound(pool, runId, options),
+  );
+}
+async function runDiscoveryD3Bound(
   pool: Pool,
   runId: string,
   options: { runtime?: DiscoveryD3Runtime; environment?: NodeJS.ProcessEnv } = {},
@@ -342,6 +352,10 @@ export async function runDiscoveryD3Agent(input: {
   const apiKey = process.env.CODEX_API_KEY;
   if (!apiKey) throw new Error('CODEX_API_KEY is required for D3 Topic Discovery.');
 
+  const prompt = await productionPrompt(
+    'discovery.d3.topic_discovery',
+    buildDiscoveryD3UserPrompt(input.topicLeads, input.memory),
+  );
   const context: DiscoveryAgentContext = { fetches: [] };
   const processor = new PostgresDiscoveryTracingProcessor(input.pool, input.runId);
   setTraceProcessors([processor]);
@@ -355,7 +369,7 @@ export async function runDiscoveryD3Agent(input: {
   const agent = new Agent<DiscoveryAgentContext, typeof DiscoveryD3OutputSchema>({
     name: 'X-field Topic Discovery Agent',
     model: input.config.model,
-    instructions: buildDiscoveryD3Instructions(),
+    ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
     tools: [
       webSearchTool({ searchContextSize: 'medium' }),
       createDiscoveryFetchContentTool({ timeoutMs: input.config.fetchTimeoutMs, pool: input.pool }),
@@ -365,15 +379,11 @@ export async function runDiscoveryD3Agent(input: {
 
   const startedAt = Date.now();
   try {
-    const result = await runner.run(
-      agent,
-      buildDiscoveryD3UserPrompt(input.topicLeads, input.memory),
-      {
-        context,
-        maxTurns: input.config.maxTurns,
-        signal: AbortSignal.timeout(input.config.timeoutMs),
-      },
-    );
+    const result = await runner.run(agent, prompt.input, {
+      context,
+      maxTurns: input.config.maxTurns,
+      signal: AbortSignal.timeout(input.config.timeoutMs),
+    });
     if (!result.finalOutput) throw new Error('D3 Agent returned no final output.');
     return {
       output: result.finalOutput,
@@ -674,7 +684,7 @@ async function persistDiscoveryD3Config(
       runId,
       JSON.stringify({
         ...config,
-        promptVersion: DISCOVERY_D3_PROMPT_VERSION,
+        legacyPromptVersion: DISCOVERY_D3_PROMPT_VERSION,
         editorialPromptVersion: DISCOVERY_EDITORIAL_PROMPT_VERSION,
       }),
     ],

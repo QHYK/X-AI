@@ -2,9 +2,19 @@
 
 本文档定义 Application 与 LLM 的接口合同。Runtime Prompt 应与本文件保持一致；修改 Runtime Prompt 或 Structured Output Contract 时，应同步更新本文件。
 
+## Prompt Registry 与生产加载契约（B3.1 / B3.2）
+
+**Implemented**：`src/lib/prompts/contracts.ts` 定义 15 个正式 Request key 与 3 个 Shared Fragment key；导入器 `production-seeds.ts` 从现有静态 builder 获取基线，保留文本、空行、原版本标签和 Git 来源。Stage4 External Context Decision 无旧标签，其原字面量文本原样保留在 `src/prompts/stage4-context-decision.ts` 作为导入基线。历史 Repair、D0、Spike、测试 Prompt 不注册。
+
+数据库模板只支持 `{{input}}`、Digest 的 `{{category}}` 和 System 中的 `{{fragment.slot}}`，禁止表达式。`input` 必须由调用方沿用当前字段映射与 JSON 序列化构造，非序列化对象不进入 renderer；模板不递归解析替换值。System / User 可为空；空角色不发占位。User 未引用 input 时，渲染器将必需业务输入作为 User 内容保留，已有自定义 User 文本与输入用两个换行连接。System 不允许引用正文 input。未知 / 缺失变量、非法 Fragment、未支持的变体或 Provider/API 组合明确失败。
+
+共享文本以有序 slot + 精确 Published Version ID 引用；只支持 Request → Fragment，不允许嵌套。发布后的 Request 不跟随 Fragment Active 变化。Stage4 Enrichment 的 `without_search` / `with_search` 为同一版本下两个显式变体，调用方必须选择；Schema、工具及搜索条件仍由代码控制。
+
+**Implemented（B3.2）**：15 类生产请求加载数据库 Prompt。`productionPrompt()` 在本次执行上下文首次使用 key 时取得并固定 Published Version，之后只用该版本及其精确 Fragment；加载、绑定、模板或引用错误明确失败，不发静态 fallback 请求。原静态 System 文本仅作基线；现有 User JSON 字段映射 / 业务输入构造仍在代码中。Chat Completions / Responses 使用现有兼容 Client 的 instructions / input，Agents SDK 使用可选 instructions + 必需 input；空角色不传占位，不引入 Developer。同次自动重试 / Provider fallback / Agent Loop 使用已加载文本。管理页面仍为 Planned（B3.3）。数据载体见 [Data Model](05-data-model.md#121-b32-版本绑定载体)，运行规则见各 Workflow，导入命令见 Operations。
+
 ## Ignored Article Put Back
 
-Runtime Prompt 位于 `src/prompts/digest-put-back.ts`。这是独立的展示字段补齐任务，不使用 Stage1 的保留 / 路由判断指令。输入为已存原文 / 摘要、原标题、原 URL、来源及原分类；不搜索、不抓取、不执行 Event Merge 或 Ranking。输出严格包含 `category`（既有 Digest 分类）、`title_zh`、`summary`（英文）、`summary_zh`（中文）和最多 `MAX_STAGE1_TAGS` 个字符串 Tags；复用 Stage1 的分类枚举和标签上限。不得输出 Ignore / keep / routing 判断，不编造正文没有提供的内容。中文字段在模型返回后校验；正文不足返回明确失败，不持久化伪完整摘要。Provider / Model 复用 Stage1 配置，单次请求不自动重试。
+静态导入基线位于 `src/prompts/digest-put-back.ts`，生产 key 为 `daily.editorial.digest_put_back`。这是独立的展示字段补齐任务，不使用 Stage1 的保留 / 路由判断指令。输入为已存原文 / 摘要、原标题、原 URL、来源及原分类；不搜索、不抓取、不执行 Event Merge 或 Ranking。输出严格包含 `category`（既有 Digest 分类）、`title_zh`、`summary`（英文）、`summary_zh`（中文）和最多 `MAX_STAGE1_TAGS` 个字符串 Tags；复用 Stage1 的分类枚举和标签上限。不得输出 Ignore / keep / routing 判断，不编造正文没有提供的内容。中文字段在模型返回后校验；正文不足返回明确失败，不持久化伪完整摘要。Provider / Model 复用 Stage1 配置，单次请求不自动重试。
 
 ## Stage 1 — Content Understanding & Selection
 
@@ -298,11 +308,11 @@ Do not manufacture significance. Straightforward Events whose significance is al
 
 ## Manual In-depth Generate
 
-人工候选共用 In-depth Editorial Introduction 的写作指令、D4 的共享编辑标准和 Discovery Tags 指令，另加人工任务说明，不复制完整 Prompt。只接收实际保存的完整正文、Original URL 和可靠元数据；不搜索、不运行 D4 入选判断，不生成时长或作者。一次 Structured Output 返回五个字段：`title_zh`、`summary`、`whyWorthReading`、`extra_info` 均为字符串，`tags` 为最多三对双语标签。`summary`、`whyWorthReading`、`extra_info` 使用中文 Markdown，标题忠实翻译；Tags 复用现有应用层校验和去重。人工已有 Tags 保留。正文不足返回明确失败，不保存貌似完整的介绍；模型输出不包含审核状态或 Notes。运行 Prompt 位于 `src/prompts/manual-in-depth.ts`。
+人工候选共用 In-depth Editorial Introduction 的写作指令、D4 的共享编辑标准和 Discovery Tags 指令，另加人工任务说明，不复制完整 Prompt。只接收实际保存的完整正文、Original URL 和可靠元数据；不搜索、不运行 D4 入选判断，不生成时长或作者。一次 Structured Output 返回五个字段：`title_zh`、`summary`、`whyWorthReading`、`extra_info` 均为字符串，`tags` 为最多三对双语标签。`summary`、`whyWorthReading`、`extra_info` 使用中文 Markdown，标题忠实翻译；Tags 复用现有应用层校验和去重。人工已有 Tags 保留。正文不足返回明确失败，不保存貌似完整的介绍；模型输出不包含审核状态或 Notes。静态导入基线位于 `src/prompts/manual-in-depth.ts`，生产 key 为 `in_depth.manual.generate`。
 
 ## In-depth Editorial Introduction
 
-Runtime Prompt：`src/prompts/in-depth-introduction.ts`，版本 `v2`，独立于 Daily 长文摘要 Prompt。沿用下方 D0 每周长文推荐的内容研究标准，应用先取得选定作品的原文，模型不进行开放搜索或发现新候选。
+静态导入基线：`src/prompts/in-depth-introduction.ts`（原标签 `v2`），生产 key 为 `in_depth.editorial.introduction`，独立于 Daily 长文摘要 Prompt。沿用下方 D0 每周长文推荐的内容研究标准，应用先取得选定作品的原文，模型不进行开放搜索或发现新候选。
 
 输入必须包含 Original URL、实际读取的完整正文及可用元数据（标题、作者、来源、发布时间）；已有 Agent Summary、Evidence 和 Limitations 仅作上下文，不能替代原文。外部文本是资料而非指令，不能因收到 URL 就声明已阅读。原文读取策略由 `04-technical-spec.md` §7.3 定义。
 

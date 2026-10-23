@@ -1,3 +1,4 @@
+import { productionPrompt } from '../lib/prompts/runtime.js';
 /**
  * Stage 3 Long-form Ranking 的 LLM 调用层。
  * 对全部长文候选进行严格完整排名，成功结果才交给 Stage 3 persistence。
@@ -18,9 +19,7 @@ import {
   type Stage3RankingOutput,
 } from './stage3-contract.js';
 import {
-  buildStage3LongFormRankingInstructions,
   buildStage3LongFormRankingUserPrompt,
-  STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
   type Stage3LongFormRankingInput,
 } from '../prompts/stage3-long-form-ranking.js';
 import { resolveStageLlmRuntimeConfig } from './stage-llm-runtime-config.js';
@@ -84,6 +83,10 @@ export async function runStage3LongFormRankingLlm(
   const runtimeConfig = resolveStageLlmRuntimeConfig('stage3');
   const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
   const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
+  const prompt = await productionPrompt(
+    'daily.stage3.long_form_ranking',
+    buildStage3LongFormRankingUserPrompt(input),
+  );
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const expectedIds = input.candidates.map((candidate) => candidate.id);
@@ -101,14 +104,14 @@ export async function runStage3LongFormRankingLlm(
         const response = await client.structured.create(
           {
             model,
-            instructions: buildStage3LongFormRankingInstructions(),
+            ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
             input: [
               {
                 role: 'user',
                 content: [
                   {
                     type: 'input_text',
-                    text: buildStage3LongFormRankingUserPrompt(input),
+                    text: prompt.input,
                   },
                 ],
               },
@@ -159,7 +162,7 @@ export async function runStage3LongFormRankingLlm(
           assignment,
           warnings: normalized.warnings,
           model,
-          promptVersion: STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
+          promptVersion: prompt.versionId,
           responseId: response.id,
           attempts: attempt,
           elapsedMs: Date.now() - startedAt,
@@ -185,7 +188,7 @@ export async function runStage3LongFormRankingLlm(
       input,
       assignment: lastAssignment,
       model,
-      promptVersion: STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
+      promptVersion: prompt.versionId,
       attempts: attemptsUsed,
       elapsedMs: Date.now() - startedAt,
       tokenUsage: attemptsUsed > 0 ? tokenUsage : null,

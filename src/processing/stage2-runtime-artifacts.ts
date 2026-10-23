@@ -1,3 +1,4 @@
+import { writeRunFile } from '../lib/prompts/run-file.js';
 /**
  * Stage 2 runtime artifact 写入层。
  * 保存模型输入、id-map、输出与统计，作为 Stage 3 的明确上游 lineage。
@@ -106,7 +107,9 @@ export async function writeStage2RuntimeArtifacts(
 }
 
 function writeJson(path: string, value: unknown): Promise<void> {
-  return writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
+  return path.endsWith('/run.json')
+    ? writeRunFile(path, value as Record<string, unknown>)
+    : writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function toRunTimestamp(date: Date): string {

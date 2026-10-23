@@ -1,3 +1,10 @@
+import {
+  productionPrompt,
+  withPromptBindings,
+  claimManualPrompt,
+  finishManualPrompt,
+  PromptAttemptBusyError,
+} from './prompts/runtime.js';
 import { z } from 'zod';
 import { normalizeArticleUrl } from '../processing/url-normalization.js';
 import type { Pool, PoolClient } from 'pg';
@@ -14,10 +21,6 @@ import {
   resolveStageLlmProvider,
   resolveStageLlmModel,
 } from '../processing/llm-client.js';
-import {
-  DIGEST_PUT_BACK_PROMPT,
-  DIGEST_PUT_BACK_PROMPT_VERSION,
-} from '../prompts/digest-put-back.js';
 
 export const PutBackInput = z.object({ id: z.uuid(), date: z.iso.date() }).strict();
 const ChineseText = (limit: number) =>
@@ -81,7 +84,7 @@ export type PutBackResult = {
   putBackAt: string | null;
   alreadyInDigest: boolean;
 };
-type Database = Pick<Pool, 'connect'>;
+type Database = Pick<Pool, 'connect' | 'query'>;
 type Request = ReturnType<typeof createLlmClient>['structured']['create'];
 
 async function loadArticle(client: Pick<PoolClient, 'query'>, id: string): Promise<ArticleRow> {
@@ -162,6 +165,15 @@ async function existingDigestWork(
     [`digest-put-back-url:${date}:${normalized}`],
   );
   if (!locked.rows[0]?.locked) throw new PutBackError('相同作品正在恢复，请等待完成后刷新。', 409);
+  // The URL transaction lock serializes claims; the committed marker survives while LLM runs.
+  const running = await client.query<{ id: string; url: string | null }>(
+    `select id, url from raw_articles
+      where id <> $1::uuid and metadata->'promptAttempt'->>'status' = 'running'
+        and metadata->'promptAttempt'->>'key' = 'daily.editorial.digest_put_back'`,
+    [row.id],
+  );
+  if (running.rows.some((item) => item.url && normalizeArticleUrl(item.url) === normalized))
+    throw new PutBackError('相同作品正在恢复，请等待完成后刷新。', 409);
   const matches = await client.query<{
     id: string;
     url: string | null;
@@ -206,17 +218,22 @@ export async function putBackIgnoredArticle(
 ): Promise<PutBackResult> {
   const input = PutBackInput.parse(rawInput);
   const now = options.now ?? new Date();
-  const client = await db.connect();
+  let client = await db.connect();
+  let released = false;
   let model: ReturnType<typeof createLlmClient> | null = null;
   let fields: PutBackFields | undefined;
   let preparationSaved = false;
+  let claimed = false;
+  let claimFinished = false;
   try {
     await client.query('begin');
     await lockArticle(client, input.id);
     let row = await loadArticle(client, input.id);
     validateDate(row, input.date, now);
     if (isVisibleDigest(row)) {
+      if (claimed) await finishManualPrompt(client, 'raw', input.id, 'completed');
       await client.query('commit');
+      claimFinished = true;
       return result(row, true);
     }
     assertRestorable(row);
@@ -239,23 +256,43 @@ export async function putBackIgnoredArticle(
         throw new PutBackError('没有足够的已存正文，未调用模型、未恢复文章。', 422);
       const contentTruncated = content.length > 60_000;
       if (contentTruncated) content = content.slice(0, 60_000);
+      const boundVersion = await claimManualPrompt(
+        client,
+        'raw',
+        input.id,
+        'daily.editorial.digest_put_back',
+        true,
+      );
+      await client.query('commit');
+      claimed = true;
+      client.release();
+      released = true;
       try {
+        const prompt = await withPromptBindings(
+          db,
+          async () => boundVersion,
+          () =>
+            productionPrompt(
+              'daily.editorial.digest_put_back',
+              JSON.stringify({
+                title: row.title,
+                originalUrl: row.url,
+                author: row.author,
+                source: row.source_name,
+                category: row.category ?? row.source_category,
+                content,
+                contentTruncated,
+              }),
+            ),
+        );
         const provider = resolveStageLlmProvider('stage1');
         const name = resolveStageLlmModel('stage1');
         if (!options.request)
           model = createLlmClient({ provider, maxRetries: 0, timeoutMs: 120_000 });
         const response = await (options.request ?? model!.structured.create)({
           model: name,
-          instructions: DIGEST_PUT_BACK_PROMPT,
-          input: JSON.stringify({
-            title: row.title,
-            originalUrl: row.url,
-            author: row.author,
-            source: row.source_name,
-            category: row.category ?? row.source_category,
-            content,
-            contentTruncated,
-          }),
+          ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
+          input: prompt.input,
           max_output_tokens: 4000,
           store: false,
           text: {
@@ -277,14 +314,24 @@ export async function putBackIgnoredArticle(
           dailyDate: input.date,
           provider,
           model: name,
-          promptVersion: DIGEST_PUT_BACK_PROMPT_VERSION,
+          promptVersion: prompt.versionId,
           usage: response.usage,
         });
       } catch (error) {
+        if (error instanceof PromptAttemptBusyError) throw new PutBackError(error.message, 409);
         if (error instanceof PutBackError) throw error;
         console.error('Digest Put Back model failed.', error);
         throw new PutBackError('字段生成失败，未恢复文章。', 502);
       }
+    }
+    if (claimed) {
+      client = await db.connect();
+      released = false;
+      await client.query('begin');
+      await lockArticle(client, input.id);
+      row = await loadArticle(client, input.id);
+      validateDate(row, input.date, now);
+      assertRestorable(row);
     }
     const preparation = {
       dailyDate: input.date,
@@ -306,13 +353,17 @@ export async function putBackIgnoredArticle(
     row = await loadArticle(client, input.id);
     validateDate(row, input.date, now);
     if (isVisibleDigest(row)) {
+      if (claimed) await finishManualPrompt(client, 'raw', input.id, 'completed');
       await client.query('commit');
+      claimFinished = true;
       return result(row, true);
     }
     assertRestorable(row);
     const duplicateAfterPreparation = await existingDigestWork(client, row, input.date);
     if (duplicateAfterPreparation) {
+      if (claimed) await finishManualPrompt(client, 'raw', input.id, 'completed');
       await client.query('commit');
+      claimFinished = true;
       return duplicateAfterPreparation;
     }
     await lockDigestOrder(client);
@@ -353,10 +404,27 @@ export async function putBackIgnoredArticle(
     );
     if (raw.rowCount !== 1) throw new PutBackError('文章状态已变化，恢复已回滚。', 409);
     const restored = await loadArticle(client, input.id);
+    if (claimed) await finishManualPrompt(client, 'raw', input.id, 'completed');
     await client.query('commit');
+    claimFinished = true;
     return result(restored, false);
   } catch (error) {
-    await client.query('rollback');
+    if (!released) {
+      await client.query('rollback');
+      client.release();
+      released = true;
+    }
+    if (claimed && !claimFinished) {
+      try {
+        await finishManualPrompt(db, 'raw', input.id, 'failed');
+      } catch (failure) {
+        console.error(
+          'Put Back Prompt attempt recovery failed; needs operator verification.',
+          failure,
+        );
+      }
+    }
+    if (error instanceof PromptAttemptBusyError) throw new PutBackError(error.message, 409);
     if (error instanceof PutBackError) throw error;
     console.error('Digest Put Back persistence failed.', error);
     throw new PutBackError(
@@ -370,6 +438,6 @@ export async function putBackIgnoredArticle(
     );
   } finally {
     await model?.close();
-    client.release();
+    if (!released) client.release();
   }
 }

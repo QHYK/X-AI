@@ -1,3 +1,4 @@
+import { productionPrompt } from '../lib/prompts/runtime.js';
 /**
  * Stage 2 Event Merge 的 LLM 调用层。
  * 负责 Provider 调用、重试与运行诊断；分组完整性由 job 层记录并交给后续 Stage 使用。
@@ -12,9 +13,7 @@ import {
 } from './llm-client.js';
 import { stage2OutputJsonSchema, type Stage2Input, type Stage2Output } from './stage2-contract.js';
 import {
-  buildStage2Instructions,
   buildStage2UserPrompt,
-  STAGE2_PROMPT_VERSION,
 } from '../prompts/stage2-event-merge.js';
 import {
   resolveStage2MaxOutputTokens,
@@ -39,7 +38,7 @@ export type Stage2LlmOptions = {
 
 type Stage2ResponseRequest = {
   model: string;
-  instructions: string;
+  instructions?: string;
   input: Array<{ role: string; content: Array<{ type: 'input_text'; text: string }> }>;
   max_output_tokens: number;
   store: boolean;
@@ -114,6 +113,7 @@ export async function runStage2MergeLlm(
   const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
   const maxOutputTokens = resolveStage2MaxOutputTokens();
   // SDK retries stay disabled: Stage 2 owns attempt accounting and retry policy.
+  const prompt = await productionPrompt('daily.stage2.event_merge', buildStage2UserPrompt(input));
   const client = options.request ? null : createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const request = options.request ?? client?.responses.create;
   if (!request) {
@@ -135,14 +135,14 @@ export async function runStage2MergeLlm(
       const response = await request(
         {
           model,
-          instructions: buildStage2Instructions(),
+          ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
           input: [
             {
               role: 'user',
               content: [
                 {
                   type: 'input_text',
-                  text: buildStage2UserPrompt(input),
+                  text: prompt.input,
                 },
               ],
             },
@@ -187,7 +187,7 @@ export async function runStage2MergeLlm(
         input,
         output,
         model,
-        promptVersion: STAGE2_PROMPT_VERSION,
+        promptVersion: prompt.versionId,
         responseId: response.id,
         attempts: attempt,
         elapsedMs: Date.now() - startedAt,
@@ -222,7 +222,7 @@ export async function runStage2MergeLlm(
     success: false,
     input,
     model,
-    promptVersion: STAGE2_PROMPT_VERSION,
+    promptVersion: prompt.versionId,
     attempts: attemptsUsed,
     elapsedMs: Date.now() - startedAt,
     tokenUsage: attemptsUsed > 0 ? tokenUsage : null,

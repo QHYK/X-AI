@@ -1,3 +1,5 @@
+import { withPromptBindings, databasePromptBinder } from '../lib/prompts/runtime.js';
+import { productionPrompt } from '../lib/prompts/runtime.js';
 // D2
 import type { Pool } from 'pg';
 import {
@@ -7,9 +9,7 @@ import {
   type LlmResponse,
 } from '../processing/llm-client.js';
 import {
-  buildDiscoveryD2Instructions,
   buildDiscoveryD2UserPrompt,
-  DISCOVERY_D2_PROMPT_VERSION,
   DISCOVERY_EDITORIAL_PROMPT_VERSION,
 } from '../prompts/discovery-topic-selection.js';
 import {
@@ -61,7 +61,7 @@ type RawDiscoveryLead = RawDirectLead | RawTopicLead;
 
 type DiscoveryD2Request = {
   model: string;
-  instructions: string;
+  instructions?: string;
   input: string;
   max_output_tokens: number;
   store: boolean;
@@ -135,6 +135,15 @@ export async function runDiscoveryD2(
   runId: string,
   options: RunDiscoveryD2Options = {},
 ): Promise<RunDiscoveryD2Result> {
+  return withPromptBindings(pool, databasePromptBinder(pool, 'discovery', runId), () =>
+    runDiscoveryD2Bound(pool, runId, options),
+  );
+}
+async function runDiscoveryD2Bound(
+  pool: Pool,
+  runId: string,
+  options: RunDiscoveryD2Options = {},
+): Promise<RunDiscoveryD2Result> {
   const run = await getDiscoveryRun(pool, runId);
   if (!run || run.status !== 'running' || run.runType !== 'regular') {
     throw new Error('D2 requires a running regular Discovery Run.');
@@ -175,12 +184,16 @@ export async function runDiscoveryD2(
   let responseUsage: LlmResponse['usage'] | null = null;
 
   try {
+    const prompt = await productionPrompt(
+      'discovery.d2.topic_selection',
+      buildDiscoveryD2UserPrompt(input),
+    );
     const requestStartedAt = Date.now();
     const response = await request(
       {
         model,
-        instructions: buildDiscoveryD2Instructions(),
-        input: buildDiscoveryD2UserPrompt(input),
+        ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
+        input: prompt.input,
         max_output_tokens: 4_000,
         store: false,
         text: {
@@ -207,7 +220,7 @@ export async function runDiscoveryD2(
         provider,
         model,
         timeoutMs,
-        promptVersion: DISCOVERY_D2_PROMPT_VERSION,
+        promptVersion: prompt.versionId,
         editorialPromptVersion: DISCOVERY_EDITORIAL_PROMPT_VERSION,
       },
       buildDiscoveryStageState({
@@ -226,7 +239,7 @@ export async function runDiscoveryD2(
       selection,
       provider,
       model,
-      promptVersion: DISCOVERY_D2_PROMPT_VERSION,
+      promptVersion: prompt.versionId,
       responseId: response.id,
       apiMode: response.api_mode,
       requestElapsedMs: Date.now() - requestStartedAt,

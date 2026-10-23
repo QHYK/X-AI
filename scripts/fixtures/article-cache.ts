@@ -1,3 +1,4 @@
+import { attachPromptMemory, PromptMemory } from './prompt-runtime.js';
 import assert from 'node:assert/strict';
 import type { ArticleDatabase, ArticleDocument } from '../../src/lib/article-fetch-cache.js';
 
@@ -35,6 +36,7 @@ export class ArticleStore {
   cache = new Map<string, CacheRow>();
   daily: Record<string, unknown>[] = [];
   source: Record<string, unknown> | null = {
+    candidate_id: '00000000-0000-4000-8000-000000000001',
     title: 'Original',
     author: 'Author',
     url: articleUrl,
@@ -95,7 +97,8 @@ export class ArticleStore {
       });
       return { rows };
     }
-    if (sql.includes('select dc.title')) return { rows: this.source ? [this.source] : [] };
+    if (sql.includes('select dc.title') || sql.includes('select dc.id as candidate_id'))
+      return { rows: this.source ? [this.source] : [] };
     if (sql.includes('update in_depth_candidates')) {
       assert.ok(sql.includes('set editorial_summary = $2'));
       assert.ok(sql.includes('editorial_why_worth_reading = $3'));
@@ -179,7 +182,8 @@ export class ArticleStore {
       },
     };
   }
+  private prompts = new PromptMemory();
   get db(): ArticleDatabase {
-    return this as unknown as ArticleDatabase;
+    return attachPromptMemory(this as unknown as ArticleDatabase, this.prompts);
   }
 }

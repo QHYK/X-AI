@@ -1,13 +1,15 @@
+import { attachPromptMemory } from './fixtures/prompt-runtime.js';
+import { baselineVersionId } from '../src/lib/prompts/production-seeds.js';
 import type { Pool } from 'pg';
 import { resolveProviderLlmModel } from '../src/processing/llm-client.js';
 import {
   parseAndValidateDiscoveryD4Output,
-  runDiscoveryD4,
+  runDiscoveryD4 as executeD4,
 } from '../src/discovery/direct-verification.js';
 import type { DiscoveryWindowInput } from '../src/discovery/daily-read-adapter.js';
 import {
   parseAndValidateDiscoveryD2Output,
-  runDiscoveryD2,
+  runDiscoveryD2 as executeD2,
   type DiscoverySelectionOutput,
 } from '../src/discovery/topic-selection.js';
 import {
@@ -214,6 +216,24 @@ function testD2Validation() {
   );
 }
 
+const promptDbs = new WeakMap<Pool, Pool>();
+function promptDb(db: Pool): Pool {
+  let decorated = promptDbs.get(db);
+  if (!decorated) {
+    decorated = attachPromptMemory(db);
+    promptDbs.set(db, decorated);
+  }
+  return decorated;
+}
+const runDiscoveryD2 = (
+  db: Pool,
+  ...args: Parameters<typeof executeD2> extends [Pool, ...infer R] ? R : never
+) => executeD2(promptDb(db), ...args);
+const runDiscoveryD4 = (
+  db: Pool,
+  ...args: Parameters<typeof executeD4> extends [Pool, ...infer R] ? R : never
+) => executeD4(promptDb(db), ...args);
+
 async function testD2PersistenceAndUrlEnrichment() {
   const input = discoveryWindowFixture();
   const db = new FakeDiscoveryPool(input, {
@@ -241,7 +261,8 @@ async function testD2PersistenceAndUrlEnrichment() {
       direct[0]?.url === 'https://example.test/digest' &&
         direct[1]?.url === null &&
         db.run.selection_output !== null &&
-        (db.run.config_snapshot?.d2 as { promptVersion?: string })?.promptVersion === 'v2',
+        (db.run.config_snapshot?.d2 as { promptVersion?: string })?.promptVersion ===
+          baselineVersionId('discovery.d2.topic_selection'),
     ],
     [
       'D2 records missing_url diagnostics without putting URLs in LLM output',

@@ -9,6 +9,7 @@ import {
   boolean,
   check,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -178,12 +179,17 @@ export const stage4Runs = pgTable(
     dailyDate: date('daily_date').notNull(),
     reviewRunId: uuid('review_run_id').notNull(),
     status: text('status').notNull(),
+    promptVersions: jsonb('prompt_versions').$type<Record<string, string>>().notNull().default({}),
     expectedCount: integer('expected_count').notNull(),
     successCount: integer('success_count').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
   (table) => [
+    check(
+      'stage4_runs_prompt_versions_object_check',
+      sql`jsonb_typeof(${table.promptVersions}) = 'object'`,
+    ),
     index('stage4_runs_daily_date_idx').on(table.dailyDate),
     uniqueIndex('stage4_runs_review_run_unique').on(table.reviewRunId),
   ],
@@ -598,3 +604,53 @@ export type DiscoveryCandidate = typeof discoveryCandidates.$inferSelect;
 export type NewDiscoveryCandidate = typeof discoveryCandidates.$inferInsert;
 export type InDepthCandidate = typeof inDepthCandidates.$inferSelect;
 export type NewInDepthCandidate = typeof inDepthCandidates.$inferInsert;
+
+/** Prompt text/version infrastructure; production binding carriers are documented in Data Model. */
+export const promptRegistry = pgTable(
+  'prompt_registry',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    key: text('key').notNull(),
+    kind: text('kind').notNull(),
+    workflow: text('workflow').notNull(),
+    step: text('step').notNull(),
+    requestType: text('request_type').notNull(),
+    displayName: text('display_name').notNull(),
+    activeVersionId: uuid('active_version_id'),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('prompt_registry_key_unique').on(table.key),
+    check('prompt_registry_kind_check', sql`${table.kind} in ('request', 'fragment')`),
+    foreignKey({
+      name: 'prompt_registry_active_same_registry_fk',
+      columns: [table.activeVersionId, table.id],
+      foreignColumns: [promptVersions.id, promptVersions.registryId],
+    }),
+  ],
+);
+export const promptVersions = pgTable(
+  'prompt_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    registryId: uuid('registry_id')
+      .notNull()
+      .references((): AnyPgColumn => promptRegistry.id),
+    version: integer('version').notNull(),
+    status: text('status').notNull(),
+    body: jsonb('body').$type<Record<string, unknown>>().notNull(),
+    contentHash: text('content_hash').notNull(),
+    sourceCommit: text('source_commit'),
+    legacyVersion: text('legacy_version'),
+    changeNote: text('change_note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('prompt_versions_registry_version_unique').on(table.registryId, table.version),
+    uniqueIndex('prompt_versions_id_registry_unique').on(table.id, table.registryId),
+    check('prompt_versions_version_check', sql`${table.version} > 0`),
+    check('prompt_versions_status_check', sql`${table.status} in ('draft', 'published')`),
+    check('prompt_versions_body_check', sql`jsonb_typeof(${table.body}) = 'object'`),
+    check('prompt_versions_content_hash_check', sql`${table.contentHash} ~ '^[a-f0-9]{64}$'`),
+  ],
+);

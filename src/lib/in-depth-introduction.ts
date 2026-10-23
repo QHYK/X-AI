@@ -1,13 +1,10 @@
+import { productionPrompt, withPromptBindings, databasePromptBinder } from './prompts/runtime.js';
 import { z } from 'zod';
 import {
   createLlmClient,
   resolveLlmProvider,
   resolveProviderLlmModel,
 } from '../processing/llm-client.js';
-import {
-  IN_DEPTH_INTRODUCTION_PROMPT,
-  IN_DEPTH_INTRODUCTION_PROMPT_VERSION,
-} from '../prompts/in-depth-introduction.js';
 import { EditorialIntroductionSchema, type EditorialIntroduction } from './in-depth-editorial.js';
 import { fetchDiscoveryArticle } from '../discovery/fetch-content.js';
 import {
@@ -32,6 +29,7 @@ export class IntroductionError extends Error {
 }
 
 type SourceRow = {
+  candidate_id: string;
   title: string | null;
   author: string | null;
   summary: string | null;
@@ -50,7 +48,7 @@ export async function generateAndSaveInDepthIntroduction(
   options: { request?: LlmRequest; fetchDocument?: (url: string) => Promise<ArticleDocument> } = {},
 ): Promise<EditorialIntroduction> {
   const source = await db.query<SourceRow>(
-    `select dc.title, dc.author, dc.summary, dc.why_worth_reading, dc.evidence,
+    `select dc.id as candidate_id, dc.title, dc.author, dc.summary, dc.why_worth_reading, dc.evidence,
             dc.url, dc.source_content_id, dc.publication, dc.published_at
        from in_depth_candidates idc
        join discovery_candidates dc on dc.id = idc.discovery_candidate_id
@@ -113,6 +111,28 @@ export async function generateAndSaveInDepthIntroduction(
       '全文超过当前单次介绍输入上限；已保留 Fetch 内容，未截断正文或调用介绍模型。',
       422,
     );
+  const prompt = await withPromptBindings(
+    db,
+    databasePromptBinder(db, 'candidate', row.candidate_id, { fresh: true }),
+    () =>
+      productionPrompt(
+        'in_depth.editorial.introduction',
+        JSON.stringify({
+          originalUrl: row.url,
+          finalUrl: article.finalUrl,
+          source: row.publication,
+          publishedAt: row.published_at,
+          sourceMetadata: article.metadata,
+          title: row.title,
+          author: row.author,
+          content: article.markdown,
+          contentComplete: article.isComplete,
+          agentSummary: row.summary,
+          agentWhyWorthReading: row.why_worth_reading,
+          evidence: row.evidence,
+        }),
+      ),
+  );
   const provider = resolveLlmProvider(
     process.env.DISCOVERY_LLM_PROVIDER?.trim() || process.env.LLM_PROVIDER,
   );
@@ -124,21 +144,8 @@ export async function generateAndSaveInDepthIntroduction(
   try {
     const response = await (options.request ?? client!.structured.create)({
       model,
-      instructions: IN_DEPTH_INTRODUCTION_PROMPT,
-      input: JSON.stringify({
-        originalUrl: row.url,
-        finalUrl: article.finalUrl,
-        source: row.publication,
-        publishedAt: row.published_at,
-        sourceMetadata: article.metadata,
-        title: row.title,
-        author: row.author,
-        content: article.markdown,
-        contentComplete: article.isComplete,
-        agentSummary: row.summary,
-        agentWhyWorthReading: row.why_worth_reading,
-        evidence: row.evidence,
-      }),
+      ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
+      input: prompt.input,
       max_output_tokens: 8_000,
       store: false,
       text: {
@@ -154,7 +161,7 @@ export async function generateAndSaveInDepthIntroduction(
       id,
       provider,
       model,
-      promptVersion: IN_DEPTH_INTRODUCTION_PROMPT_VERSION,
+      promptVersion: prompt.versionId,
       usage: response.usage,
       apiMode: response.api_mode,
       articleOrigin: article.origin,

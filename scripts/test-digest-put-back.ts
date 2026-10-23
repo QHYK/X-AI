@@ -1,3 +1,4 @@
+import { attachPromptMemory, PromptMemory } from './fixtures/prompt-runtime.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import type { Pool } from 'pg';
@@ -169,6 +170,20 @@ class Store {
           ],
         };
       }
+      if (sql.includes('select id, url from raw_articles')) {
+        return {
+          rows: [...this.raw.values()]
+            .filter(
+              (r) =>
+                r.id !== v[0] &&
+                (
+                  this.prompts.owners.get(`raw_articles:${r.id}`)?.promptAttempt as
+                    { status?: string } | undefined
+                )?.status === 'running',
+            )
+            .map((r) => ({ id: r.id, url: r.url })),
+        };
+      }
       if (sql.includes('select pc.id, ra.url')) {
         return {
           rows: [...rows().values()]
@@ -302,7 +317,8 @@ class Store {
     c.release();
     return r;
   };
-  db = this as unknown as Pool;
+  prompts = new PromptMemory();
+  db = attachPromptMemory(this as unknown as Pool, this.prompts);
 }
 
 let calls = 0;

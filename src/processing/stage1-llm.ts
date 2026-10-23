@@ -1,3 +1,4 @@
+import { productionPrompt } from '../lib/prompts/runtime.js';
 /**
  * Stage 1 Content Understanding 的 LLM 调用层。
  * 将 batch 输入、Prompt 和严格 Schema 校验串联，并在可恢复错误上执行有限重试。
@@ -12,9 +13,7 @@ import {
   type Stage1BatchOutput,
 } from './stage1-contract.js';
 import {
-  buildStage1Instructions,
   buildStage1UserPrompt,
-  STAGE1_PROMPT_VERSION,
 } from '../prompts/stage1-content-understanding.js';
 import {
   createLlmClient,
@@ -119,6 +118,10 @@ export async function runStage1BatchLlmForInput(
   let rawOutputText: string | null = null;
   let lastError = 'Unknown Stage 1 LLM failure.';
   let attemptsUsed = 0;
+  const prompt = await productionPrompt(
+    'daily.stage1.content_understanding',
+    buildStage1UserPrompt(input),
+  );
   let client: ReturnType<typeof createLlmClient>;
   try {
     client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
@@ -136,7 +139,7 @@ export async function runStage1BatchLlmForInput(
       success: false,
       input,
       model,
-      promptVersion: STAGE1_PROMPT_VERSION,
+      promptVersion: prompt.versionId,
       attempts: 0,
       elapsedMs: Date.now() - startedAt,
       tokenUsage: null,
@@ -152,14 +155,14 @@ export async function runStage1BatchLlmForInput(
       const response = await client.structured.create(
         {
           model,
-          instructions: buildStage1Instructions(),
+          ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
           input: [
             {
               role: 'user',
               content: [
                 {
                   type: 'input_text',
-                  text: buildStage1UserPrompt(input),
+                  text: prompt.input,
                 },
               ],
             },
@@ -235,7 +238,7 @@ export async function runStage1BatchLlmForInput(
         input,
         output: validation.output,
         model,
-        promptVersion: STAGE1_PROMPT_VERSION,
+        promptVersion: prompt.versionId,
         responseId: response.id,
         attempts: attempt,
         elapsedMs: Date.now() - startedAt,
@@ -273,7 +276,7 @@ export async function runStage1BatchLlmForInput(
     success: false,
     input,
     model,
-    promptVersion: STAGE1_PROMPT_VERSION,
+    promptVersion: prompt.versionId,
     attempts: attemptsUsed,
     elapsedMs: Date.now() - startedAt,
     tokenUsage: attemptsUsed > 0 ? tokenUsage : null,

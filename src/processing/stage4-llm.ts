@@ -1,11 +1,10 @@
+import { productionPrompt } from '../lib/prompts/runtime.js';
 /**
  * Stage 4 Event Enrichment 的 LLM 调用层。
  * 允许模型按需检索，并用实际工具调用记录覆盖模型自报的外部上下文字段。
  */
 import {
-  buildStage4EventEnrichmentInstructions,
   buildStage4EventEnrichmentUserPrompt,
-  STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
   type Stage4EventEnrichmentInput,
 } from '../prompts/stage4-event-enrichment.js';
 import { createLlmClient, resolveStageLlmModel, resolveStageLlmProvider } from './llm-client.js';
@@ -109,6 +108,11 @@ export async function runStage4EventEnrichmentLlm(
   let tokenUsage = contextDecision.tokenUsage;
   let llmDurationMs = contextDecision.llmDurationMs;
   const useWebSearch = contextDecision.needExternalContext;
+  const prompt = await productionPrompt(
+    'daily.stage4.event_enrichment',
+    buildStage4EventEnrichmentUserPrompt(input),
+    { variant: useWebSearch ? 'with_search' : 'without_search' },
+  );
 
   let rawOutputText: string | null = null;
   let lastError = 'Unknown Stage 4 LLM failure.';
@@ -121,16 +125,14 @@ export async function runStage4EventEnrichmentLlm(
       const response = await (useWebSearch ? client.responses : client.structured).create(
         {
           model,
-          instructions: buildStage4EventEnrichmentInstructions({
-            webSearchAvailable: useWebSearch,
-          }),
+          ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
           input: [
             {
               role: 'user',
               content: [
                 {
                   type: 'input_text',
-                  text: buildStage4EventEnrichmentUserPrompt(input),
+                  text: prompt.input,
                 },
               ],
             },
@@ -180,7 +182,7 @@ export async function runStage4EventEnrichmentLlm(
         rawStructuredOutput: validation.output,
         toolUsage,
         model,
-        promptVersion: STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
+        promptVersion: prompt.versionId,
         responseId: response.id,
         attempts: attempt,
         llmCallCount: contextDecision.llmCallCount + attempt,
@@ -211,7 +213,7 @@ export async function runStage4EventEnrichmentLlm(
     success: false,
     input,
     model,
-    promptVersion: STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
+    promptVersion: prompt.versionId,
     attempts: attemptsUsed,
     llmCallCount: contextDecision.llmCallCount + attemptsUsed,
     llmDurationMs,
@@ -237,17 +239,17 @@ async function determineWhetherExternalContextIsNeeded(
   llmDurationMs: number;
   tokenUsage: Stage4TokenUsage;
 }> {
+  const prompt = await productionPrompt(
+    'daily.stage4.external_context_decision',
+    buildStage4EventEnrichmentUserPrompt(input),
+  );
   const requestStartedAt = Date.now();
   try {
     const response = await client.structured.create(
       {
         model,
-        instructions: [
-          'Decide whether external web context is necessary before enriching this event.',
-          'Return need_external_context=true only when a critical fact is missing from the provided reports and that gap would materially impair understanding: necessary background, a latest development that cannot be determined, important factual conflict, or needed authoritative confirmation.',
-          'Do not request search merely because more facts may exist. If the reports already explain what happened, needed background, why it matters, and material source differences, return false.',
-        ].join('\n'),
-        input: buildStage4EventEnrichmentUserPrompt(input),
+        ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
+        input: prompt.input,
         max_output_tokens: 64,
         store: false,
         text: {

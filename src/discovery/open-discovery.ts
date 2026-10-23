@@ -1,3 +1,5 @@
+import { withPromptBindings, databasePromptBinder } from '../lib/prompts/runtime.js';
+import { productionPrompt } from '../lib/prompts/runtime.js';
 // D5 Open Discovery. It deliberately reuses D3's fetch, tracing and candidate
 // persistence boundary while keeping the no-Lead output contract explicit.
 import type { Pool } from 'pg';
@@ -19,7 +21,6 @@ import {
   DiscoveryTagsTransportSchema,
 } from '../lib/discovery-content-metadata.js';
 import {
-  buildDiscoveryD5Instructions,
   buildDiscoveryD5UserPrompt,
   DISCOVERY_D5_PROMPT_VERSION,
   DISCOVERY_EDITORIAL_PROMPT_VERSION,
@@ -100,6 +101,15 @@ export type RunDiscoveryD5Result = {
 };
 
 export async function runDiscoveryD5(
+  pool: Pool,
+  runId: string,
+  options: { runtime?: DiscoveryD5Runtime; environment?: NodeJS.ProcessEnv } = {},
+): Promise<RunDiscoveryD5Result> {
+  return withPromptBindings(pool, databasePromptBinder(pool, 'discovery', runId), () =>
+    runDiscoveryD5Bound(pool, runId, options),
+  );
+}
+async function runDiscoveryD5Bound(
   pool: Pool,
   runId: string,
   options: { runtime?: DiscoveryD5Runtime; environment?: NodeJS.ProcessEnv } = {},
@@ -268,6 +278,10 @@ export async function runDiscoveryD5Agent(input: {
   if (!input.pool) throw new Error('D5 Agent runtime requires a PostgreSQL pool for tracing.');
   const apiKey = process.env.CODEX_API_KEY;
   if (!apiKey) throw new Error('CODEX_API_KEY is required for D5 Open Discovery.');
+  const prompt = await productionPrompt(
+    'discovery.d5.open_discovery',
+    buildDiscoveryD5UserPrompt(input.memory, input.manualContext),
+  );
   const context: DiscoveryAgentContext = { fetches: [] };
   const processor = new PostgresDiscoveryTracingProcessor(input.pool, input.runId);
   setTraceProcessors([processor]);
@@ -280,7 +294,7 @@ export async function runDiscoveryD5Agent(input: {
   const agent = new Agent<DiscoveryAgentContext, typeof DiscoveryD5OutputSchema>({
     name: 'X-field Open Discovery Agent',
     model: input.config.model,
-    instructions: buildDiscoveryD5Instructions(),
+    ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
     tools: [
       webSearchTool({ searchContextSize: 'medium' }),
       createDiscoveryFetchContentTool({ timeoutMs: input.config.fetchTimeoutMs, pool: input.pool }),
@@ -289,15 +303,11 @@ export async function runDiscoveryD5Agent(input: {
   });
   const startedAt = Date.now();
   try {
-    const agentResult = await runner.run(
-      agent,
-      buildDiscoveryD5UserPrompt(input.memory, input.manualContext),
-      {
-        context,
-        maxTurns: input.config.maxTurns,
-        signal: AbortSignal.timeout(input.config.timeoutMs),
-      },
-    );
+    const agentResult = await runner.run(agent, prompt.input, {
+      context,
+      maxTurns: input.config.maxTurns,
+      signal: AbortSignal.timeout(input.config.timeoutMs),
+    });
     if (!agentResult.finalOutput) throw new Error('D5 Agent returned no final output.');
     return {
       output: agentResult.finalOutput,
@@ -396,7 +406,7 @@ async function persistDiscoveryD5Config(
       runId,
       JSON.stringify({
         ...config,
-        promptVersion: DISCOVERY_D5_PROMPT_VERSION,
+        legacyPromptVersion: DISCOVERY_D5_PROMPT_VERSION,
         editorialPromptVersion: DISCOVERY_EDITORIAL_PROMPT_VERSION,
       }),
     ],

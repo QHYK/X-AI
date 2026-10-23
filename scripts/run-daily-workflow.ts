@@ -1,9 +1,9 @@
+import { writeRunFile } from '../src/lib/prompts/run-file.js';
 import { spawn } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from "node:path";
 import { Pool } from "pg";
 import { resolveDailyScope } from "../src/lib/daily-scope.js";
-import { STAGE1_PROMPT_VERSION } from "../src/prompts/stage1-content-understanding.js";
 import {
   buildDailyStepEnv,
   type DailyStageName,
@@ -33,7 +33,6 @@ type StepRun = {
   duration_ms: number | null;
   status: StepStatus;
   exit_code: number | null;
-  prompt_version?: string;
 };
 
 type DailyRun = {
@@ -101,9 +100,8 @@ async function main() {
       started_at: stepStartedAt.toISOString(),
       finished_at: null,
       duration_ms: null,
-      status: "running",
+      status: 'running',
       exit_code: null,
-      ...(name === "process:stage1" ? { prompt_version: STAGE1_PROMPT_VERSION } : {}),
     };
     run.steps.push(step);
     await writeRun(runPath, run);
@@ -124,7 +122,8 @@ async function main() {
     let exitCode = await runNpmScript(name, {
       ...process.env,
       ...stepEnv,
-      PIPELINE_TRIGGER_SOURCE: "daily_orchestrator",
+      DAILY_PROMPT_RUN_PATH: runPath,
+      PIPELINE_TRIGGER_SOURCE: 'daily_orchestrator',
     });
     if (pointerPath) {
       try {
@@ -252,7 +251,7 @@ function finishRun(
 }
 
 function writeRun(path: string, run: DailyRun): Promise<void> {
-  return writeFile(path, `${JSON.stringify(run, null, 2)}\n`);
+  return writeRunFile(path, run as unknown as Record<string, unknown>);
 }
 
 function toRunTimestamp(date: Date): string {

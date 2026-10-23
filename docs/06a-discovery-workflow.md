@@ -259,6 +259,8 @@ Discovery 分支失败后不自动重跑。是否复用原 Run，以 D2 的持�
 - D2 的完成以持久化 `selection_output` 为准；D3 / D4 的完成判断读取 `discovery_runs.execution_state` 中各自阶段状态。已执行阶段还在其中保存实际 Provider、模型、耗时与 Usage 诊断；字段完整性语义由 `05-data-model.md` 定义。D3 正常返回 0 篇仍写入 `completed + no_candidates`；缺失状态或进程异常遗留的 `running` 不视为完成。阶段状态独立更新，任何一条分支失败都不得覆盖另一条分支的完成记录或候选。
 - Resume 用于继续未完成的同一次执行。若操作目的为主动重新生成内容，而不是完成失败任务，则创建 New Run，不覆盖原 Run 的 Selection、Candidate、评价或 Trace。
 
+**B3.2 Prompt 绑定**：D2–D5 各在首次实际 LLM 请求前锁当前 Run 行，提交相应 Request Key 的 Active Version ID；D4 多篇与 D3/D5 Agent Loop 固定同一步骤版本。Resume 使用同一 Run 已绑定版本，未执行步骤首次开始时才绑定；已完成步骤不补写版本或重跑。新 Regular / Open Run 不继承父 Run 的绑定。缺失或非法版本明确失败，不回退静态文本；载体见 Data Model §12.1。历史未记录 UUID 的步骤无法还原旧文本，保留历史结果，仅下一次实际请求首次绑定当前 Active。
+
 当前 D3 Resume 以完整 Agent Run 为恢复边界：已完成则跳过；未完成、失败或遗留 `running` 时重新执行整个 D3，不实现 Agent 内部 Checkpoint。D4 继续复用 Candidate 级 Resume。
 
 ### 8.3.1 D2–D5 编排入口

@@ -1,3 +1,4 @@
+import { productionPrompt } from '../lib/prompts/runtime.js';
 /**
  * Stage 3 Source Digest 排名调用层。
  * ID 异常由确定性 normalization 修复，不额外发起 repair 请求。
@@ -20,9 +21,7 @@ import {
   type Stage3RankingWarnings,
 } from './stage3-contract.js';
 import {
-  buildStage3DigestRankingInstructions,
   buildStage3DigestRankingUserPrompt,
-  STAGE3_DIGEST_RANKING_PROMPT_VERSION,
   type Stage3DigestRankingInput,
 } from '../prompts/stage3-digest-ranking.js';
 import { resolveStageLlmRuntimeConfig } from './stage-llm-runtime-config.js';
@@ -130,6 +129,11 @@ export async function runStage3DigestRankingLlm(
   const runtimeConfig = resolveStageLlmRuntimeConfig('stage3');
   const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
   const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
+  const prompt = await productionPrompt(
+    'daily.stage3.digest_ranking',
+    buildStage3DigestRankingUserPrompt(input),
+    { category: input.category },
+  );
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const expectedIds = input.candidates.map((candidate) => candidate.id);
@@ -165,14 +169,14 @@ export async function runStage3DigestRankingLlm(
         const response = await client.structured.create(
           {
             model,
-            instructions: buildStage3DigestRankingInstructions(input.category),
+            ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
             input: [
               {
                 role: 'user',
                 content: [
                   {
                     type: 'input_text',
-                    text: buildStage3DigestRankingUserPrompt(input),
+                    text: prompt.input,
                   },
                 ],
               },
@@ -249,7 +253,7 @@ export async function runStage3DigestRankingLlm(
         assignment: lastAssignment,
         repair: null,
         model,
-        promptVersion: STAGE3_DIGEST_RANKING_PROMPT_VERSION,
+        promptVersion: prompt.versionId,
         attempts: attemptsUsed,
         elapsedMs: Date.now() - startedAt,
         error: lastError,
@@ -278,7 +282,7 @@ export async function runStage3DigestRankingLlm(
         assignment: normalized.integrity,
         repair: null,
         model,
-        promptVersion: STAGE3_DIGEST_RANKING_PROMPT_VERSION,
+        promptVersion: prompt.versionId,
         attempts: attemptsUsed,
         elapsedMs: Date.now() - startedAt,
         error: `Ranking integrity validation failed: ${normalized.integrity.errors.join('; ')}`,
@@ -312,7 +316,7 @@ export async function runStage3DigestRankingLlm(
         after: null,
       },
       model,
-      promptVersion: STAGE3_DIGEST_RANKING_PROMPT_VERSION,
+      promptVersion: prompt.versionId,
       responseId: initial.responseId,
       attempts: attemptsUsed,
       elapsedMs: Date.now() - startedAt,

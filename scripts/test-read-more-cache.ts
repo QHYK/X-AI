@@ -24,15 +24,15 @@ const cached = await generateReadMoreSummary(poolWith([[{ summaryZh: "cached" }]
 });
 const generated = await generateReadMoreSummary(poolWith([
   [], [{ fullContentText: null, contentText: "甲".repeat(READ_MORE_CONTENT_TEXT_MIN_LENGTH) }], [{ summaryZh: "generated" }],
-]), contentId, { generate: async (text) => { generatorCalls += 1; return text.length === 3000 ? "generated" : "wrong"; } });
-const unavailable = await generateReadMoreSummary(poolWith([[], [{ fullContentText: null, contentText: "甲".repeat(2999) }]]), contentId, {
+]), contentId, { generate: async (text) => { generatorCalls += 1; return text.length === READ_MORE_CONTENT_TEXT_MIN_LENGTH ? "generated" : "wrong"; } });
+const unavailable = await generateReadMoreSummary(poolWith([[], [{ fullContentText: null, contentText: "甲".repeat(READ_MORE_CONTENT_TEXT_MIN_LENGTH - 1) }]]), contentId, {
   generate: async () => { throw new Error("unavailable content must not call LLM"); },
 });
-const fullPreferred = selectReadMoreSourceText({ fullContentText: " full ", contentText: "甲".repeat(3001) }) === "full";
+const fullPreferred = selectReadMoreSourceText({ fullContentText: " full ", contentText: "甲".repeat(READ_MORE_CONTENT_TEXT_MIN_LENGTH + 1) }) === "full";
 const boundaries =
-  selectReadMoreSourceText({ fullContentText: null, contentText: "甲".repeat(2999) }) === null &&
-  selectReadMoreSourceText({ fullContentText: null, contentText: "甲".repeat(3000) })?.length === 3000 &&
-  selectReadMoreSourceText({ fullContentText: null, contentText: "甲".repeat(3001) })?.length === 3001;
+  selectReadMoreSourceText({ fullContentText: null, contentText: "甲".repeat(READ_MORE_CONTENT_TEXT_MIN_LENGTH - 1) }) === null &&
+  selectReadMoreSourceText({ fullContentText: null, contentText: "甲".repeat(READ_MORE_CONTENT_TEXT_MIN_LENGTH) })?.length === READ_MORE_CONTENT_TEXT_MIN_LENGTH &&
+  selectReadMoreSourceText({ fullContentText: null, contentText: "甲".repeat(READ_MORE_CONTENT_TEXT_MIN_LENGTH + 1) })?.length === READ_MORE_CONTENT_TEXT_MIN_LENGTH + 1;
 const unicodeLengthMatchesPostgresCharLength = readMoreTextLength("😀") === 1;
 const passed = cached.status === "success" && cached.summary_zh === "cached" &&
   generated.status === "success" && generated.summary_zh === "generated" &&

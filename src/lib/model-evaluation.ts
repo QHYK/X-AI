@@ -1,3 +1,4 @@
+import { withPromptBindings, evaluationPromptBinder } from './prompts/runtime.js';
 /**
  * Stage 1–3 离线模型评测服务。
  * 一次构造并持久化冻结输入，再让多个模型独立复用它；本模块只写 Evaluation 三张表。
@@ -250,7 +251,11 @@ export async function executePreparedEvaluation(prepared: PreparedEvaluation): P
   const execute = prepared.execute ?? executeFrozenEvaluation;
   for (const { model, run, startedAt } of prepared.models) {
     try {
-      const execution = await execute({ stage: prepared.stage, frozenInput, model });
+      const execution = await withPromptBindings(
+        prepared.pool,
+        evaluationPromptBinder(prepared.pool, prepared.evaluationInput.id, run.id),
+        () => execute({ stage: prepared.stage, frozenInput, model }),
+      );
       const completedAt = new Date();
       await prepared.storage.createOutputs(execution.outputs.map((output) => ({ ...output, evaluationRunId: run.id })));
       await prepared.storage.completeRun({

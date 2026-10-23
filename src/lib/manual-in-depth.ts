@@ -1,3 +1,10 @@
+import {
+  productionPrompt,
+  withPromptBindings,
+  claimManualPrompt,
+  finishManualPrompt,
+  PromptAttemptBusyError,
+} from './prompts/runtime.js';
 import { z } from 'zod';
 import type { Pool } from 'pg';
 import {
@@ -28,10 +35,6 @@ import {
   resolveLlmProvider,
   resolveProviderLlmModel,
 } from '../processing/llm-client.js';
-import {
-  buildManualInDepthInstructions,
-  MANUAL_IN_DEPTH_PROMPT_VERSION,
-} from '../prompts/manual-in-depth.js';
 
 export const ManualCandidateInput = z
   .object({
@@ -257,9 +260,12 @@ export async function generateManualInDepthIntroduction(
   id: string,
   options: { request?: Request; regenerate?: boolean } = {},
 ): Promise<EditorialIntroduction> {
-  const client = await db.connect();
+  let client = await db.connect();
+  let released = false;
   let llm: ReturnType<typeof createLlmClient> | null = null;
   let generated: EditorialIntroduction | undefined;
+  let claimedId: string | undefined;
+  let claimFinished = false;
   try {
     await client.query('begin');
     const lock = await client.query<{ locked: boolean }>(
@@ -309,6 +315,35 @@ export async function generateManualInDepthIntroduction(
         '没有可用的完整正文或正文超过单次输入上限；未抓取或调用模型。',
         422,
       );
+    const boundVersion = await claimManualPrompt(
+      client,
+      'candidate',
+      row.candidate_id,
+      'in_depth.manual.generate',
+      false,
+    );
+    await client.query('commit');
+    claimedId = row.candidate_id;
+    client.release();
+    released = true;
+    const prompt = await withPromptBindings(
+      db,
+      async () => boundVersion,
+      () =>
+        productionPrompt(
+          'in_depth.manual.generate',
+          JSON.stringify({
+            originalUrl: row.url,
+            title: row.title,
+            author: row.author,
+            source: row.publication,
+            sourceMetadata: article.metadata,
+            content: article.markdown,
+            contentComplete: true,
+            tags: readDiscoveryContentMetadata(row).tags,
+          }),
+        ),
+    );
     const provider = resolveLlmProvider(
       process.env.DISCOVERY_LLM_PROVIDER?.trim() || process.env.LLM_PROVIDER,
     );
@@ -318,17 +353,8 @@ export async function generateManualInDepthIntroduction(
     try {
       const response = await (options.request ?? llm!.structured.create)({
         model,
-        instructions: buildManualInDepthInstructions(),
-        input: JSON.stringify({
-          originalUrl: row.url,
-          title: row.title,
-          author: row.author,
-          source: row.publication,
-          sourceMetadata: article.metadata,
-          content: article.markdown,
-          contentComplete: true,
-          tags: readDiscoveryContentMetadata(row).tags,
-        }),
+        ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
+        input: prompt.input,
         max_output_tokens: 8000,
         store: false,
         text: {
@@ -354,7 +380,7 @@ export async function generateManualInDepthIntroduction(
         id,
         provider,
         model,
-        promptVersion: MANUAL_IN_DEPTH_PROMPT_VERSION,
+        promptVersion: prompt.versionId,
         usage: response.usage,
         apiMode: response.api_mode,
       });
@@ -368,6 +394,12 @@ export async function generateManualInDepthIntroduction(
       extra_info: output.extra_info.trim(),
     };
     const tags = row.evaluation?.manualTags ? readDiscoveryContentMetadata(row).tags : output.tags;
+    client = await db.connect();
+    released = false;
+    await client.query('begin');
+    await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      `manual-generate:${id}`,
+    ]);
     const candidate = await client.query(
       `update discovery_candidates set title_zh = $2, summary = $3, why_worth_reading = $4,
          status = 'evaluated', evaluation = coalesce(evaluation, '{}'::jsonb) || $5::jsonb, updated_at = now()
@@ -387,10 +419,27 @@ export async function generateManualInDepthIntroduction(
       [id, generated.summary, generated.whyWorthReading, generated.extra_info],
     );
     if (review.rowCount !== 1) throw new Error('Review candidate disappeared.');
+    await finishManualPrompt(client, 'candidate', row.candidate_id, 'completed');
     await client.query('commit');
+    claimFinished = true;
     return generated;
   } catch (error) {
-    await client.query('rollback');
+    if (!released) {
+      await client.query('rollback');
+      client.release();
+      released = true;
+    }
+    if (claimedId && !claimFinished) {
+      try {
+        await finishManualPrompt(db, 'candidate', claimedId, 'failed');
+      } catch (failure) {
+        console.error(
+          'Manual Prompt attempt recovery failed; needs operator verification.',
+          failure,
+        );
+      }
+    }
+    if (error instanceof PromptAttemptBusyError) throw new IntroductionError(error.message, 409);
     if (error instanceof IntroductionError) throw error;
     console.error('Manual In-depth persistence failed.', error);
     throw new IntroductionError(
@@ -402,6 +451,6 @@ export async function generateManualInDepthIntroduction(
     );
   } finally {
     await llm?.close();
-    client.release();
+    if (!released) client.release();
   }
 }

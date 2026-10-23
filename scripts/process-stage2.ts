@@ -1,3 +1,4 @@
+import { withFilePrompts, runPath } from '../src/lib/prompts/run-file.js';
 import { writeFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import { loadPipelineEnvironment } from '../src/lib/pipeline-env.js';
@@ -63,11 +64,13 @@ async function main() {
         scope.dailyDate,
       );
       await dailyAttribution.backfillDailyAttribution(pool, scope);
-      const result = await stage2Job.processStage2Merge(pool, {
-        dailyDate: scope.dailyDate,
-        stage1StartedAt: stage1?.run.started_at,
-        stage1FinishedAt: stage1?.run.finished_at,
-      });
+      const result = await withFilePrompts(pool, runPath('stage2', startedAt), () =>
+        stage2Job.processStage2Merge(pool, {
+          dailyDate: scope.dailyDate,
+          stage1StartedAt: stage1?.run.started_at,
+          stage1FinishedAt: stage1?.run.finished_at,
+        }),
+      );
       const summary = stage2Job.summarizeStage2Result(result);
       const artifacts = await runtimeArtifacts.writeStage2RuntimeArtifacts(result, {
         startedAt,

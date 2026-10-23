@@ -95,7 +95,11 @@
     "test:manual-in-depth": "tsx scripts/test-manual-in-depth.ts",
     "test:manual-in-depth-ui": "tsx scripts/test-manual-in-depth-ui.ts",
     "test:digest-put-back": "tsx scripts/test-digest-put-back.ts",
-    "test:digest-put-back-ui": "tsx scripts/test-digest-put-back-ui.ts"
+    "test:digest-put-back-ui": "tsx scripts/test-digest-put-back-ui.ts",
+    "prompts:import": "tsx scripts/import-prompts.ts",
+    "test:prompt-registry": "tsx scripts/test-prompt-registry.ts",
+    "test:prompt-runtime": "tsx scripts/test-prompt-runtime.ts",
+    "test:prompt-requests": "tsx scripts/test-prompt-requests.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

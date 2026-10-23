@@ -207,7 +207,7 @@ flowchart LR
     CLIENT --> KIMI["Kimi"]
 ```
 
-LLM 的 Runtime Prompt 位于 `src/prompts/`，Prompt 与 Structured Output Contract 见 `07-prompt-spec.md`
+**Implemented（B3.2）**：15 类生产请求通过 `src/lib/prompts/runtime.ts` 加载数据库中的精确 Published Version，按请求上下文缓存；没有静态 fallback。`src/prompts/` 保留原静态文本作为导入与一致性验收参考，动态业务输入 builder 继续由代码管理。LLM Client、Provider、Schema、工具和执行算法保持原样。Prompt / 角色契约见 `07-prompt-spec.md`，存储位置见 `05-data-model.md` §12，Daily / Discovery 的绑定与恢复边界分别见对应 Workflow。
 
 
 Discovery 的 Agent 工具调用、模型兼容性与 Trace 细节由 `04a-discovery-technical-spec.md` 定义。

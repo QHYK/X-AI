@@ -1,3 +1,5 @@
+import { withPromptBindings, databasePromptBinder } from '../lib/prompts/runtime.js';
+import { productionPrompt } from '../lib/prompts/runtime.js';
 import { loadDiscoverySources } from '../lib/discovery-source-list.js';
 import { publicationFromMetadata, resolveDiscoveryPublication } from '../lib/discovery-source.js';
 // D4
@@ -18,7 +20,6 @@ import {
 } from '../processing/llm-client.js';
 import { normalizeArticleUrl } from '../processing/url-normalization.js';
 import {
-  buildDiscoveryD4Instructions,
   buildDiscoveryD4UserPrompt,
   DISCOVERY_D4_PROMPT_VERSION,
   DISCOVERY_EDITORIAL_PROMPT_VERSION,
@@ -60,7 +61,7 @@ export type DiscoveryD4Evaluation = {
 
 type DiscoveryD4Request = {
   model: string;
-  instructions: string;
+  instructions?: string;
   input: string;
   max_output_tokens: number;
   store: boolean;
@@ -187,6 +188,15 @@ export const discoveryD4OutputJsonSchema = {
 } as const;
 
 export async function runDiscoveryD4(
+  pool: Pool,
+  runId: string,
+  options: RunDiscoveryD4Options = {},
+): Promise<RunDiscoveryD4Result> {
+  return withPromptBindings(pool, databasePromptBinder(pool, 'discovery', runId), () =>
+    runDiscoveryD4Bound(pool, runId, options),
+  );
+}
+async function runDiscoveryD4Bound(
   pool: Pool,
   runId: string,
   options: RunDiscoveryD4Options = {},
@@ -785,12 +795,16 @@ async function requestOneCandidate(
   response: LlmResponse;
   requestElapsedMs: number;
 }> {
+  const prompt = await productionPrompt(
+    'discovery.d4.direct_verification',
+    buildDiscoveryD4UserPrompt([candidate.prompt]),
+  );
   const requestStartedAt = Date.now();
   const response = await request(
     {
       model,
-      instructions: buildDiscoveryD4Instructions(),
-      input: buildDiscoveryD4UserPrompt([candidate.prompt]),
+      ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
+      input: prompt.input,
       max_output_tokens: 8_000,
       store: false,
       text: {
@@ -989,7 +1003,7 @@ async function persistD4Config(
       runId,
       JSON.stringify({
         ...config,
-        promptVersion: DISCOVERY_D4_PROMPT_VERSION,
+        legacyPromptVersion: DISCOVERY_D4_PROMPT_VERSION,
         editorialPromptVersion: DISCOVERY_EDITORIAL_PROMPT_VERSION,
       }),
     ],

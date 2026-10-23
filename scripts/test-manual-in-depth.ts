@@ -1,3 +1,4 @@
+import { attachPromptMemory } from './fixtures/prompt-runtime.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import type { ArticleDatabase } from '../src/lib/article-fetch-cache.js';
@@ -79,7 +80,7 @@ class ManualStore {
     }
     return this.articles.query(sql, values);
   }
-  db = {
+  db = attachPromptMemory({
     query: (sql: string, values?: unknown[]) => this.query(sql, values),
     connect: async () => {
       const cache = await this.articles.connect();
@@ -185,7 +186,7 @@ class ManualStore {
         },
       };
     },
-  } as unknown as ArticleDatabase;
+  } as unknown as ArticleDatabase);
 }
 
 let modelCalls = 0;

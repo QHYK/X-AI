@@ -73,6 +73,26 @@ curl --fail --max-time 10 http://127.0.0.1:5260/ai >/dev/null || echo 'Old HTTP 
 
 旧构建完整时，切换后失败会尝试恢复原分支及 Commit、旧 `.next`、`node_modules` 并重新验证服务。旧构建不完整或不存在时仍可部署，但没有自动回滚：激活失败会保留当前源码、`.next`、依赖及暂存目录现场，并提示人工恢复，不会声称旧服务已恢复。无法安全恢复分支时会明确报错；按 Action 输出的暂存目录人工处理，不要仅恢复 `.next`。当前服务器 `ubuntu` 用户具有广泛免密 sudo 权限，这是现有部署账户的安全风险，建议后续收窄为服务管理所需命令。
 
+### 2.3 Prompt 基线导入与生产接入（B3.1 / B3.2）
+
+先提交并部署经过验收的基线源码，`npm run db:migrate` 应用 `0021_prompt_registry.sql`（两表及保护 Trigger）及 `0022_stage4_prompt_versions.sql`（Stage4 映射列）。在启动新 Web / Worker / CLI 前完成导入；尚无 Active 的请求会明确失败。随后可运行：
+
+```bash
+npm run prompts:import -- --dry-run
+npm run prompts:import
+npm run test:prompt-registry
+npm run test:prompt-runtime
+npm run test:prompt-requests
+```
+
+Dry-run 只读当前 Git / Prompt 源码，输出 18 项 key、拟导入的 `vN` 编号、来源和 Hash，不连接数据库。测试默认使用 Mock；若显式提供 `PROMPT_REGISTRY_TEST_DATABASE_URL`（独立测试数据库），同一测试还会创建隔离 Schema 并在事务结束时回滚全部 DDL / 数据，用于验证真实 PostgreSQL 约束。不要填生产连接。正式导入使用现有环境加载顺序与 DATABASE_URL，单事务导入 3 个 Fragment 和 15 个 Request；已有任意版本的 Registry 全部跳过，不覆盖人工 Draft / Published / Active。正式文本源文件须与 HEAD 一致，否则拒绝标注不真实的来源 Commit。无新环境变量、依赖或付费调用。
+
+B3.2 已切换数据库读取，部署顺序必须是 Migration → 幂等导入 → 切换调用方；导入脚本不会激活或覆盖已有 Registry，需在启用前确认 15 个 Request 及其精确 Fragment 均有有效 Published 版本。数据库不可用 / Active 缺失不允许回退代码文本。回滚优先回退调用方代码，保留两表、Stage4 映射列及已发布版本；不要自动删表、重置 Active 或覆盖人工版本。
+
+Mock / 请求一致性测试不连接生产或调用模型；B3.1 **真实 PostgreSQL 约束验收尚未完成**，未提供独立测试 URL 时测试会明确 skip，不算通过。Stage4 行锁并发首次绑定也仍需独立 PostgreSQL 验收；不得把 Mock 结果等同真实事务验证。
+
+Manual / Put Back 进程硬退出可能遗留 `promptAttempt.status=running`：先确认原请求进程已结束、无模型请求仍在进行，并检查是否已有成功结果，再由运维针对该文章 / Candidate 将标记恢复为 failed；不要自动超时接管或批量清除。Put Back 保留原绑定 UUID，Manual 下一次主动点击重新选择 Active。此流程不提供未经确认的自动修复脚本。
+
 ## 3. Production Processing 命令
 
 ### 3.1 完整 workflow

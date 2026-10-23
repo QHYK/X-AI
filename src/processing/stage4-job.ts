@@ -1,3 +1,5 @@
+import { withPromptBindings, databasePromptBinder } from '../lib/prompts/runtime.js';
+import { observeRunPrompts, writeRunFile } from '../lib/prompts/run-file.js';
 /**
  * Stage 4 Workflow job：读取 Stage 3 选中的 Event、执行 enrichment，并重建最终 events。
  * Daily 运行传入本次 Stage 3 runtime，单独运行才回退到最近成功 artifact。
@@ -404,9 +406,9 @@ async function processStage4FromDb(
           retryCount: 0,
           llmDurationMs: 0,
           webSearchEventCount: 0,
-        totalWebSearchCalls: 0,
-        eventsCreated: 0,
-        tokenUsage: null,
+          totalWebSearchCalls: 0,
+          eventsCreated: 0,
+          tokenUsage: null,
           error: null,
         }),
       );
@@ -432,6 +434,15 @@ async function processStage4FromDb(
     }
     const reviewRunId = selected[0]!.reviewRunId;
     const stage4Run = await loadOrCreateStage4Run(pool, dailyDate, reviewRunId, selected.length);
+    const storedPrompts = await pool.query<{ prompt_versions: Record<string, string> }>(
+      'select prompt_versions from stage4_runs where id = $1::uuid',
+      [stage4Run.id],
+    );
+    for (const [key, id] of Object.entries(storedPrompts.rows[0]?.prompt_versions ?? {}))
+      await observeRunPrompts(join(runDir, 'run.json'), pool)(
+        key as import('../lib/prompts/contracts.js').PromptKey,
+        id,
+      );
     const drafted = await loadDraftReviewItemIds(pool, stage4Run.id);
     const candidateIds = selected.flatMap((item) => item.processedContentIds);
     const sourceCandidates = await loadStage4SourceCandidates(pool, candidateIds);
@@ -458,7 +469,13 @@ async function processStage4FromDb(
       );
       await writeJson(join(eventDir, 'input.json'), prepared.input);
       try {
-        const enriched = await enrichStage4Event(prepared, { model });
+        const enriched = await withPromptBindings(
+          pool,
+          databasePromptBinder(pool, 'stage4', stage4Run.id, {
+            observe: observeRunPrompts(join(runDir, 'run.json'), pool),
+          }),
+          () => enrichStage4Event(prepared, { model }),
+        );
         llmCalls += enriched.llm.llmCallCount;
         retryCount += enriched.llm.attempts - 1;
         llmDurationMs += enriched.llm.llmDurationMs;
@@ -651,7 +668,7 @@ function stage4RuntimeArtifact(value: {
     daily_date: value.dailyDate,
     stage4_run_id: value.stage4RunId,
     model: value.model,
-    prompt_version: STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
+    legacy_prompt_version: STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
     selected_event_count: value.selectedEventCount,
     enrichment_success_count: value.enrichmentSuccessCount,
     enrichment_failure_count: value.enrichmentFailureCount,
@@ -863,7 +880,7 @@ async function mapWithConcurrency<T, R>(
 }
 
 async function writeRunJson(path: string, value: Record<string, unknown>): Promise<void> {
-  await writeJson(path, value);
+  await writeRunFile(path, value);
 }
 
 async function readJson<T>(path: string): Promise<T> {

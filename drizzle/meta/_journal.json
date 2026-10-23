@@ -148,6 +148,20 @@
       "when": 1792674000000,
       "tag": "0020_digest_put_back",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792764000000,
+      "tag": "0021_prompt_registry",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792767600000,
+      "tag": "0022_stage4_prompt_versions",
+      "breakpoints": true
     }
   ]
 }

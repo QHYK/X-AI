@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { readRunBindings } from '../src/lib/prompts/run-file.js';
 import { writeFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import {
@@ -51,6 +53,7 @@ async function main() {
         dailyDate: process.env.DAILY_DATE,
         concurrency: parseOptionalPositiveInt(process.env.STAGE4_CONCURRENCY),
       });
+      const promptVersions = await readRunBindings(join(result.runDir, 'run.json'));
       await writeRunPointer(result.runDir);
       const status = result.success
         ? 'success'
@@ -70,7 +73,9 @@ async function main() {
           draft_count: status === 'partial' ? result.enrichmentSuccessCount : 0,
           published_count: result.success ? result.eventsCreated : 0,
           llm_calls: result.llmCalls,
-          prompt_version: STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
+          prompt_version: promptVersions['daily.stage4.event_enrichment'] ?? null,
+          prompt_versions: promptVersions,
+          legacy_prompt_version: STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
           retry_count: result.retryCount,
           duration_ms: Date.now() - startedAt.getTime(),
           llm_duration_ms: result.llmDurationMs,

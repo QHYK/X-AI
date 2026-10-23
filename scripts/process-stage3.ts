@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { readRunBindings } from '../src/lib/prompts/run-file.js';
 import { writeFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import { readPublishedAtScopeFromEnv } from '../src/lib/daily-scope.js';
@@ -56,6 +58,7 @@ async function main() {
         publishedAtScope: inheritedDailyScope ?? readPublishedAtScopeFromEnv(process.env),
         dailyDate: inheritedDailyDate,
       });
+      const promptVersions = await readRunBindings(join(result.runDir, 'run.json'));
       await writeRunPointer(result.runDir);
       await safelyFinishPipelineRun(pool, pipelineRunId, {
         status: result.status,
@@ -63,6 +66,11 @@ async function main() {
         model: resolveStageLlmModel('stage3'),
         metrics: {
           prompt_versions: {
+            event: promptVersions['daily.stage3.event_ranking'] ?? null,
+            digest: promptVersions['daily.stage3.digest_ranking'] ?? null,
+            long_form: promptVersions['daily.stage3.long_form_ranking'] ?? null,
+          },
+          legacy_prompt_versions: {
             event: STAGE3_EVENT_RANKING_PROMPT_VERSION,
             digest: STAGE3_DIGEST_RANKING_PROMPT_VERSION,
             long_form: STAGE3_LONG_FORM_RANKING_PROMPT_VERSION,
