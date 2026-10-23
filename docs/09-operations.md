@@ -83,6 +83,7 @@ npm run prompts:import
 npm run test:prompt-registry
 npm run test:prompt-runtime
 npm run test:prompt-requests
+npm run test:prompt-management
 ```
 
 Dry-run 只读当前 Git / Prompt 源码，输出 18 项 key、拟导入的 `vN` 编号、来源和 Hash，不连接数据库。测试默认使用 Mock；若显式提供 `PROMPT_REGISTRY_TEST_DATABASE_URL`（独立测试数据库），同一测试还会创建隔离 Schema 并在事务结束时回滚全部 DDL / 数据，用于验证真实 PostgreSQL 约束。不要填生产连接。正式导入使用现有环境加载顺序与 DATABASE_URL，单事务导入 3 个 Fragment 和 15 个 Request；已有任意版本的 Registry 全部跳过，不覆盖人工 Draft / Published / Active。正式文本源文件须与 HEAD 一致，否则拒绝标注不真实的来源 Commit。无新环境变量、依赖或付费调用。
@@ -90,6 +91,8 @@ Dry-run 只读当前 Git / Prompt 源码，输出 18 项 key、拟导入的 `vN`
 B3.2 已切换数据库读取，部署顺序必须是 Migration → 幂等导入 → 切换调用方；导入脚本不会激活或覆盖已有 Registry，需在启用前确认 15 个 Request 及其精确 Fragment 均有有效 Published 版本。数据库不可用 / Active 缺失不允许回退代码文本。回滚优先回退调用方代码，保留两表、Stage4 映射列及已发布版本；不要自动删表、重置 Active 或覆盖人工版本。
 
 Mock / 请求一致性测试不连接生产或调用模型；B3.1 **真实 PostgreSQL 约束验收尚未完成**，未提供独立测试 URL 时测试会明确 skip，不算通过。Stage4 行锁并发首次绑定也仍需独立 PostgreSQL 验收；不得把 Mock 结果等同真实事务验证。
+
+B3.3 无新增 Migration 或环境变量。启动 Web 后登录 `/ai/prompts`（也可由 Sidebar 进入）；页面只读加载，不自动导入或更改 Active。`test:prompt-management` 使用 JSDOM 与 Mock HTTP 验证编辑、冲突保留、发布 / 切换及相对 URL，不访问数据库或 LLM。Service Mock 仍由 `test:prompt-registry` 覆盖，认证 / 导航回归分别运行 `test:admin-auth` 与 `test:admin-navigation`。手动验收保存和 Activate 会写入 Web 当前连接的数据库，应在测试环境进行，并在切换前核对起止版本。
 
 Manual / Put Back 进程硬退出可能遗留 `promptAttempt.status=running`：先确认原请求进程已结束、无模型请求仍在进行，并检查是否已有成功结果，再由运维针对该文章 / Candidate 将标记恢复为 failed；不要自动超时接管或批量清除。Put Back 保留原绑定 UUID，Manual 下一次主动点击重新选择 Active。此流程不提供未经确认的自动修复脚本。
 

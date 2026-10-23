@@ -10,7 +10,9 @@
 
 共享文本以有序 slot + 精确 Published Version ID 引用；只支持 Request → Fragment，不允许嵌套。发布后的 Request 不跟随 Fragment Active 变化。Stage4 Enrichment 的 `without_search` / `with_search` 为同一版本下两个显式变体，调用方必须选择；Schema、工具及搜索条件仍由代码控制。
 
-**Implemented（B3.2）**：15 类生产请求加载数据库 Prompt。`productionPrompt()` 在本次执行上下文首次使用 key 时取得并固定 Published Version，之后只用该版本及其精确 Fragment；加载、绑定、模板或引用错误明确失败，不发静态 fallback 请求。原静态 System 文本仅作基线；现有 User JSON 字段映射 / 业务输入构造仍在代码中。Chat Completions / Responses 使用现有兼容 Client 的 instructions / input，Agents SDK 使用可选 instructions + 必需 input；空角色不传占位，不引入 Developer。同次自动重试 / Provider fallback / Agent Loop 使用已加载文本。管理页面仍为 Planned（B3.3）。数据载体见 [Data Model](05-data-model.md#121-b32-版本绑定载体)，运行规则见各 Workflow，导入命令见 Operations。
+**Implemented（B3.2）**：15 类生产请求加载数据库 Prompt。`productionPrompt()` 在本次执行上下文首次使用 key 时取得并固定 Published Version，之后只用该版本及其精确 Fragment；加载、绑定、模板或引用错误明确失败，不发静态 fallback 请求。原静态 System 文本仅作基线；现有 User JSON 字段映射 / 业务输入构造仍在代码中。Chat Completions / Responses 使用现有兼容 Client 的 instructions / input，Agents SDK 使用可选 instructions + 必需 input；空角色不传占位，不引入 Developer。同次自动重试 / Provider fallback / Agent Loop 使用已加载文本。管理页面已实现（B3.3），架构见 `04-technical-spec.md` §7。数据载体见 [Data Model](05-data-model.md#121-b32-版本绑定载体)，运行规则见各 Workflow，导入命令见 Operations。
+
+**Implemented（B3.3 管理契约）**：Draft 支持反复保存，Published 不可修改；Publish 校验同一套模板和 Published Fragment 规则，但不改变 Active。Activate 独立选择本 Registry 的 Published Version，也允许重新激活历史版本。Fragment 更新不会自动升级任何 Request；编辑 Request Draft 时显式选择精确 Fragment Version。Stage4 两个命名变体独立编辑、逐一校验，保留原 Body 结构；Schema、动态输入、工具及生产版本绑定不由管理页面编辑。
 
 ## Ignored Article Put Back
 

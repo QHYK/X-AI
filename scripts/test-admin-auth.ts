@@ -92,6 +92,7 @@ try {
   );
 
   for (const page of [
+    '/prompts',
     '/dashboard',
     '/dashboard/analytics',
     '/dashboard/metrics',
@@ -134,6 +135,8 @@ try {
     ['review/in-depth', ['GET', 'PATCH', 'POST']],
     ['review/in-depth/manual', ['GET', 'POST']],
     ['dashboard/analytics/ignored-articles/put-back', ['POST']],
+    ['prompts', ['GET']],
+    ['prompts/[key]', ['GET', 'POST', 'PATCH']],
     ['evaluation', ['GET']],
     ['evaluation/run', ['POST']],
     ['evaluation/cancel', ['POST']],
@@ -149,6 +152,18 @@ try {
       const request = new Request(`${origin}/ai/api/admin/${route}`, { method });
       assert.equal((await handler[method](request)).status, 401, `${method} ${route}`);
     }
+  }
+  const prompts = await import('../src/app/api/admin/prompts/[key]/route.js');
+  for (const method of ['POST', 'PATCH'] as const) {
+    const denied = await prompts[method](
+      new Request(`${origin}/ai/api/admin/prompts/daily.stage1.content_understanding`, {
+        method,
+        headers: { cookie, origin: 'http://evil.test', 'content-type': 'application/json' },
+        body: '{}',
+      }),
+      { params: Promise.resolve({ key: 'daily.stage1.content_understanding' }) },
+    );
+    assert.equal(denied.status, 403, `Prompt ${method} requires same-origin authenticated Session`);
   }
   const inDepth = await import('../src/app/api/admin/review/in-depth/route.js');
   const discovery = await import('../src/app/api/admin/discovery/route.js');

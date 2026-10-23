@@ -284,7 +284,7 @@ User Request → Read More API → Server-side Full Content → LLM → Detailed
 
 ### 6.3 管理路由与认证
 
-`/dashboard/*` 与 `/review/*` 是后台页面，保留现有 URL；`/api/admin/*` 是后台 API。二者均要求单管理员 Session。未登录页面跳转 `/login`，未登录 API 返回 JSON 401。`/`、`/api/in-depth`、`/api/brief` 和 `/api/content/read-more` 保持匿名访问。登录与退出端点位于 `/api/auth/*`。
+`/dashboard/*`、`/review/*` 与 `/prompts` 是后台页面，保留现有 URL；`/api/admin/*` 是后台 API。二者均要求单管理员 Session。未登录页面跳转 `/login`，未登录 API 返回 JSON 401。`/`、`/api/in-depth`、`/api/brief` 和 `/api/content/read-more` 保持匿名访问。登录与退出端点位于 `/api/auth/*`。
 
 管理员密码以服务端环境变量中的 scrypt hash 配置。登录后生成随机、不透明的 Session Cookie；服务端文件存储其 hash 对应的会话记录和过期时间，独立于业务数据库及 `runtime/` Pipeline Artifacts。退出删除记录；密码 hash 变化会使旧会话失效。不使用用户表或 RBAC。Proxy 保护页面和管理 API，每个管理 Route Handler 还独立校验 Session；修改数据或触发任务的请求校验同源 Origin。Cookie 的 Secure 属性由部署配置决定，具体设置和 HTTP 风险见 `09-operations.md`。
 
@@ -296,7 +296,11 @@ User Request → Read More API → Server-side Full Content → LLM → Detailed
 
 X-AI-field 包含一个 Internal Dashboard，用于运行观察、Human Review 与 Model Evaluation。
 
-后台 `dashboard/` 与 `review/` 页面集中放在 `src/app/(admin)/` Route Group，由共享 `layout.tsx` 和可复用 Sidebar 提供后台外壳；Route Group 不改变浏览器 URL。`src/app/admin-navigation.ts` 是 Sidebar 分组、名称和链接的唯一配置来源，不承担认证或路由注册职责。跨页面菜单使用 Next.js `Link` 的应用根路径，由 Next.js 处理 basePath；其余既有相对 URL 约定见 §6.3。登录、启动页和公开 In-depth 列表位于 Route Group 外。
+后台 `dashboard/`、`review/` 与 `prompts/` 页面集中放在 `src/app/(admin)/` Route Group，由共享 `layout.tsx` 和可复用 Sidebar 提供后台外壳；Route Group 不改变浏览器 URL。`src/app/admin-navigation.ts` 是 Sidebar 分组、名称和链接的唯一配置来源，不承担认证或路由注册职责。跨页面菜单使用 Next.js `Link` 的应用根路径，由 Next.js 处理 basePath；其余既有相对 URL 约定见 §6.3。登录、启动页和公开 In-depth 列表位于 Route Group 外。
+
+**Implemented（B3.3）**：`/prompts` 是共享后台中的 Prompt Management 页面，支持按 Key 搜索、类型筛选、完整版本历史、从版本创建 Draft、保存、Publish 和独立 Activate / 回滚。页面调用 `/api/admin/prompts` 列表接口与 `/api/admin/prompts/[key]` 详情 / 写接口，复用 Registry Service；每个接口独立检查管理员 Session，写请求同时检查同源 Origin，不提供模型调用功能。
+
+管理写入在 Registry 行锁内执行。Draft 保存 / Publish 校验客户端读取的 Content Hash，Activate 校验旧 Active ID；冲突返回 409。前端保留未保存文本，不自动刷新覆盖，用户核对后再操作。Published 只读；Activate / 回滚确认框明确显示起止版本。管理页面不改变 B3.2 的运行绑定机制，Prompt 模板与精确 Fragment 语义见 `07-prompt-spec.md`。
 
 Dashboard 不是 Production Source of Truth。它读取 Production 数据与 Runtime Artifacts，并调用已有 Application Services，不应在 UI 层复制 Processing、Review 或 Evaluation 的业务逻辑。
 

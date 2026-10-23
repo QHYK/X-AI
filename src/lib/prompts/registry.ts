@@ -11,6 +11,14 @@ import {
 
 type Queryable = Pick<Pool | PoolClient, 'query'>;
 type Database = Pick<Pool, 'connect'>;
+export class PromptManagementError extends Error {
+  constructor(
+    message: string,
+    readonly status: 400 | 404 | 409,
+  ) {
+    super(message);
+  }
+}
 export type RegistryInput = {
   key: RegistryKey;
   kind: RegistryKind;
@@ -48,7 +56,7 @@ const SELECT_VERSION = `select v.id, v.registry_id as "registryId", r.key, r.kin
 export async function getPromptVersion(db: Queryable, id: string): Promise<PromptVersion> {
   const result = await db.query<PromptVersion>(`${SELECT_VERSION} where v.id = $1::uuid`, [id]);
   const version = result.rows[0];
-  if (!version) throw new Error(`Prompt version not found: ${id}`);
+  if (!version) throw new PromptManagementError(`Prompt version not found: ${id}`, 404);
   validatePromptBody(version.key, version.kind, version.body);
   if (promptContentHash(version.body) !== version.contentHash)
     throw new Error('Prompt content hash mismatch.');
@@ -100,11 +108,16 @@ async function transaction<T>(db: Database, work: (client: PoolClient) => Promis
   }
 }
 async function lockRegistry(client: PoolClient, key: RegistryKey) {
-  const result = await client.query<{ id: string; key: RegistryKey; kind: RegistryKind }>(
-    'select id, key, kind from prompt_registry where key = $1 for update',
+  const result = await client.query<{
+    id: string;
+    key: RegistryKey;
+    kind: RegistryKind;
+    activeVersionId: string | null;
+  }>(
+    'select id, key, kind, active_version_id as "activeVersionId" from prompt_registry where key = $1 for update',
     [key],
   );
-  if (!result.rows[0]) throw new Error(`Registry not found: ${key}`);
+  if (!result.rows[0]) throw new PromptManagementError(`Registry not found: ${key}`, 404);
   return result.rows[0];
 }
 async function insertDraft(
@@ -145,25 +158,50 @@ export async function createPromptDraft(
     insertDraft(client, await lockRegistry(client, key), body, source),
   );
 }
-export async function publishPromptVersion(db: Database, key: RegistryKey, versionId: string) {
+export async function publishPromptVersion(
+  db: Database,
+  key: RegistryKey,
+  versionId: string,
+  expectedHash?: string,
+) {
   return transaction(db, async (client) => {
     const registry = await lockRegistry(client, key);
     const version = await getPromptVersion(client, versionId);
-    if (version.registryId !== registry.id) throw new Error('Version belongs to another Registry.');
+    if (version.registryId !== registry.id)
+      throw new PromptManagementError('Version belongs to another Registry.', 400);
+    if (
+      expectedHash !== undefined &&
+      (version.status !== 'draft' || version.contentHash !== expectedHash)
+    )
+      throw new PromptManagementError('版本已被修改或发布，请重新检查版本后再发布。', 409);
     await resolvePromptFragments(client, version);
     if (version.status === 'draft')
       await client.query("update prompt_versions set status = 'published' where id = $1::uuid", [
         versionId,
       ]);
+    await touchRegistry(client, registry.id);
     return getPromptVersion(client, versionId);
   });
 }
-export async function activatePromptVersion(db: Database, key: RegistryKey, versionId: string) {
+export async function activatePromptVersion(
+  db: Database,
+  key: RegistryKey,
+  versionId: string,
+  expectedActiveVersionId?: string | null,
+) {
   return transaction(db, async (client) => {
     const registry = await lockRegistry(client, key);
+    if (
+      expectedActiveVersionId !== undefined &&
+      (registry.activeVersionId ?? null) !== expectedActiveVersionId
+    )
+      throw new PromptManagementError('Active Version 已变化，请刷新核对后重新确认切换。', 409);
     const version = await getPromptVersion(client, versionId);
     if (version.registryId !== registry.id || version.status !== 'published')
-      throw new Error('Active must be a published version of the same Registry.');
+      throw new PromptManagementError(
+        'Active must be a published version of the same Registry.',
+        400,
+      );
     await resolvePromptFragments(client, version);
     await client.query(
       'update prompt_registry set active_version_id = $2::uuid, updated_at = now() where id = $1::uuid',
@@ -241,5 +279,125 @@ export async function importPromptSeeds(db: Database, seeds: PromptSeed[]) {
       imported.push(seed.key);
     }
     return { imported, skipped };
+  });
+}
+
+export type PromptRegistryItem = RegistryInput & {
+  id: string;
+  activeVersionId: string | null;
+  activeVersion: number | null;
+  updatedAt: string;
+};
+export type ManagedPromptVersion = PromptVersion & { createdAt: string; changeNote: string | null };
+export type PromptManagementDetail = {
+  registry: PromptRegistryItem;
+  versions: ManagedPromptVersion[];
+  fragments: ManagedPromptVersion[];
+};
+const SELECT_REGISTRY = `select r.id,r.key,r.kind,r.workflow,r.step,r.request_type as "requestType",
+  r.display_name as "displayName",r.active_version_id as "activeVersionId",v.version as "activeVersion",
+  r.updated_at as "updatedAt" from prompt_registry r left join prompt_versions v on v.id=r.active_version_id`;
+function iso(value: Date | string) {
+  return new Date(value).toISOString();
+}
+export async function listPromptRegistries(
+  db: Queryable,
+  search = '',
+  kind?: RegistryKind,
+): Promise<PromptRegistryItem[]> {
+  const result = await db.query<PromptRegistryItem>(
+    `${SELECT_REGISTRY}
+    where strpos(lower(r.key),lower($1::text))>0 and ($2::text is null or r.kind=$2)
+    order by r.workflow,r.step,r.key`,
+    [search, kind ?? null],
+  );
+  return result.rows.map((row) => ({ ...row, updatedAt: iso(row.updatedAt) }));
+}
+export async function getPromptManagementDetail(
+  db: Queryable,
+  key: RegistryKey,
+): Promise<PromptManagementDetail> {
+  const result = await db.query<PromptRegistryItem>(`${SELECT_REGISTRY} where r.key=$1`, [key]);
+  if (!result.rows[0]) throw new PromptManagementError('Prompt Registry 不存在。', 404);
+  const select = SELECT_VERSION.replace(
+    'select v.id,',
+    'select v.created_at as "createdAt",v.change_note as "changeNote",v.id,',
+  );
+  const versions = await db.query<ManagedPromptVersion>(
+    `${select} where r.key=$1 order by v.version desc`,
+    [key],
+  );
+  const fragments = await db.query<ManagedPromptVersion>(
+    `${select} where r.kind='fragment' and v.status='published' order by r.key,v.version desc`,
+  );
+  const checked = (row: ManagedPromptVersion) => {
+    validatePromptBody(row.key, row.kind, row.body);
+    if (promptContentHash(row.body) !== row.contentHash)
+      throw new Error('Prompt content hash mismatch.');
+    return { ...row, createdAt: iso(row.createdAt) };
+  };
+  return {
+    registry: { ...result.rows[0], updatedAt: iso(result.rows[0].updatedAt) },
+    versions: versions.rows.map(checked),
+    fragments: fragments.rows.map(checked),
+  };
+}
+async function touchRegistry(client: PoolClient, id: string) {
+  await client.query('update prompt_registry set updated_at=now() where id=$1::uuid', [id]);
+}
+function requireOwnedVersion(
+  version: PromptVersion,
+  registry: { id: string },
+  expectedHash: string,
+) {
+  if (version.registryId !== registry.id)
+    throw new PromptManagementError('Version belongs to another Registry.', 400);
+  if (version.contentHash !== expectedHash)
+    throw new PromptManagementError(
+      '版本已被其他操作修改，当前编辑内容已保留。请刷新并重新检查版本。',
+      409,
+    );
+}
+export async function createPromptDraftFromVersion(
+  db: Database,
+  key: RegistryKey,
+  sourceVersionId: string,
+  expectedHash: string,
+) {
+  return transaction(db, async (client) => {
+    const registry = await lockRegistry(client, key);
+    const source = await getPromptVersion(client, sourceVersionId);
+    requireOwnedVersion(source, registry, expectedHash);
+    const draft = await insertDraft(client, registry, source.body, {
+      changeNote: `Derived from v${source.version}`,
+    });
+    await touchRegistry(client, registry.id);
+    return draft;
+  });
+}
+export async function updatePromptDraft(
+  db: Database,
+  key: RegistryKey,
+  versionId: string,
+  expectedHash: string,
+  rawBody: PromptBody,
+) {
+  return transaction(db, async (client) => {
+    const registry = await lockRegistry(client, key);
+    const current = await getPromptVersion(client, versionId);
+    requireOwnedVersion(current, registry, expectedHash);
+    if (current.status !== 'draft')
+      throw new PromptManagementError('Published 版本不可修改，请创建新的 Draft。', 409);
+    const body = validatePromptBody(key, registry.kind, rawBody);
+    await resolvePromptFragments(client, { body });
+    const result = await client.query(
+      `update prompt_versions set body=$3::jsonb,content_hash=$4
+      where id=$1::uuid and registry_id=$2::uuid and status='draft' and content_hash=$5 returning id`,
+      [versionId, registry.id, JSON.stringify(body), promptContentHash(body), expectedHash],
+    );
+    if (result.rowCount !== 1)
+      throw new PromptManagementError('Draft 已变化，当前编辑内容已保留，请重新检查版本。', 409);
+    await touchRegistry(client, registry.id);
+    return getPromptVersion(client, versionId);
   });
 }

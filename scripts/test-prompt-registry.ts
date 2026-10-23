@@ -16,6 +16,10 @@ import {
   type RegistryKey,
 } from '../src/lib/prompts/contracts.js';
 import {
+  listPromptRegistries,
+  getPromptManagementDetail,
+  createPromptDraftFromVersion,
+  updatePromptDraft,
   importPromptSeeds,
   initialPromptVersion,
   getActivePrompt,
@@ -259,9 +263,19 @@ assert.throws(() =>
 class Store {
   registries = new Map<
     string,
-    { id: string; key: RegistryKey; kind: string; activeVersionId: string | null }
+    {
+      id: string;
+      key: RegistryKey;
+      kind: string;
+      activeVersionId: string | null;
+      workflow: string;
+      step: string;
+      requestType: string;
+      displayName: string;
+      updatedAt: string;
+    }
   >();
-  versions = new Map<string, PromptVersion>();
+  versions = new Map<string, PromptVersion & { createdAt?: string; changeNote?: string | null }>();
   failActive = false;
   statements: string[] = [];
   connect = async () => {
@@ -285,8 +299,27 @@ class Store {
             key: values[0] as RegistryKey,
             kind: String(values[1]),
             activeVersionId: null,
+            workflow: String(values[2]),
+            step: String(values[3]),
+            requestType: String(values[4]),
+            displayName: String(values[5]),
+            updatedAt: new Date().toISOString(),
           });
         return { rows: [] };
+      }
+      if (sql.includes('from prompt_registry r left join')) {
+        const rows = [...this.registries.values()].filter((r) =>
+          sql.includes('where r.key=$1')
+            ? r.key === values[0]
+            : r.key.toLowerCase().includes(String(values[0]).toLowerCase()) &&
+              (!values[1] || r.kind === values[1]),
+        );
+        return {
+          rows: rows.map((r) => ({
+            ...r,
+            activeVersion: r.activeVersionId ? this.versions.get(r.activeVersionId)!.version : null,
+          })),
+        };
       }
       if (sql.includes('from prompt_registry where key')) {
         const r = this.registries.get(String(values[0]));
@@ -316,8 +349,39 @@ class Store {
           sourceCommit: values[3] as string | null,
           legacyVersion: values[4] as string | null,
         };
-        this.versions.set(version.id, version);
+        this.versions.set(version.id, {
+          ...version,
+          createdAt: new Date().toISOString(),
+          changeNote: values[5] as string | null,
+        });
         return { rows: [{ id: version.id }] };
+      }
+      if (sql.includes('from prompt_versions v join') && sql.startsWith('select v.created_at')) {
+        return {
+          rows: [...this.versions.values()]
+            .filter((v) =>
+              sql.includes("where r.kind='fragment'")
+                ? v.kind === 'fragment' && v.status === 'published'
+                : v.key === values[0],
+            )
+            .sort((a, b) => b.version - a.version)
+            .map((v) => ({
+              ...structuredClone(v),
+              createdAt: v.createdAt ?? new Date().toISOString(),
+              changeNote: v.changeNote ?? null,
+            })),
+        };
+      }
+      if (sql.startsWith('update prompt_versions set body')) {
+        const v = this.versions.get(String(values[0]))!;
+        if (v.registryId !== values[1] || v.status !== 'draft' || v.contentHash !== values[4])
+          return { rows: [], rowCount: 0 };
+        this.versions.set(v.id, {
+          ...v,
+          body: JSON.parse(String(values[2])),
+          contentHash: String(values[3]),
+        });
+        return { rows: [{ id: v.id }], rowCount: 1 };
       }
       if (sql.includes('from prompt_versions v join')) {
         const v = this.versions.get(String(values[0]));
@@ -329,6 +393,7 @@ class Store {
         this.versions.set(v.id, { ...v, status: 'published' });
         return { rows: [] };
       }
+      if (sql.startsWith('update prompt_registry set updated_at')) return { rows: [], rowCount: 1 };
       if (sql.startsWith('update prompt_registry set active_version_id')) {
         if (this.failActive) throw new Error('Mock Active write failed');
         const r = [...this.registries.values()].find((r) => r.id === values[0])!;
@@ -458,10 +523,87 @@ await assert.rejects(
     fragments: [{ slot: 'editorial', versionId: base.id }, d3.body.fragments[1]],
   }),
 );
-const tampered = { ...base, contentHash: '0'.repeat(64) };
+const originalStored = store.versions.get(base.id)!;
+const tampered = { ...originalStored, contentHash: '0'.repeat(64) };
 store.versions.set(base.id, tampered);
 await assert.rejects(getPromptVersion(store.db, base.id), /hash mismatch/);
-store.versions.set(base.id, base);
+store.versions.set(base.id, originalStored);
+
+// Management lifecycle: listing, optimistic concurrency, immutable history and independent activation.
+assert.equal((await listPromptRegistries(store.db)).length, 18);
+assert.equal((await listPromptRegistries(store.db, '', 'fragment')).length, 3);
+assert.equal((await listPromptRegistries(store.db, 'DAILY.STAGE1')).length, 1);
+const detail = await getPromptManagementDetail(store.db, base.key);
+assert.equal(detail.registry.activeVersionId, base.id);
+assert.ok(detail.versions.length >= 2);
+assert.ok(detail.versions.every((v) => v.createdAt));
+const cloned = await createPromptDraftFromVersion(store.db, base.key, base.id, base.contentHash);
+assert.deepEqual(cloned.body, base.body);
+let saved = await updatePromptDraft(store.db, base.key, cloned.id, cloned.contentHash, newBody);
+await assert.rejects(
+  updatePromptDraft(store.db, base.key, cloned.id, cloned.contentHash, base.body),
+  { status: 409 },
+);
+assert.deepEqual((await getPromptVersion(store.db, cloned.id)).body, newBody);
+saved = await updatePromptDraft(store.db, base.key, cloned.id, saved.contentHash, {
+  ...newBody,
+  userTemplate: 'Edited User',
+});
+await assert.rejects(
+  updatePromptDraft(store.db, base.key, cloned.id, saved.contentHash, {
+    ...newBody,
+    userTemplate: '{{bad}}',
+  }),
+);
+await assert.rejects(updatePromptDraft(store.db, base.key, base.id, base.contentHash, newBody), {
+  status: 409,
+});
+await assert.rejects(createPromptDraftFromVersion(store.db, base.key, d3.id, d3.contentHash), {
+  status: 400,
+});
+await assert.rejects(publishPromptVersion(store.db, base.key, saved.id, cloned.contentHash), {
+  status: 409,
+});
+await publishPromptVersion(store.db, base.key, saved.id, saved.contentHash);
+assert.equal((await getActivePrompt(store.db, base.key)).id, base.id, 'Publish does not Activate');
+await activatePromptVersion(store.db, base.key, saved.id, base.id);
+await assert.rejects(activatePromptVersion(store.db, base.key, base.id, base.id), { status: 409 });
+await activatePromptVersion(store.db, base.key, base.id, saved.id);
+assert.equal(
+  (await getActivePrompt(store.db, base.key)).id,
+  base.id,
+  'Rollback selects immutable history',
+);
+const stage4 = await getActivePrompt(store.db, 'daily.stage4.event_enrichment');
+const variantDraft = await createPromptDraftFromVersion(
+  store.db,
+  stage4.key,
+  stage4.id,
+  stage4.contentHash,
+);
+const variantBody = structuredClone(variantDraft.body);
+variantBody.variants.with_search.systemInstructions = 'Changed search instructions';
+const variantSaved = await updatePromptDraft(
+  store.db,
+  stage4.key,
+  variantDraft.id,
+  variantDraft.contentHash,
+  variantBody,
+);
+assert.deepEqual(variantSaved.body.variants.without_search, stage4.body.variants.without_search);
+variantBody.variants.without_search.userTemplate = '{{invalid}}';
+await assert.rejects(
+  updatePromptDraft(store.db, stage4.key, variantDraft.id, variantSaved.contentHash, variantBody),
+);
+await assert.rejects(
+  updatePromptDraft(store.db, d3.key, upgraded.id, upgraded.contentHash, {
+    ...d3.body,
+    fragments: [{ slot: 'editorial', versionId: base.id }, d3.body.fragments[1]],
+  }),
+);
+console.log(
+  'PASS management: 18 registries, history, Draft CAS, Publish/Activate/rollback, pinned fragments, Stage4 variants',
+);
 
 // Optional real PostgreSQL gate: isolated schema, all DDL/data rolled back; never loads .env / production URL.
 const migration = await readFile(
