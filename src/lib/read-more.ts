@@ -1,36 +1,26 @@
+import { selectReadMoreSourceText } from './read-more-eligibility.js';
 import { productionPrompt, withPromptBindings, databasePromptBinder } from './prompts/runtime.js';
 /**
  * Read More 的按需服务：优先复用已验证的持久化摘要；缓存未命中时才读取正文并调用 LLM。
  * 原始正文只在服务端读取，永不返回客户端。
  */
-import type { Pool } from "pg";
-import { createLlmClient, resolveLlmModel, resolveLlmProvider } from "../processing/llm-client.js";
+import type { Pool } from 'pg';
+import { createLlmClient, resolveLlmModel, resolveLlmProvider } from '../processing/llm-client.js';
 
-export type ReadMoreResponse = { status: "success"; summary_zh: string } | { status: "not_available" };
+export type ReadMoreResponse =
+  { status: 'success'; summary_zh: string } | { status: 'not_available' };
 type CachedSummaryRow = { summaryZh: string | null };
 type ContentRow = { rawId?: string; fullContentText: string | null; contentText: string | null };
 export type ReadMoreGenerator = (sourceText: string) => Promise<string>;
 
 const READ_MORE_TIMEOUT_MS = Number(process.env.READ_MORE_LLM_TIMEOUT_MS ?? 120_000);
-export const READ_MORE_CONTENT_TEXT_MIN_LENGTH = 4_000;
 
 const readMoreOutputJsonSchema = {
-  type: "object", additionalProperties: false, required: ["summary_zh"],
-  properties: { summary_zh: { type: "string" } },
+  type: 'object',
+  additionalProperties: false,
+  required: ['summary_zh'],
+  properties: { summary_zh: { type: 'string' } },
 } as const;
-
-/** Returns the server-side source text permitted for Read More, if any. */
-export function selectReadMoreSourceText(row: ContentRow): string | null {
-  const fullContentText = row.fullContentText?.trim();
-  if (fullContentText) return fullContentText;
-  const contentText = row.contentText?.trim();
-  return contentText && readMoreTextLength(contentText) >= READ_MORE_CONTENT_TEXT_MIN_LENGTH ? contentText : null;
-}
-
-/** Matches PostgreSQL char_length() for trimmed Unicode text. */
-export function readMoreTextLength(text: string): number {
-  return Array.from(text).length;
-}
 
 /** Cache lookup intentionally precedes eligibility: validated past output remains readable. */
 export async function generateReadMoreSummary(
@@ -44,7 +34,7 @@ export async function generateReadMoreSummary(
     [contentId],
   );
   const cachedSummary = cached.rows[0]?.summaryZh?.trim();
-  if (cachedSummary) return { status: "success", summary_zh: cachedSummary };
+  if (cachedSummary) return { status: 'success', summary_zh: cachedSummary };
 
   const result = await pool.query<ContentRow>(
     `select ra.id as "rawId", ra.full_content_text as "fullContentText", ra.content_text as "contentText"
@@ -53,7 +43,7 @@ export async function generateReadMoreSummary(
     [contentId],
   );
   const sourceText = result.rows[0] ? selectReadMoreSourceText(result.rows[0]) : null;
-  if (!sourceText) return { status: "not_available" };
+  if (!sourceText) return { status: 'not_available' };
 
   const summaryZh = await (options.generate
     ? options.generate(sourceText)
@@ -70,8 +60,8 @@ export async function generateReadMoreSummary(
     [contentId, summaryZh],
   );
   const persistedSummary = persisted.rows[0]?.summaryZh?.trim();
-  if (!persistedSummary) throw new Error("Read More cache upsert did not return a valid summary.");
-  return { status: "success", summary_zh: persistedSummary };
+  if (!persistedSummary) throw new Error('Read More cache upsert did not return a valid summary.');
+  return { status: 'success', summary_zh: persistedSummary };
 }
 
 async function generateReadMoreWithLlm(sourceText: string): Promise<string> {
@@ -107,14 +97,19 @@ async function generateReadMoreWithLlm(sourceText: string): Promise<string> {
 
 function parseReadMoreSummary(rawText: string): string {
   let parsed: unknown;
-  try { parsed = JSON.parse(rawText); }
-  catch (error) { throw new Error(`Read More structured output is not valid JSON: ${error instanceof Error ? error.message : String(error)}`); }
-  if (!isRecord(parsed) || typeof parsed.summary_zh !== "string" || !parsed.summary_zh.trim()) {
-    throw new Error("Read More structured output must contain a non-empty summary_zh string.");
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (error) {
+    throw new Error(
+      `Read More structured output is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!isRecord(parsed) || typeof parsed.summary_zh !== 'string' || !parsed.summary_zh.trim()) {
+    throw new Error('Read More structured output must contain a non-empty summary_zh string.');
   }
   return parsed.summary_zh.trim();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

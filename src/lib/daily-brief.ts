@@ -1,22 +1,23 @@
+import { readMoreAvailabilitySql } from './read-more-eligibility.js';
 /**
  * Daily Brief 的数据库组合层。
  *
  * 复用同一查询规则提供 API 与 Dashboard 所需的最终展示内容，并在传入 Daily scope 时按原始采集输入归属。
  */
-import type { Pool } from "pg";
-import type { ShanghaiDayRange } from "./brief-date.js";
-import { resolveDailyScope, type DailyScope } from "./daily-scope.js";
-import { LONG_FORM_DISPLAY_CUTOFF } from "./ranking-config.js";
+import type { Pool } from 'pg';
+import type { ShanghaiDayRange } from './brief-date.js';
+import { resolveDailyScope, type DailyScope } from './daily-scope.js';
+import { LONG_FORM_DISPLAY_CUTOFF } from './ranking-config.js';
 
-export type DailyBriefQueryable = Pick<Pool, "query">;
+export type DailyBriefQueryable = Pick<Pool, 'query'>;
 
 export const DIGEST_CATEGORY_KEYS = [
-  "Finance & Economy",
-  "Technology",
-  "Science",
-  "Policy",
-  "Company",
-  "General",
+  'Finance & Economy',
+  'Technology',
+  'Science',
+  'Policy',
+  'Company',
+  'General',
 ] as const;
 
 export type BriefEventSource = {
@@ -57,24 +58,21 @@ export type BriefContentItem = {
   has_full_content: boolean;
 };
 
-export type BriefInspirationItem = Omit<
-  BriefContentItem,
-  "rank" | "has_full_content"
-> & {
+export type BriefInspirationItem = Omit<BriefContentItem, 'rank' | 'has_full_content'> & {
   image_url: string | null;
 };
 
 export type DailyBriefResponse = {
   date: string;
   /** Published is authoritative; partial is a draft-only fallback, never a mixed set. */
-  events_status: "published" | "partial" | "empty";
+  events_status: 'published' | 'partial' | 'empty';
   events: BriefEvent[];
   digests: Record<string, BriefContentItem[]>;
   long_form: BriefContentItem[];
   inspiration: BriefInspirationItem[];
   meta: {
-    timezone: "Asia/Shanghai";
-    date_basis: "workflow_daily_date";
+    timezone: 'Asia/Shanghai';
+    date_basis: 'workflow_daily_date';
     generated_at: string;
     event_count: number;
     digest_count: number;
@@ -123,7 +121,7 @@ type ContentRow = {
   hasFullContent: boolean;
 };
 
-type InspirationRow = Omit<ContentRow, "rank" | "category" | "hasFullContent"> & {
+type InspirationRow = Omit<ContentRow, 'rank' | 'category' | 'hasFullContent'> & {
   image_url: string | null;
 };
 
@@ -150,8 +148,8 @@ export async function getDailyBrief(
     long_form: longForm,
     inspiration,
     meta: {
-      timezone: "Asia/Shanghai",
-      date_basis: "workflow_daily_date",
+      timezone: 'Asia/Shanghai',
+      date_basis: 'workflow_daily_date',
       generated_at: new Date().toISOString(),
       event_count: eventResult.events.length,
       digest_count: Object.values(digests).reduce((sum, items) => sum + items.length, 0),
@@ -184,7 +182,7 @@ export function getDailyBriefForDailyDate(
 async function loadEvents(
   pool: DailyBriefQueryable,
   range: ShanghaiDayRange,
-): Promise<{ events: BriefEvent[]; status: DailyBriefResponse["events_status"] }> {
+): Promise<{ events: BriefEvent[]; status: DailyBriefResponse['events_status'] }> {
   // Daily ownership comes from the published Stage 4 run, not the event's own date.
   const publishedResult = await pool.query<EventRow>(
     `
@@ -214,7 +212,7 @@ async function loadEvents(
   );
 
   if (publishedResult.rows.length > 0) {
-    return { events: await attachEventSources(pool, publishedResult.rows), status: "published" };
+    return { events: await attachEventSources(pool, publishedResult.rows), status: 'published' };
   }
 
   const fallbackRun = await pool.query<{ id: string }>(
@@ -224,7 +222,7 @@ async function loadEvents(
     [range.date],
   );
   const stage4RunId = fallbackRun.rows[0]?.id;
-  if (!stage4RunId) return { events: [], status: "empty" };
+  if (!stage4RunId) return { events: [], status: 'empty' };
   const draftResult = await pool.query<EventRow>(
     `select events.id, coalesce(events.display_rank, events.ai_rank) as rank,
         to_char(events.event_date, 'YYYY-MM-DD') as event_date, events.created_at,
@@ -238,11 +236,14 @@ async function loadEvents(
       order by coalesce(events.display_rank, events.ai_rank) asc, events.created_at asc, events.id asc`,
     [stage4RunId],
   );
-  if (draftResult.rows.length === 0) return { events: [], status: "empty" };
-  return { events: await attachEventSources(pool, draftResult.rows), status: "partial" };
+  if (draftResult.rows.length === 0) return { events: [], status: 'empty' };
+  return { events: await attachEventSources(pool, draftResult.rows), status: 'partial' };
 }
 
-async function attachEventSources(pool: DailyBriefQueryable, rows: EventRow[]): Promise<BriefEvent[]> {
+async function attachEventSources(
+  pool: DailyBriefQueryable,
+  rows: EventRow[],
+): Promise<BriefEvent[]> {
   const eventIds = rows.map((row) => row.id);
   const sourcesByEventId = await loadEventSources(pool, eventIds);
 
@@ -250,7 +251,7 @@ async function attachEventSources(pool: DailyBriefQueryable, rows: EventRow[]): 
     id: row.id,
     rank: row.rank,
     event_date: row.event_date,
-    created_at: toIsoString(row.created_at) ?? "",
+    created_at: toIsoString(row.created_at) ?? '',
     title: row.title,
     title_zh: row.title_zh,
     summary: row.summary,
@@ -324,11 +325,7 @@ async function loadDigestItems(
         ra.url,
         ra.published_at,
         pc.created_at,
-        (
-          coalesce(nullif(btrim(crm.summary_zh), ''), '') <> ''
-          or coalesce(nullif(btrim(ra.full_content_text), ''), '') <> ''
-          or char_length(btrim(coalesce(ra.content_text, ''))) >= 3000
-        ) as "hasFullContent"
+        ${readMoreAvailabilitySql()} as "hasFullContent"
       from processed_contents pc
       join raw_articles ra on ra.id = pc.raw_article_id
       join sources s on s.id = ra.source_id
@@ -368,11 +365,7 @@ async function loadLongFormItems(
         ra.url,
         ra.published_at,
         pc.created_at,
-        (
-          coalesce(nullif(btrim(crm.summary_zh), ''), '') <> ''
-          or coalesce(nullif(btrim(ra.full_content_text), ''), '') <> ''
-          or char_length(btrim(coalesce(ra.content_text, ''))) >= 3000
-        ) as "hasFullContent"
+        ${readMoreAvailabilitySql()} as "hasFullContent"
       from processed_contents pc
       join raw_articles ra on ra.id = pc.raw_article_id
       join sources s on s.id = ra.source_id
@@ -426,7 +419,7 @@ async function loadInspirationItems(
     url: row.url,
     image_url: row.image_url,
     published_at: toIsoString(row.published_at),
-    created_at: toIsoString(row.created_at) ?? "",
+    created_at: toIsoString(row.created_at) ?? '',
   }));
 }
 
@@ -445,7 +438,7 @@ function toBriefContentItem(row: ContentRow): BriefContentItem {
     source: row.source,
     url: row.url,
     published_at: toIsoString(row.published_at),
-    created_at: toIsoString(row.created_at) ?? "",
+    created_at: toIsoString(row.created_at) ?? '',
     has_full_content: row.hasFullContent,
   };
 }
