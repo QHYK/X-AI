@@ -132,7 +132,7 @@ event | digest | long_form | inspiration
 
 `ai_rank` 保存 AI 排序；`display_rank` 是页面最终顺序。人工调整只改 `display_rank`。
 
-Put Back 保持 `raw_article_id` 唯一约束；在同一事务中创建 / 更新原处理记录并将 Raw 标记 selected，不创建新的 Raw 或修改原 Source / URL。已有其他 Daily attribution 或已关联 Event 的非 Digest 记录不得被静默迁移 / 解绑。恢复时 `routing = digest`、`ai_rank = NULL`；后续 Stage3 清空追加标记并更新排名，原恢复准备记录保留在 Raw metadata。排名维护规则见 `06-processing-workflow.md` 的 Put Back。
+Put Back 复用 `raw_article_id` 唯一记录，追加阶段为 `routing = digest`、`ai_rank = NULL`，准备结果位于 Raw metadata。归属校验、状态写入、排序和后续 Stage3 重排规则统一见 `06-processing-workflow.md` §6.4.1。
 
 ### `content_read_more`
 
@@ -364,9 +364,9 @@ Discovery 与 Daily Production 独立，不修改既有 `feedback`、`pipeline_r
 - `CHECK(parent_run_id IS NULL OR parent_run_id <> id)` 防止 Run 自引用；父 Run 的类型与 Lead 归属由应用层验证。
 - 日期字段记录**计划输入窗口**，不从实际执行时间推导；`input_content_ids` 记录当次选入的 Event / Digest / Long-form 内容成员 ID，避免复制 Daily 正文。当前没有 `input_snapshot`，不得将成员 ID 记录视为完整模型输入文本快照。
 - 上游 Daily 未就绪可记录 `blocked` 和 `upstream_not_ready`，不冒充已完成 Discovery。
-- 人工 Open 不重新执行 Topic Selection；**Planned** 的 `single_lead` 也不重新执行 Topic Selection，单条执行通过 `parent_run_id + source_lead_id` 定位原线索，Direct 复用 D4、Topic 复用 D3；原运行结果不覆盖。Lead ID 由应用代码在 D2 输出校验后生成，不能由 LLM 自由生成。
+- `source_lead_id` 对应应用生成并保存的 D2 Lead ID；Planned 单条执行的技术边界见 `04a` §6.3。
 - **Planned**：单条 Lead 执行入口实现后，各 Lead 的执行状态及关联结果通过 Run 的 `selection_output`、关联的 `single_lead` Run 和候选记录查询计算，不新增 Lead 表或冗余状态字段。
-- 自动 Open 仅在常规 Direct / Topic 均正常完成且合计 0 篇合格作品时触发；分支失败不自动重跑、不自动 Open。
+- 自动 / 人工 Open、分支失败与 Resume 的执行语义见 `06a-discovery-workflow.md` §6、§8。
 - `status` 与 `end_reason` 分开：例如 `partial + timeout`、`completed + candidates_found` 与 `completed + no_candidates` 的业务含义不同；`end_reason` 只在运行结束时填写。
 - `execution_state` 仅接受 JSON 对象。已执行阶段以 `d2` / `d3` / `d4` / `d5` 键保存 `status`、`endReason`、`completedAt`、错误摘要、Provider / Model / API mode、累计 `elapsedMs` 与 `usage`；更新单个阶段时不得覆盖其他阶段。`running` 或字段缺失均不表示完成，历史 Run 不从缺失状态推断成功。D3 / D5 正常空结果也写入对应 `status = 'completed'` 与 `endReason = 'no_candidates'`，供 Resume 作确定性判断。
 - `usage` 包含 `requests`、`inputTokens`、`outputTokens`、`cachedInputTokens` 与 `usageComplete`。缓存输入已包含在输入 Token 内，不得再次加到总 Token；Provider 未返回某字段使用 `null`，任一请求缺失完整 Usage 时 `usageComplete = false`。缓存命中率是读取端派生指标（`cachedInputTokens / inputTokens`），不持久化；统计不完整时不得展示为完整命中率。
@@ -468,7 +468,7 @@ Discovery 与 Daily Production 独立，不修改既有 `feedback`、`pipeline_r
 | `updated_at` | timestamptz | NOT NULL |
 
 - `UNIQUE(discovery_candidate_id)`；同一候选不重复进入审核队列。
-- 常规路径每次最多 Direct 3 篇 + Topic 3 篇；自动或人工 Open 每次最多 3 篇。数量由 Workflow 校验，不通过数据库复杂 CHECK 实现。
+- 候选提交数量由 `06a-discovery-workflow.md` 定义，不通过数据库复杂 CHECK 实现。
 - 人工触发 Open 后，新增 Run 和审核候选，不覆盖原有记录。
 - In-depth Reads 以 `review_status = 'approved'` 作为上架与前台可见条件；`pending` / `rejected` 不可见。`approved` 改为 `rejected` 即撤下。标题和作者使用 Candidate 客观字段。
 - 「完善介绍」独立保存到以上三个 TEXT 列；Generate 自动保存与 Save changes 写入同一组列，不覆盖 Candidate 原始 Agent 字段。非空 Editorial summary / why worth reading 优先于 Candidate 原字段；NULL / 空字符串按无覆盖处理。Editorial extra_info 缺失时返回空字符串，禁止回退到内部 `discovery_candidates.extra_info`。
@@ -535,7 +535,7 @@ in_depth_candidates(review_status, created_at DESC)
 - Discovery：`discovery_runs.config_snapshot.promptVersions`，与既有 d2–d5 配置并存。
 - Evaluation：同一 `evaluation_input_id` 的 `evaluation_runs.prompt_version` 保存同一个精确 UUID；已有字段为 text，无新列。
 - Introduction / Manual Generate：`discovery_candidates.evaluation.promptVersions` 保存最近一次相应生成尝试的版本；不是跨 HTTP 请求 Resume 或完整历史。
-- Put Back / Read More：`raw_articles.metadata.promptVersions`；Put Back 的失败重试复用文章已有绑定。
+- Put Back / Read More：`raw_articles.metadata.promptVersions`。
 - Manual / Put Back 的同一 JSONB 下 `promptAttempt = {key, status}` 是短事务领取后的执行标记（running / completed / failed），防止释放事务后的重复付费。既有业务数据与其他 metadata 保留。进程硬退出留下 running 时不自动接管，恢复操作见 Operations。
 
 除 Stage4 列外不新增业务字段、表或 Schema；JSONB 版本关联由服务层加载时验证所属 key、Published 状态、Hash 和精确 Fragment 引用。

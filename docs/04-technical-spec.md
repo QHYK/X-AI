@@ -207,10 +207,9 @@ flowchart LR
     CLIENT --> KIMI["Kimi"]
 ```
 
-**Implemented（B3.2）**：15 类生产请求通过 `src/lib/prompts/runtime.ts` 加载数据库中的精确 Published Version，按请求上下文缓存；没有静态 fallback。**B3.4**：数据库是生产 Prompt 文本的唯一权威来源。`src/prompts/` 仅保留动态业务输入 builder、类型及现有历史日志标签，不含静态指令或 fallback；Evaluation 复用同一生产调用链。初始化 Seed 与独立历史测试 Fixture 的职责见 `07-prompt-spec.md`，运行模块不得依赖它们。LLM Client、Provider、Schema、工具和执行算法保持原样。Prompt / 角色契约见 `07-prompt-spec.md`，存储位置见 `05-data-model.md` §12，Daily / Discovery 的绑定与恢复边界分别见对应 Workflow。
+生产 Prompt 文本唯一来源是数据库中精确绑定的 Published Version。`src/lib/prompts/runtime.ts` 在执行上下文中加载并缓存，失败不使用静态 fallback；Evaluation 复用同一生产调用链。`src/prompts/` 仅保存动态输入 builder、类型和历史标签，运行模块不得依赖初始化 Seed 或历史 Fixture。
 
-
-Discovery 的 Agent 工具调用、模型兼容性与 Trace 细节由 `04a-discovery-technical-spec.md` 定义。
+模板、角色和精确 Fragment 契约见 `07-prompt-spec.md`；存储与版本载体见 `05-data-model.md` §12；Daily / Discovery 的恢复特例见对应 Workflow。LLM Client、Provider、Schema 和工具仍由代码管理。
 
 ### 5.1 Structured Output 边界
 
@@ -298,9 +297,9 @@ X-AI-field 包含一个 Internal Dashboard，用于运行观察、Human Review �
 
 后台 `dashboard/`、`review/` 与 `prompts/` 页面集中放在 `src/app/(admin)/` Route Group，由共享 `layout.tsx` 和可复用 Sidebar 提供后台外壳；Route Group 不改变浏览器 URL。`src/app/admin-navigation.ts` 是 Sidebar 分组、名称和链接的唯一配置来源，不承担认证或路由注册职责。跨页面菜单使用 Next.js `Link` 的应用根路径，由 Next.js 处理 basePath；其余既有相对 URL 约定见 §6.3。登录、启动页和公开 In-depth 列表位于 Route Group 外。
 
-**Implemented（B3.3）**：`/prompts` 是共享后台中的 Prompt Management 页面，支持按 Key 搜索、类型筛选、完整版本历史、从版本创建 Draft、保存、Publish 和独立 Activate / 回滚。页面调用 `/api/admin/prompts` 列表接口与 `/api/admin/prompts/[key]` 详情 / 写接口，复用 Registry Service；每个接口独立检查管理员 Session，写请求同时检查同源 Origin，不提供模型调用功能。
+`/prompts` 提供 Registry 搜索 / 类型筛选、版本历史、Draft 编辑、Publish 及独立 Activate / 回滚；历史 Published 只读。服务复用 `src/lib/prompts/registry.ts`，接口为 `/api/admin/prompts` 与 `/api/admin/prompts/[key]`，沿用 §6.3 的服务端认证和同源校验，不提供在线模型调用。
 
-管理写入在 Registry 行锁内执行。Draft 保存 / Publish 校验客户端读取的 Content Hash，Activate 校验旧 Active ID；冲突返回 409。前端保留未保存文本，不自动刷新覆盖，用户核对后再操作。Published 只读；Activate / 回滚确认框明确显示起止版本。管理页面不改变 B3.2 的运行绑定机制，Prompt 模板与精确 Fragment 语义见 `07-prompt-spec.md`。
+Publish 不改变生产 Active；Activate / 回滚确认起止版本，不影响已绑定任务。Registry 行锁内校验 Draft Content Hash / 旧 Active ID；并发冲突返回 409，前端保留未保存内容，不自动刷新覆盖。Fragment 与条件变体的校验见 `07`。
 
 Dashboard 不是 Production Source of Truth。它读取 Production 数据与 Runtime Artifacts，并调用已有 Application Services，不应在 UI 层复制 Processing、Review 或 Evaluation 的业务逻辑。
 
@@ -312,7 +311,9 @@ Dashboard 不是 Production Source of Truth。它读取 Production 数据与 Run
 
 查看指定日期的 Daily Job 运行情况与各 Processing Step 的结果，用于判断该次运行是否正常完成以及定位问题。
 
-`/dashboard` 的 Discovery Run Card 以当前 Dashboard 选中的业务日期匹配 `discovery_runs.window_end_date = selectedDate`（PostgreSQL `date` 直接比较，不作时区转换），不按服务器当天或启动日期过滤。汇总信息（包括运行次数、整体状态、Candidates、审核数量和缓存指标）及 D2–D4 仅取该日期的 Regular Run：不筛选状态，展示 `started_at` 最新的一次（NULL 排最后，同时间按 ID 降序），明确标记 Regular Run。D5 独立取该日期实际执行记录最新的一次，可来自 Regular 或 Open Run，并展示所属 Run ID / 类型；按阶段 `completedAt` 排序，正在运行或历史缺少完成时间时使用 Run 的 `updated_at`（阶段状态写入时更新），再回退 `started_at`，同时间按 ID 降序。不将 Open Run 指标并入 Regular 汇总。只有 Open Run 时汇总及 D2–D4 显示 N/A，D5 正常显示；既无 Regular Run 也无 D5 执行记录时隐藏。读取 `discovery_runs.execution_state` 和关联 Candidate / 审核记录显示真实状态、耗时与数量，历史缺失指标显示未知，不从 Trace 或候选反推阶段成功；完整 Retry 位于 Discovery 区域标题旁，独立 Retry Open 位于 D5 卡片；即使该日期没有 Run，仍可提交完整 Retry。按钮展示窗口 / 阶段及付费确认，Admin API 迅速返回任务 ID 并轮询状态；执行方式见 `04a-discovery-technical-spec.md` §7.1。CLI Resume 保留。缓存 Token 与命中率汇总实际阶段 Usage，缺失值显示 `—`；Selected 统计定义见 `05-data-model.md` §11.1。
+Discovery Run Card 按 Dashboard 业务日期匹配 `window_end_date`，不按服务器当天或 Run 启动日期过滤。汇总与 D2–D4 取该日期最新启动的 Regular Run，不筛选状态；D5 独立取最新实际执行阶段，可来自 Regular 或 Open Run，明确显示所属 Run ID / 类型，不混加跨 Run 统计。只有 Open 时 Regular 部分显示 N/A；没有 Regular 或 D5 记录则隐藏。
+
+阶段状态和指标取持久化业务数据，历史缺失显示未知，不由 Trace 猜测成功。查询与稳定排序实现见 `src/lib/discovery-dashboard.ts`。Retry Discovery / Retry Open 均有付费确认，提交后轮询；异步执行架构见 `04a` §7.1，运行关联规则见 `06a` §6、§8。
 
 ### 7.3 Human Review
 
@@ -328,16 +329,22 @@ In-depth Review 保留完整标题及既有审核操作；基本信息区左侧�
 
 #### In-depth Editorial Introduction
 
-人工 URL 候选入口位于同一审核页面：`POST /api/admin/review/in-depth/manual` 获取基础信息并创建 / 返回候选，`GET` 以 Candidate ID 只读预览已存正文，不发起抓取。现有 Generate 端点对 manual 使用专用任务指令，成功后更新同一详情中的中文标题和介绍；人工编辑仍只保存三段 Editorial。产品行为见 `01-product-spec.md` §4.2，技术边界见 `04a-discovery-technical-spec.md` §6.4；manual 的 Run / Processing Stage 显示为不适用，不伪造 D4。
+人工 URL 候选使用 `POST /api/admin/review/in-depth/manual` 创建或返回既有候选，`GET` 按 Candidate ID 只读预览正文；产品行为见 `01` §4.2，复用与并发边界见 `04a` §6.4。manual 不伪造 Run / D4。
 
-`/review/in-depth` 的「完善介绍」复用当前 Candidate Card，只编辑「讲了什么」「为什么值得用心阅读」「其他具体评估」三段中文 Markdown；Original Title 完整展示，Title / Author 不再提供编辑输入。Notes、介绍、审核状态是三个独立控制：
+`/review/in-depth` 中 Original Title 完整展示，Title / Author 不提供人工编辑。介绍、Notes、审核状态三个控制相互独立：
 
-- `PATCH /api/admin/review/in-depth` 使用严格的 action 契约：`review` 只更新 reviewStatus / reviewedAt，`notes` 只更新 editorialNotes，`editorial` 只保存三段 Editorial；不能夹带其他控制的字段。
-- 同端点 `POST { id }` 在 Session、同源及输入校验后，调用共享 LLM Client 生成并自动保存介绍。服务端依次复用完整 Fetch Cache / 已有 Candidate 正文、Daily 已保存全文；未命中时复用 Firecrawl 读取 Original URL 并保存到同一 Cache，再交给普通 Structured LLM。当前 Client 的 Chat Completions 入口不执行网页读取工具，不假设模型收到 URL 就已阅读；不引入 Agent、搜索或 Discovery Run。正文不可访问、不完整或超出单次输入上限时明确失败，不用 Agent 摘要替代。原文 Cache 技术边界见 `04a-discovery-technical-spec.md` §4.3。
-- Regenerate 遇到未保存人工修改须确认；请求中继续输入或切换 Candidate 时，旧响应不能覆盖新输入。生成成功但保存失败时返回生成文本，允许直接 Save changes 重试，无需重复模型调用。
-- 介绍的持久化与历史兼容由 `05-data-model.md` §11.4 定义，模型质量与输出契约由 `07-prompt-spec.md` 的 In-depth Editorial Introduction 定义。
-- X-AI-field 不再提供公开 `/in-depth` 页面；匿名 `GET /api/in-depth` 使用 Approved 查询，读取最新已保存介绍及 Editorial extra_info；API 返回 `{ items, nextCursor, hasMore }`，默认每页 10 篇；SQL 按 `in_depth_candidates.created_at DESC, id DESC` 排序，以二者组成严格校验的 opaque cursor，保留 UTC 微秒精度；游标标记当前排序版本，旧 Discovery 表游标失效，需重新加载首页。用同一表的 tuple `<` 查询下一页并多取一条判断末页，不使用 Offset。非法游标返回 400；末页 nextCursor 为 null、hasMore 为 false。items 中既有 Agent / Editorial / Tags / Cover 等字段语义不变。公开字段显式列出，不序列化 Notes、内部证据、模型诊断或内部 Editorial 传输对象。无介绍时回退原内容，无 Draft/Published 双版本。
-- 读者端 Xfield 使用公开 API 增量字段 `agent: { summary, whyWorthReading }` 与 `editorial: { summary, whyWorthReading, extra_info }` 分别展示原始 Agent 与独立 Editorial，空 Editorial 不回填 Agent；既有顶层展示字段保持原有覆盖语义。公开元信息另提供 `publishedAt`、经既有读取器验证的双语 `tags` 与 `cover`，不返回其所在的完整 `evaluation` / `evidence`。
+- `PATCH /api/admin/review/in-depth` 的严格 action 为 `editorial` / `notes` / `review`，只能修改各自字段。
+- 同端点 `POST {id}` 生成并自动保存介绍；manual 使用专用生成任务。普通 LLM 接收实际正文，不因收到 URL 就视为已阅读，不增加搜索或 Discovery Run。
+- Introduction 优先用完整 Cache / Candidate 正文，再用 Daily 全文，未命中才固定 URL Fetch 并缓存；Manual Generate 只读已保存正文。正文缺失、不完整或超输入上限时明确失败；Cache 设计见 `04a` §4.3。
+- Regenerate 覆盖未保存修改前确认；迟到响应不得覆盖新输入或其他 Candidate。生成成功但保存失败返回文本供手动保存，不要求重复付费。
+
+持久化与 Editorial 回退规则见 `05` §11.4，模型输入输出见 `07`。
+
+#### In-depth 公开 API
+
+匿名 `GET /api/in-depth` 只返回 Approved Candidate；X-AI-field 不提供公开 `/in-depth` 页面。响应 `{items, nextCursor, hasMore}` 默认每页 10 篇，按 Candidate `created_at DESC, id DESC` 排序；opaque cursor 保留稳定分页精度，非法游标返回 400，末页 nextCursor=null、hasMore=false。实现见 `src/lib/in-depth-reads.ts`。
+
+items 显式列出客观元数据（含 publishedAt、双语 tags、cover）、`agent: {summary, whyWorthReading}` 及 `editorial: {summary, whyWorthReading, extra_info}`。独立 editorial 不用 Agent 补空，原顶层展示字段保持既有覆盖语义；不返回 Review notes、内部 evidence/evaluation 或模型调试数据。已 Approved 内容保存 Editorial 后立即可读，不引入 Draft/Published 双版本。Xfield 按此契约分别展示 Agent 与 Editorial，并按 API 顺序追加分页结果。
 
 ### 7.4 Model Evaluation
 

@@ -2,7 +2,7 @@
 
 本文档只定义 X-AI-field Discovery 的**技术实现边界与关键决策**。通用架构见 `04-technical-spec.md`；AI 语义见 `03-ai-workflow-spec.md`；执行分支、人工触发与失败语义见 `06a-discovery-workflow.md`；字段定义见 `05-data-model.md`；Prompt 与输出契约见 `07-prompt-spec.md`；运行命令见 `09-operations.md`。
 
-> **Implemented**：D2–D5 生产执行路径、候选持久化、原文 Cache、数据库 Trace、人工审核及 Worker 异步执行已实现。**Planned** 能力单独标注，不能视为已有入口。**Historical**：旧的“仅完成 Spike、生产方案待实现”状态说明已失效；Spike 仅保留为历史验证记录，不作为生产运行入口。代码已实现不等于特定服务器已部署或外部 Provider 始终可用。
+D2–D5、候选持久化、原文 Cache、数据库 Trace、人工审核与 Worker 已实现；Planned 能力单独标注。代码实现不代表特定服务器已部署。
 
 ## 1. 技术目标与边界
 
@@ -28,25 +28,22 @@ src/discovery (workflow orchestration / candidate evaluation)
        └── DB execution steps（经现有 db 层）
 ```
 
-- `src/prompts/` 保存 Discovery Prompt；`src/db/` 保存 Drizzle Schema。
+- 生产 Prompt 从数据库 Published Version 加载；`src/prompts/` 仅保存动态输入 builder、类型与历史标签，架构见 `04-technical-spec.md` §5。`src/db/` 保存 Drizzle Schema。
 - 现有 Daily Brief 查询逻辑应抽取或复用为可被 API 与 Discovery 调用的服务函数；**不通过复制 SQL / 过滤规则实现第二套 Daily 选择逻辑**。
 - 不让 `src/discovery` 调用 Daily Stage 的 orchestration；只读取其已生成的数据。
 - 不在 Route Handler、CLI 入口中实现 Agent Loop 或编辑判断。
 
 ## 3. 输入快照与读取
 
-Discovery 默认在 Asia/Shanghai 12:00 启动，前提是依赖的两期 Daily 均已完成；若上游失败则等待人工修复后手动启动，不因补跑时间变化而切换计划窗口。一次 Discovery Run 确定一个两期 Daily 的输入窗口。Event 可覆盖窗口内所有 Event；Digest 与 Long-form 沿用对外 API 的内容选择规则（以 `06a` 为准）。
+`src/discovery/daily-read-adapter.ts` 复用 Daily 查询组装内容成员，不调用 Daily orchestration。输入窗口、就绪条件与成员选择由 `06a-discovery-workflow.md` §2 定义。
 
-- Code 读取并组装标题、摘要、必要标签、来源及内容 ID；Topic Selection 不读取原文、不要求 URL。后续阶段通过 ID 查询 URL 和正文。
-- 记录计划窗口、实际输入内容 ID，以及用于模型调用的**输入快照或可核查的输入记录**，防止数据后续更新导致无法解释历史决策。
-- 推荐历史用于候选去重，不默认加入 Topic Selection / Agent Context；少量 Few-shot 与相关显式 Memory 可按 `03` 的语义输入。
-- 不在本规范中定义 Daily 日期边界或 API membership 规则，需先核实代码后复用。
+保存窗口、实际输入内容 ID 与可核查记录，避免补跑时悄然换窗；成员 ID 不是完整模型输入快照（字段见 `05-data-model.md` §11.1）。推荐历史用于 Code 去重，不默认作为模型上下文；显式 Memory 仍为可选输入。
 
 ## 4. AI 调用与 Agent Runtime
 
 ### 4.1 Topic Selection 与编辑评价
 
-使用普通 LLM Structured Output 调用，经应用层 Schema Validation 后使用。Topic Selection 最多返回 **8 条** Direct / Topic 线索合计，按优先级排序；可以为空。该限制不意味着启动 8 个完整 Agent Loop。
+D2 / D4 复用共享 LLM Client 和 Structured Output，校验后才能进入业务逻辑。输入输出见 `07-prompt-spec.md`，执行与数量边界见 `06a-discovery-workflow.md`。
 
 ### 4.2 Discovery Agent
 
@@ -58,18 +55,16 @@ Discovery 默认在 Asia/Shanghai 12:00 启动，前提是依赖的两期 Daily 
 
 Agent 每轮依据工具观察结果决定搜索、阅读、追踪或结束。工具调用与结果必须可记录，最终自然语言声明不能替代真实执行证据。
 
-常规 D3 使用一个 Agent Run 接收 D2 按优先级输出的全部 Topic Leads。整个 Run 最多输出 3 篇，每篇必须声明一个属于当前输入的主要 `sourceLeadId`，由 Code 校验后持久化。
+常规 D3 使用一个 Agent Run 接收 D2 按优先级输出的全部 Topic Leads。每篇必须声明属于输入的主要 `sourceLeadId`，由 Code 校验后持久化；不为每条 Lead 新建 Agent Loop。
 
-**模型接入（Spike 已验证）**：Discovery Agent 首版通过已实测的 Codex Responses endpoint 接入 GPT 模型，使用 OpenAI Agents SDK；普通 Topic Selection / Direct 编辑评价仍使用现有共享 LLM Client。Spike 使用 `@openai/agents@0.20.0`、`zod@4.6.7`，在 `gpt-5.6-terra` 上真实验证 Hosted Web Search、Function Tool、Structured Output 和自定义 TracingProcessor。生产代码应将 Endpoint、Key、Model 置于配置层，不将本机地址写死，不预设多 Provider 自动切换。
+Agent 通过配置的 Responses endpoint 使用 OpenAI Agents SDK，D2 / D4 使用共享 LLM Client；Endpoint、Key、Model 不硬编码，也不自动切换 Provider。配置和真实诊断入口见 `09-operations.md`；历史 Spike 不作为生产入口。
 
 ### 4.3 工具与搜索方案
 
 首版优先使用以下两种工具：
 
-- **Agents SDK 托管 Web Search**：优先使用 SDK 提供的 `webSearchTool()`（由 OpenAI 服务端执行搜索），由 Agent 决定搜索什么、何时继续；**不自建 `search_web(query)` 封装**。Spike 已验证实际 `web_search_call`；在当前 SDK 中该调用出现在 `response` Span 的 output items 中，不是独立的搜索 Span。
+- **Agents SDK 托管 Web Search**：优先使用 SDK 提供的 `webSearchTool()`（由 OpenAI 服务端执行搜索），由 Agent 决定搜索什么、何时继续；**不自建 `search_web(query)` 封装**。搜索证据由 SDK `response` Span 的 output items 提取，不能只数工具 Span。
 - **自定义 `fetch_content(url)`**：通过 Agents SDK Function Tool 接入现有抓取 / Firecrawl 能力，返回真实取得的正文、可用转写文本、来源及读取状态；明确区分完整、部分与不可获取。搜索摘要不能替代全文验证。
-
-Hosted Tool 和自定义 Function Tool 都属于 Agent 的工具调用；使用平台提供的搜索能力不改变 X-field 自己负责 Workflow、Agent 指令、验证、数据存储和人工审核的职责。**不需要 Skill**。
 
 Content Fetch 的同一次 Firecrawl Scrape 请求同时取 Markdown、主内容 HTML 和响应元数据，不为图片追加抓取。Code 按 `og:image`、`twitter:image`、正文图片的顺序选一个 Cover：社会化元数据提供文章关联依据，正文图片要求位置与声明尺寸证据（宽至少 600，已知高至少 300）；过滤明显 Logo、头像、图标、广告及推荐区，已知尺寸不足或比例极端时弃用。相对图片地址以原文 URL 解析，仅接受无凭据的 HTTP(S)。没有合适图片或解析失败只令 Cover 为空，不影响已获取正文。Direct 路径仅复用已有 `raw_articles.metadata` 和 `image_url`，不为图片重抓。图片不经过 LLM，也不上传或代理；持久化形状见 `05-data-model.md` §11.3。
 
@@ -81,7 +76,7 @@ D3 / D5 的工具调用早于最终 Candidate 选择，可能读取更多作品�
 
 成功但明确不完整的响应可保存并标记不完整，不能命中完整正文复用；HTTP 错误、空响应不保存为成功正文。缓存唯一键避免重复记录；同一规范化请求 URL 使用 PostgreSQL 事务级 advisory lock 并在锁内复查，减少多进程并发重复付费，适用于 transaction pooling。锁与持久化独立于 Candidate 写入事务；已成功抓取但 Cache 写入失败时明确记录日志并保留本次已取得内容，不能静默当作已缓存。查询 / 锁失败不降级为无保护的付费抓取。已有重定向目标也可命中 Cache；不同未知别名首次并发抓取不实现复杂的别名协调。
 
-D4 本身不抓取，继续通过现有 Daily 关联读取 `raw_articles.full_content_text`；不复制到新 Cache。共享原文读取器还可复用 Daily `content_text` 中有明确证明的完整短正文：Content Completion 为 success、类型 article_body、full_content_length 为 0（既有提取器只在正文不超过 Stage1 上限时如此保存）；不能将 Abstract / Summary 或没有这些证明的片段当作全文。Daily 只保留摘要、未保存全文的历史记录无法无成本恢复原文。Editorial 原文读取与生成边界见 `04-technical-spec.md` §7.3；本轮不改变 Daily Pipeline。
+D4 通过现有 Daily 关联读取 `raw_articles.full_content_text`；不复制到新 Cache。共享原文读取器还可复用 Daily `content_text` 中有明确证明的完整短正文：Content Completion 为 success、类型 article_body、full_content_length 为 0（既有提取器只在正文不超过 Stage1 上限时如此保存）；不能将 Abstract / Summary 或没有这些证明的片段当作全文。Daily 只保留摘要、未保存全文的历史记录无法无成本恢复原文。Editorial 原文读取与生成边界见 `04-technical-spec.md` §7.3。
 
 如果 Hosted Web Search 在实际模型、SDK 或证据记录要求下无法满足需求，再引入第三方搜索 API 并实现自定义 `search_web`，不提前维护两套搜索实现。
 
@@ -90,8 +85,8 @@ D4 本身不抓取，继续通过现有 Daily 关联读取 `raw_articles.full_co
 ### 4.4 资源控制
 
 - 对每次 Agent Run 设置最大轮数、整体超时及工具级超时；数值在实验后进入 `09-operations.md`。
-- Topic Selection 的 8 条为候选线索上限；实际探索多少条由 Code 根据排序和资源预算限制，**不增加第二个 LLM Ranking 阶段**。
-- Direct 验证与 Topic Discovery 可并发；采用简单的 Promise 并发与失败隔离，避免无界并发。
+- 候选线索不是独立 Agent 配额；不增加第二个 LLM Ranking 阶段。
+- 编排按 `06a` §8.3.1 顺序执行并隔离分支失败；不引入并发调度器。
 - Agent 达到限制时记录 `budget_exhausted` / `timeout` 等真实原因，不冒充正常完成。
 
 ## 5. Candidate Pool、验证与提交
@@ -100,8 +95,7 @@ D4 本身不抓取，继续通过现有 Daily 关联读取 `raw_articles.full_co
 - Code 负责 URL 规范化、候选去重、历史重复检查、可访问性及可核查的时长 / 内容类型检查。
 - LLM 负责编辑价值判断；最终候选必须关联实际读取证据，不以 Agent 自述作为已阅读全文的依据。
 - Tags 复用各路径已有最终阅读评价，不额外请求或建立补标签服务；阶段职责见 `06a-discovery-workflow.md` §4.1。双语输出契约见 `07-prompt-spec.md` 的 Discovery Candidate Tags，存储映射见 `05-data-model.md` §11.3。
-- 常规路径 **Direct 最多 3 篇、Topic 最多 3 篇**，最多 6 篇进入人工审核；不凑数。
-- 仅当常规 Direct / Topic 均正常完成且 Code 核查后合计 0 篇合格作品时自动触发 Open；人工可在审核不满意时额外触发 Open。Open 每次最多提交 3 篇，不覆盖已有审核候选。
+- 候选数量、自动 / 人工 Open 的触发及保留历史规则统一见 `06a-discovery-workflow.md` §1、§6。
 - 作品可以在不同路径重复发现，但应在统一 Pool 中去重并保留发现来源；最终审核列表不重复展示同一作品。
 
 ### 5.1 Candidate Source 归一化
@@ -119,18 +113,7 @@ D4 本身不抓取，继续通过现有 Daily 关联读取 `raw_articles.full_co
 
 当前使用 PostgreSQL 保存业务对象与执行 Trace，不为 Discovery 新建 `runtime/` 文件日志。**优先复用 Agents SDK 原生 Tracing 与 Processor 扩展接口**，而不是手写一套 Agent Loop 事件采集器。生产适配器 `src/discovery/agent-tracing.ts` 已实现 PostgreSQL 写入、敏感数据过滤及结束刷新；部署环境的写入、异常与退出场景仍需持续验证。
 
-| 对象 | 技术职责 |
-|---|---|
-| `discovery_runs` | 运行 ID、触发方式、计划输入窗口、输入快照、运行状态与结束原因；人工触发 Open 能关联原运行 |
-| `discovery_trace_spans` | 保存 SDK Trace / Span 的关联 ID、父子关系、类型、时间、状态及原始结构化数据，关联业务 Run |
-| `discovery_candidates` | 候选作品、发现路径、证据、验证结论及筛选状态 |
-| `in_depth_candidates` | 通过机器筛选或人工 URL 提交进入审核的作品及审核状态 |
-
-`discovery_runs.execution_state` 保存已执行 D2–D5 阶段的动态完成状态与执行诊断。它与不可变的 `config_snapshot` 分离；阶段更新必须使用局部 JSONB 更新，缺失或遗留 `running` 不视为完成。字段与 Usage 完整性语义由 `05-data-model.md` 定义。
-
-常规执行入口仅负责调用 D2、D3、D4，并在两分支均正常完成且没有合格候选时调用 D5；它不复制阶段的 Prompt、验证、候选写入、Trace 或 Usage 累计逻辑。首版顺序执行 D3 后 D4，D5 仅在兜底条件满足时运行；分支各自保留状态与失败隔离。
-
-字段、关联、索引、状态枚举和写入事务由 `05-data-model.md` 定义。本轮不修改既有 `feedback` 表；显式 Memory 写入由独立后续能力负责。
+业务对象与 Trace 表的字段见 `05-data-model.md` §11。`execution_state` 与配置快照分离，阶段更新使用局部 JSONB，不能覆盖其他分支。状态与恢复规则由 `06a` §8 定义；普通 LLM / Code 检查保留必要业务诊断，不伪装成 SDK 工具轨迹。
 
 ### 6.1 Trace 的职责与存储
 
@@ -145,37 +128,23 @@ D4 本身不抓取，继续通过现有 Daily 关联读取 `raw_articles.full_co
 
 ### 6.2 可追溯与重跑
 
-每次 Run 固定并保存计划窗口、实际输入内容 ID 与必要输入快照；相同输入允许不同探索结果，每次执行分别关联独立 Trace。Agent 的自然语言自述不能代替实际工具调用或抓取证据。状态 `timeout`、`budget_exhausted`、上游未就绪与正常空结果必须区分。
-
-具体字段、关联、索引与约束由 `05-data-model.md` 定义。本轮不修改 `feedback`；显式 Memory 写入由后续独立能力负责。
+业务状态不能由 Agent 自述或 Trace 推断；保留可关联的输入成员、工具证据和结果。Resume / New Run 的选择及 Prompt 绑定见 `06a-discovery-workflow.md` §8.3，字段见 `05-data-model.md` §11–§12。
 
 ### 6.3 人工单条线索执行（Planned）
 
-以下保留已确定的设计约定，当前 CLI / Admin API / Review UI 尚未提供单条 Lead 执行入口；数据库预留不等于功能已实现。当前人工补充执行边界见 `06a-discovery-workflow.md` §8.4。
-
-- D2 结构化输出在 Code 校验后，为每条线索分配稳定 `leadId`（例如 Run 内序号映射的 UUID）；`leadId` 不由 LLM 自由生成。审核页面展示全部线索、优先级、执行状态及关联候选。
-- 人工调用参数为 `sourceRunId + leadId`，Code 从已保存的 `selection_output` 读取并校验该线索，不能信任客户端重新提交的 question / sourceContentId。
-- `direct` 只执行选定作品的 D4 评价；`topic` 只执行选定问题的 D3 Agent；复用既有 Prompt、Schema、URL 去重和证据检查，不重新执行 D2。人工 Open 沿用既有入口。
-- 每次人工执行创建新 `discovery_runs` 记录，`parent_run_id` 指向原常规 Run，`source_lead_id` 记录目标线索；不覆盖原候选或原执行结果。保留审核候选的历史 URL 去重规则。
-- 某个分支失败时记录 `partial` / `failed` 和原因，不自动重跑，也不自动触发 Open；人工决定执行单条线索或 Open。
+当前 CLI / Admin API / UI 没有此入口。保留的设计是：接收 `sourceRunId + leadId`，从已保存 D2 输出读取线索，Direct 复用 D4、Topic 复用 D3，不重跑 D2；创建关联父 Run 的新执行并保留原候选。字段与约束见 `05-data-model.md` §11.1。不能因数据库预留字段而宣称功能已实现。
 
 ### 6.4 人工 URL 候选（Phase B1）
 
-人工提交不调用 Discovery 编排、不创建 Run / Lead 或伪造 D4 评价。共用 `discovery_candidates` 元数据与 `in_depth_candidates` 审核存储，manual 的无 Run 约束由 `05-data-model.md` 定义。Admin API 在 Session / 同源校验后按规范化 URL 查重，已有审核记录原样返回；重复人工创建以 URL 事务锁串行复查。历史无规范化键的审核候选按同一规范化函数兼容匹配。
+产品行为由 `01-product-spec.md` §4.2 定义。`src/lib/manual-in-depth.ts` 复用候选存储、URL 规范化与 §4.3 的正文读取器，不调用 Discovery 编排或创建虚假 Run / Lead；manual 空关联约束见 `05-data-model.md` §11。
 
-正文复用 §4.3 的统一 Fetch Cache / Daily 读取器，读取成功后才创建候选；Candidate 只保存关联 URL 和必要元数据，不复制大段正文。Fetch 成功而创建失败时保留独立 Cache，重试复用。人工生成只读取已有完整正文，不重新 Fetch；对同一 Candidate 使用事务级执行锁，防止并发付费生成。完整生成结果默认直接返回，只有显式 Regenerate 才重新调用模型。生成与保存失败明确区分，生成文本在保存失败时返回供人工保存。
-
-Manual Generate 使用共享 LLM Client、Editorial 写作指令、D4 共享编辑标准及 Tags 规则，单次结构化调用生成介绍，不执行 qualified / rejected / unverifiable 判断。输出校验后在一个事务内保存中文标题、候选介绍与三段 Editorial；不改 Review status、Notes 或 Discovery Run。人工输入 Tags 不被模型覆盖。
-
-既有 Discovery 历史 URL 去重继续包含人工候选；D4 的跨 Run 排除使用 NULL 安全比较，兼容 manual 的空 Run ID，其余路径的判断不变。
+- 创建时按规范化 URL 锁内复查，也兼容历史无规范化键的候选；Fetch Cache 独立提交，因此候选创建失败后可复用已付费正文。
+- Generate 只读已保存完整正文；复用共享 Client 和编辑 Fragment，输出契约见 `07-prompt-spec.md`。短事务领取执行标记后释放事务再调用模型，避免跨 LLM 请求持锁；Prompt 版本语义见 `07` 开头，存储见 `05` §12.1。
+- 生成结果原子保存；生成成功但保存失败返回文本供人工保存。既有 Discovery 历史去重包含 manual 候选，空 Run ID 不能破坏跨 Run 判断。
 
 ## 7. 运行入口、人工触发与失败处理
 
-- 定时 / CLI 入口：创建独立 Run，固定输入窗口，运行常规 Discovery；自动 Fallback 条件以 `06a` 为准。
-- 人工 Open 入口：接收原 Run 或审核批次标识及可选人工意见，创建**可关联的补充运行**；不重新执行整个 Topic Selection，也不覆盖现有候选。
-- 局部分支失败时保留其他路径的有效结果；关键依赖失败、超时、正常空结果必须区分。
-- 同一输入允许多次独立运行并产生不同候选；不要求跨运行结果相同，也不以幂等性为首版目标。但单次写入仍应遵守数据库完整性约束。
-- 通过 CLI Resume 或新建 Regular / Open Run 人工处理失败；不建立复杂自动恢复系统。按 Lead 单独执行仍为 **Planned**（§6.3）。
+CLI / Dashboard / Scheduled CLI 均复用 `src/discovery/workflow-orchestrator.ts`，不在入口复制阶段逻辑。执行分支、人工 Open 及 Resume 见 `06a` §6–§8；命令与部署见 `09`。
 
 ### 7.1 Dashboard 持久化异步执行
 

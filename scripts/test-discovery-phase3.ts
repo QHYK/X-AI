@@ -18,7 +18,6 @@ import {
   type DiscoveryD3Runtime,
 } from '../src/discovery/topic-discovery.js';
 import type { DiscoverySelectionOutput } from '../src/discovery/topic-selection.js';
-import { buildDiscoveryD3Instructions } from './fixtures/legacy-prompts.js';
 
 const RUN_ID = '00000000-0000-4000-8000-000000000301';
 
@@ -28,7 +27,6 @@ async function main(): Promise<void> {
   await testNormalEmptyAndFailureReasons();
   await testTracePersistenceAndSanitization();
   testUsageNormalization();
-  testD3PromptFiltersClearlyOverlongWorks();
   testOutputContract();
   console.log('Discovery Phase 3 tests passed.');
 }
@@ -318,13 +316,6 @@ function testUsageNormalization(): void {
     cachedInputTokens: null,
     usageComplete: false,
   });
-}
-
-function testD3PromptFiltersClearlyOverlongWorks(): void {
-  const prompt = buildDiscoveryD3Instructions();
-  assert.match(prompt, /明确显示某个完整作品明显超过 30 分钟/);
-  assert.match(prompt, /直接跳过，不要调用 fetch_content/);
-  assert.match(prompt, /不得仅因 PDF 格式拒绝作品/);
 }
 
 function testOutputContract(): void {

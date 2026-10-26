@@ -1,6 +1,6 @@
 # X-AI-field AI Workflow Spec
 
-本文档定义 X-AI-field 各 AI 能力的**语义职责与判断标准**。其中 Daily AI Stages 与 Read More 为现有能力；Discovery 为独立的拟新增能力。
+本文档定义 X-AI-field 各 AI 能力的**语义职责与判断标准**。
 
 它回答：每个 AI 能力负责什么、接收什么输入、需要做什么判断、输出什么业务结果，以及什么样的结果才算完成。
 
@@ -18,7 +18,7 @@
 
 ## 1. AI Capabilities Overview
 
-X-AI-field 已有四个 Production AI Stages 和一个按需触发的 Read More 能力；拟新增独立的 In-depth Discovery Workflow。以下分别展示 Daily / Read More 与 Discovery 的 AI 能力关系：
+X-AI-field 已有四个 Production AI Stages 和一个按需触发的 Read More 能力；以及独立的 In-depth Discovery Workflow。以下分别展示 Daily / Read More 与 Discovery 的 AI 能力关系：
 
 ```mermaid
 flowchart LR
@@ -43,8 +43,9 @@ flowchart LR
     DV --> Q{"常规路径有合格作品？"}
     TA --> Q
     Q -->|是| HR["人工审核候选"]
-    Q -->|否| OA["[Agent] Open Discovery<br/>自主发现与编辑评价"]
+    Q -->|两分支成功且无合格作品| OA["[Agent] Open Discovery<br/>自主发现与编辑评价"]
     OA --> HR
+    HR -.->|人工主动补充| OA
 ```
 
 图中仅表达 AI 能力及其判断关系；Direct 依 Topic Selection 优先级处理合格结果，Topic Agent 不负责候选排序；各路径的 Code 去重、证据核查、候选汇总与持久化由 `02-workflow-overview.md` 和 `06a-discovery-workflow.md` 定义。Open Discovery 自行完成编辑评价，Code 核查后进入人工审核，不再调用 Final Candidate Evaluation。
@@ -56,10 +57,10 @@ flowchart LR
 | Stage 3 | 在各自 Channel 中，哪些内容更重要或更值得投入注意力？ |
 | Stage 4 | 如何把入选 Event 准确整理成可直接阅读的最终内容？ |
 | Read More | 如何基于完整正文，为用户提供更深入的中文阅读导读？ |
-| D2 Topic Selection（拟新增） | 哪些现有作品值得全文验证？哪些新闻能引出值得探索的知识问题？ |
-| D4 Direct Candidate Evaluation（拟新增） | Daily 已有作品经过实际内容阅读后，是否达到 X-field 的推荐标准？ |
-| D3 Topic Discovery Agent（拟新增） | 围绕知识问题，下一步搜索、阅读和追踪，是否有值得人工审核的作品？ |
-| D5 Open Discovery（拟新增） | 不受当期新闻限制，能自主找到并评价哪些值得人工审核的优秀作品？ |
+| D2 Topic Selection | 哪些现有作品值得全文验证？哪些新闻能引出值得探索的知识问题？ |
+| D4 Direct Candidate Evaluation | Daily 已有作品经过实际内容阅读后，是否达到 X-field 的推荐标准？ |
+| D3 Topic Discovery Agent | 围绕知识问题，下一步搜索、阅读和追踪，是否有值得人工审核的作品？ |
+| D5 Open Discovery | 不受当期新闻限制，能自主找到并评价哪些值得人工审核的优秀作品？ |
 
 ---
 

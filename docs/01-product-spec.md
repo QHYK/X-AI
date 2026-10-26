@@ -52,7 +52,7 @@ X-AI-field 是一个面向主动学习者的 **AI Editor（AI 编辑）与优质
 
 每两天执行一次独立 Discovery，在最近两期 Daily Brief 的基础上寻找值得深入学习的内容，并在必要时进行开放式探索。
 优先推荐文章、视频和播客，目标阅读、观看或收听时长原则上不超过 30 分钟；不为凑数降低标准。
-In-depth Reads 经人工审核后展示：`approved` 即上架，`pending` 与 `rejected` 不向读者展示。审核者可以生成、编辑和保存「讲了什么」「为什么值得用心阅读」「其他具体评估」三段 Editorial 内容。展示与存储规则见 `04-technical-spec.md` §7.3 和 `05-data-model.md` §11.4。
+In-depth Reads 经人工审核后展示：`approved` 即上架，`pending` 与 `rejected` 不向读者展示。审核者可以生成、编辑和保存「讲了什么」「为什么值得用心阅读」「其他具体评估」三段 Editorial 内容。页面与公开 API 边界见 `04-technical-spec.md` §7.3。
 
 #### 人工添加候选（Phase B1）
 

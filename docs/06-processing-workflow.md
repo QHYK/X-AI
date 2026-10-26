@@ -451,7 +451,7 @@ Admin API 仅接受 Raw Article ID 和期望 Daily 日期。已有处理记录�
 
 同一期内按既有 URL 规范化函数识别跨 Raw / Feed 的相同作品，并对该 URL 的人工恢复使用相同事务锁；已有可展示 Digest 时返回已有条目，不新增处理记录或重复付费，也不将这条重复 Raw 伪装为已经恢复。不同日期不按 URL 合并。
 
-Put Back 和 Stage3 排名写入共用一个短事务排名锁。Put Back 恢复时取分类最大名次加一；后续 Stage3 重跑时，恢复项与其他 Digest 一起参与排名，不再固定在末尾。首次 AI 排名替换恢复时的追加名次，后续仍沿用既有人工 display_rank 保护规则；过期排名清理同样适用。Stage3 排名 / 过期清理时清空 put_back_at 追加标记，原恢复准备记录仍保留在 Raw metadata；不新增字段或改变数据库约束。字段定义见 `05-data-model.md` §3。
+Put Back 和 Stage3 排名写入共用一个短事务排名锁。Put Back 恢复时取分类最大名次加一；后续 Stage3 重跑时，恢复项与其他 Digest 一起参与排名，不再固定在末尾。首次 AI 排名替换恢复时的追加名次，后续仍沿用既有人工 display_rank 保护规则；过期排名清理同样适用。Stage3 排名 / 过期清理时清空 put_back_at 追加标记，原恢复准备记录仍保留在 Raw metadata。`put_back_at` 已由 `0020_digest_put_back.sql` 引入；上述重排规则复用该字段，不另增 rerank 字段。字段定义见 `05-data-model.md` §3。
 
 ### 6.5 Runtime
 
@@ -878,9 +878,7 @@ Stage4 先按 Review snapshot 获取唯一 Run，再锁该数据库行首次绑�
 
 相关 Daily / Stage 的 `run.json` 使用同目录临时文件 + rename 原子写入，同进程按路径串行合并，保留已保存的版本映射。版本编号用于阅读，精确 UUID 用于恢复；字段与旧格式兼容规则见 Data Model §12.1。Daily 父进程等待 Stage 子进程结束后才继续写；各独立执行有自己的 runtime 目录，因此不增加跨进程文件锁。
 
-Introduction / Manual Generate 的每次用户 Generate / Regenerate（含失败后再次点击）是新操作，加载当前 Active；同一 HTTP 请求内重试固定该版本，JSONB 只表示最近一次尝试。Put Back 按文章保留失败绑定；成功准备缓存优先复用，不再付费。Manual / Put Back 在模型调用前以短事务领取、提交版本和执行标记，调用期间不持有数据库事务；并发请求被拒绝，保存成功 / 失败更新标记。审核状态、Notes 和业务幂等边界不变。
-
-Evaluation 在输入行锁下为同一评测输入的 running 模型记录固定版本，后台进程 / Resume 复用已有 UUID；版本冲突直接失败。历史记录缺少可验证 UUID 时不虚构旧版本：保留原结果，下一次实际请求才首次绑定当前 Active（不承诺恢复未知历史文本）。
+独立 Editorial / Put Back / Evaluation 的版本边界统一见 `07-prompt-spec.md` 的执行版本边界；它们不是 Daily Stage。
 
 
 `runtime/` 用于：

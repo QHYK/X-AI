@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { buildDiscoveryD5Instructions } from './fixtures/legacy-prompts.js';
 import {
   resolveDiscoveryD5RuntimeConfig,
   validateDiscoveryD5Output,
@@ -34,6 +33,17 @@ assert.throws(
   /JSON object/i,
 );
 
+// Assert the live output contract, rather than wording in a frozen Prompt fixture.
+assert.deepEqual(validateDiscoveryD5Output({ candidates: [] }), []);
+assert.deepEqual(parsed[0]?.extraInfo, {});
+assert.deepEqual(parsed[0]?.tags, candidate.tags);
+assert.throws(() =>
+  validateDiscoveryD5Output({ candidates: [{ ...candidate, sourceLeadId: 'invented-lead' }] }),
+);
+assert.throws(() =>
+  validateDiscoveryD5Output({ candidates: [{ ...candidate, tags: [{ zh: '科学方法', en: '' }] }] }),
+);
+
 const config = resolveDiscoveryD5RuntimeConfig({
   ...process.env,
   DISCOVERY_D5_TIMEOUT_MS: '120000',
@@ -43,7 +53,5 @@ const config = resolveDiscoveryD5RuntimeConfig({
 assert.equal(config.timeoutMs, 120000);
 assert.equal(config.maxTurns, 5);
 assert.equal(config.model, 'test-model');
-assert.match(buildDiscoveryD5Instructions(), /不要依赖当期新闻/);
-assert.match(buildDiscoveryD5Instructions(), /明显超过 30 分钟/);
 
 console.log('Discovery D5 mock tests passed.');

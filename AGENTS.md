@@ -53,6 +53,9 @@
   → 先读 `03-ai-workflow-spec.md` Stage 3；
   如果涉及执行、dedup、review snapshot、persistence，再读 `06-processing-workflow.md` Stage 3；
   如果涉及 Prompt / Structured Output，再读 `07-prompt-spec.md` Stage 3。
+- 修改 Discovery Agent / Fetch / Trace
+  → 读 `04a-discovery-technical-spec.md` 对应技术章节；
+  涉及输入窗口、人工 Open、分支或 Resume 时读 `06a-discovery-workflow.md`，涉及 Prompt / Schema 时读 `07-prompt-spec.md`。
 - 修改 CLI / env / test / diagnostic
   → 读 `09-operations.md`；
   不要把 Workflow 规则复制到 Operations。

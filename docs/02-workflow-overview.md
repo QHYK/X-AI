@@ -141,13 +141,14 @@ flowchart TD
     TS -->|Topic| TD --> TC --> POOL
     POOL --> OK
     OK -->|是| REVIEW
-    OK -->|否| OPEN --> OC
+    OK -->|否：同一 Regular Run| OPEN --> OC
     OC -->|有合格作品| REVIEW
     OC -->|无合格作品| NONE
     REVIEW --> HUMAN
+    HUMAN -.->|主动补充：新建关联 Open Run| OPEN
 ```
 
-- **Direct**：验证 Daily 已有的 Long-form；**Topic**：由 Agent 围绕知识问题搜索、阅读外部作品。
+- **Direct**：验证 Daily 中具备可用正文的单篇作品；**Topic**：由 Agent 围绕知识问题搜索、阅读外部作品。
 - **Open Discovery**：常规路径没有合格作品时自动运行；人工审核后也可以独立发起补充 Open Run。
 - **审核边界**：机器选出的作品先进入待审核数据，不自动上架。
 

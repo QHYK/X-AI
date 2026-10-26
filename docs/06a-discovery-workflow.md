@@ -99,9 +99,9 @@ Topic Selection 是**潜力筛选**，不是最终质量验证：
 
 ## 4. Direct Candidate 验证与 Topic Discovery
 
-### 4.1 并发边界
+### 4.1 分支职责
 
-Selection 完成后，两条路径可以并发：
+Selection 完成后，编排顺序执行 D3、D4，分支结果和失败独立保存：
 
 1. **Direct Candidate Verification（D4）**：优先读取 Daily 已入库的 `raw_articles.full_content_text`，为空时使用 `raw_articles.content_text`，标注 `content_source`；Code 检查 URL、历史重复及可核查的时长信息；普通 LLM 按 D2 优先级逐篇串行评价，每篇独立请求，不负责排名或控制最终提交数量。默认不重新抓取；正文不足返回 `unverifiable` 并说明缺失证据。
 2. **Topic Discovery（D3）**：一个 Agent Run 接收全部 Topic Leads，通过 Agents SDK 的 Web Search 和自定义 `fetch_content` 自主搜索、读取 Daily 之外的作品；整个 D3 最多输出 3 篇，不要求覆盖全部 Topic。
@@ -110,7 +110,7 @@ D4 在原有逐篇评价调用中同步生成合格作品的读者介绍，校�
 
 候选 Tags 由各路径最终阅读评价阶段一次生成：Direct 使用 D4，Topic 使用 D3，Open 使用 D5；不在 D2 从新闻线索推断最终作品 Tags，也不增加补标签调用。输出契约见 `07-prompt-spec.md`。
 
-并发只是执行组织方式，不意味着必须使用多个 Agent 或复杂协调器。两条路径独立报告成功、空结果或失败；其中一条失败不应自动抹去另一条已经得到的有效候选。
+两条路径分别报告成功、空结果或失败；其中一条失败不抹去另一条的有效候选，不建立额外 Agent 或协调器。
 
 ### 4.2 Discovery Agent Loop
 
@@ -143,9 +143,7 @@ Agent 可按观察结果自主决定：
 
 **不强制生成或维护完整多步 Plan**，也不固定搜索与阅读顺序。Agent 的 Tool Call 必须通过真实工具执行；不能把自己描述的“已阅读 / 已核实”当作事实。
 
-`fetch_content` 在工具返回前保存成功获取的原文，不等最终 Candidate 选择或 Run 完成；已存全文优先复用，持久化与并发边界由 `04a-discovery-technical-spec.md` §4.3 定义。
-
-`fetch_content` 同时保留 Code 从该次真实响应提取的可选 Cover，关联到同 URL 的 Candidate 阅读证据。无图片或图片解析失败不改变正文获取状态与分支结果；不得为了封面重新执行 Discovery。具体提取边界见 `04a-discovery-technical-spec.md` §4.3。
+Fetch 的完整原文、工具可见片段与可选 Cover 是不同输出，复用及独立持久化边界见 `04a` §4.3。
 
 Topic Agent 自行完成编辑评价，找到最多 3 篇值得推荐且有实际阅读证据的作品即可停止；不要求排序或凑满。Code 随后核查，淘汰不合格作品后无需为补足数量重新启动 Agent。
 
@@ -203,7 +201,9 @@ Open Discovery 复用同一 Discovery Agent 和内容标准，不需要新 Agent
 
 Agent 可发现多个可比较候选；**Open Discovery 最多提交 3 篇 / 个经过初筛与验证的候选进入 `in_depth_candidates`，由人工决定是否以及上架哪一篇**。不强制凑够三个；不足标准可以提交更少或零篇。Open Discovery 同样经过统一验证与去重，不享有免检通道。
 
-**人工补充执行**：审核页面展示 D2 全部线索（含稳定 `leadId`、优先级、类型、内容/问题、执行状态及结果）。审核者可选择某个 `leadId` 单独执行：Direct 复用 D4，Topic 复用 D3；也可直接触发 Open。每次人工执行创建关联原常规 Run 的独立 Run，保留原结果，不重新运行 D2、不覆盖原有候选；Open 每次最多额外提交 3 篇。
+**Implemented：人工 Open** 可通过 Dashboard Retry Open 或 CLI 主动创建关联原 Regular Run 的独立 Open Run，不要求满足自动 Fallback 条件，不重跑 D2–D4、不覆盖原候选。入口与恢复边界见 §8.3–§8.4。
+
+**Planned：Single Lead** 按 `leadId` 单独执行 Direct / Topic，当前没有 CLI / API / UI 入口；设计边界见 `04a-discovery-technical-spec.md` §6.3。
 
 ---
 
@@ -220,7 +220,7 @@ Agent 可发现多个可比较候选；**Open Discovery 最多提交 3 篇 / 个
 
 `discovery_candidates` 与 `in_depth_candidates` **不是同一层对象**：只有通过机器初筛并提交人工审核的作品才进入后者；Open Discovery 可一次提交最多 3 个。搜索结果也不必全部转成业务候选；实际持久化粒度与运行 Trace 的边界留给技术 Spec 确定。
 
-人工审核负责接受、拒绝、修改、候选之间的比较及最终上架决策。审核页面还需展示 D2 的全部线索及执行状态，支持按 `leadId` 触发单条 Direct / Topic，或人工 Open；单条执行复用原 D4 / D3 Prompt，不新设独立 Prompt。对 D4 `unverifiable` 候选的**固定 URL 重新获取并单篇重评**可作为后续人工审核功能，**不纳入首版**。**本轮不修改现有 `feedback` 结构**。用户明确要求长期记住的意见，由未来独立 Memory 写入流程处理；普通审核意见不自动写入 Memory。
+人工审核负责接受、拒绝、比较候选及上架决定。人工 Open 已实现；D2 线索级操作面板与 Single Lead 执行仍为 Planned（§8.4）。D4 `unverifiable` 候选的固定 URL 重抓并单篇重评也是后续能力，当前不提供此入口。普通审核意见不自动写入长期 Memory；显式 Memory 写入属于独立后续能力。
 
 ---
 
@@ -259,7 +259,7 @@ Discovery 分支失败后不自动重跑。是否复用原 Run，以 D2 的持�
 - D2 的完成以持久化 `selection_output` 为准；D3 / D4 的完成判断读取 `discovery_runs.execution_state` 中各自阶段状态。已执行阶段还在其中保存实际 Provider、模型、耗时与 Usage 诊断；字段完整性语义由 `05-data-model.md` 定义。D3 正常返回 0 篇仍写入 `completed + no_candidates`；缺失状态或进程异常遗留的 `running` 不视为完成。阶段状态独立更新，任何一条分支失败都不得覆盖另一条分支的完成记录或候选。
 - Resume 用于继续未完成的同一次执行。若操作目的为主动重新生成内容，而不是完成失败任务，则创建 New Run，不覆盖原 Run 的 Selection、Candidate、评价或 Trace。
 
-**B3.2 Prompt 绑定**：D2–D5 各在首次实际 LLM 请求前锁当前 Run 行，提交相应 Request Key 的 Active Version ID；D4 多篇与 D3/D5 Agent Loop 固定同一步骤版本。Resume 使用同一 Run 已绑定版本，未执行步骤首次开始时才绑定；已完成步骤不补写版本或重跑。新 Regular / Open Run 不继承父 Run 的绑定。缺失或非法版本明确失败，不回退静态文本；载体见 Data Model §12.1。历史未记录 UUID 的步骤无法还原旧文本，保留历史结果，仅下一次实际请求首次绑定当前 Active。
+**Prompt 绑定**：通用规则见 `07` 的执行版本边界，载体见 `05` §12.1。D2–D5 在同一 Run 按步骤首次绑定；D4 多篇、D3/D5 Agent Loop 固定该步骤版本。Resume 复用旧绑定，已完成步骤不补写或重跑；新 Regular / Open Run 不继承父 Run 的绑定。
 
 当前 D3 Resume 以完整 Agent Run 为恢复边界：已完成则跳过；未完成、失败或遗留 `running` 时重新执行整个 D3，不实现 Agent 内部 Checkpoint。D4 继续复用 Candidate 级 Resume。
 

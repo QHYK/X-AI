@@ -36,7 +36,7 @@ Pipeline CLI 在读取环境派生参数或执行处理模块前，统一通过 
 | `npm run db:generate` | Drizzle Kit | 从 schema 生成 migration |
 | `npm run db:check` | Drizzle Kit | 检查 migration 一致性 |
 | `npm run db:migrate` | Drizzle Kit | 应用 migration |
-| `npm run db:seed` | `scripts/import-sources.ts` | 代码试图读取 `docs/08-source-list.md` 后同步 `sources`；会写库 |
+| `npm run db:seed` | `scripts/import-sources.ts` | 解析 `docs/08-source-list.md` 的 CSV，按 name + collection_method 更新或新增 `sources`，禁用列表中缺失的来源；事务写库 |
 | `npm run admin:hash-password` | `scripts/hash-admin-password.ts` | 隐藏输入管理员密码并输出 scrypt hash；将输出配置为服务端 `ADMIN_PASSWORD_HASH` |
 
 ### 2.1 管理员登录配置
@@ -88,13 +88,11 @@ npm run test:prompt-management
 
 Dry-run 只读当前 Git / 冻结 Seed 数据，输出 18 项 key、拟导入的 `vN` 编号、来源和 Hash，不连接数据库。测试默认使用 Mock；若显式提供 `PROMPT_REGISTRY_TEST_DATABASE_URL`（独立测试数据库），同一测试还会创建隔离 Schema 并在事务结束时回滚全部 DDL / 数据，用于验证真实 PostgreSQL 约束。不要填生产连接。正式导入使用现有环境加载顺序与 DATABASE_URL，单事务导入 3 个 Fragment 和 15 个 Request；已有任意版本的 Registry 全部跳过，不覆盖人工 Draft / Published / Active。正式导入要求 `production-seeds.ts` 和 `seed-baseline.json` 已提交且无未提交修改，否则拒绝标注不真实的来源 Commit；未提交时 dry-run 允许预览，但会明确警告，不能作为已提交来源验收。无新环境变量、依赖或付费调用。
 
-B3.2 已切换数据库读取，部署顺序必须是 Migration → 幂等导入 → 切换调用方；导入脚本不会激活或覆盖已有 Registry，需在启用前确认 15 个 Request 及其精确 Fragment 均有有效 Published 版本。数据库不可用 / Active 缺失不允许回退代码文本。回滚优先回退调用方代码，保留两表、Stage4 映射列及已发布版本；不要自动删表、重置 Active 或覆盖人工版本。
+新环境按 Migration → 幂等导入 → 启动调用方部署；已有版本的 Registry 不会被导入覆盖，启用前核对有效 Active 和精确 Fragment。回滚保留表、Stage4 映射列和历史版本，不自动删表或重置 Active。运行时契约见 `07-prompt-spec.md`。
 
 Mock / 请求一致性测试不连接生产或调用模型；B3.1 **真实 PostgreSQL 约束验收尚未完成**，未提供独立测试 URL 时测试会明确 skip，不算通过。Stage4 行锁并发首次绑定也仍需独立 PostgreSQL 验收；不得把 Mock 结果等同真实事务验证。
 
-B3.4 无新增 Migration，也不需要对已有环境重新导入或重置 Active。Seed 仅用于初始化，具体职责与冻结 Parity 基线见 `07-prompt-spec.md`。数据库 Prompt 缺失时应修复 Registry / Active 配置，不得通过静态文本恢复运行。`test:prompt-registry` 同时检查生产依赖图不能加载 Seed 或历史 Fixture；`test:prompt-requests` 继续比较实际请求。`test:stage1:chat` 冒烟入口现在使用数据库 Prompt，仅在明确授权付费测试时执行。
-
-B3.3 无新增 Migration 或环境变量。启动 Web 后登录 `/ai/prompts`（也可由 Sidebar 进入）；页面只读加载，不自动导入或更改 Active。`test:prompt-management` 使用 JSDOM 与 Mock HTTP 验证编辑、冲突保留、发布 / 切换及相对 URL，不访问数据库或 LLM。Service Mock 仍由 `test:prompt-registry` 覆盖，认证 / 导航回归分别运行 `test:admin-auth` 与 `test:admin-navigation`。手动验收保存和 Activate 会写入 Web 当前连接的数据库，应在测试环境进行，并在切换前核对起止版本。
+已有环境升级 Prompt Management / 静态清理不需额外 Migration 或重导入。登录 `/ai/prompts` 管理版本；手动保存 / Activate 会写 Web 当前连接的数据库，验收须使用测试环境。`test:prompt-registry` 检查 Service 和生产依赖边界；`test:prompt-runtime` 检查绑定；`test:prompt-requests` 检查实际请求一致性；`test:prompt-management` 检查 UI。认证 / 导航回归为 `test:admin-auth`、`test:admin-navigation`。均不调用模型；真实 Stage1 冒烟 `test:stage1:chat` 需另行授权。
 
 Manual / Put Back 进程硬退出可能遗留 `promptAttempt.status=running`：先确认原请求进程已结束、无模型请求仍在进行，并检查是否已有成功结果，再由运维针对该文章 / Candidate 将标记恢复为 failed；不要自动超时接管或批量清除。Put Back 保留原绑定 UUID，Manual 下一次主动点击重新选择 Active。此流程不提供未经确认的自动修复脚本。
 
@@ -248,7 +246,7 @@ Stage 1 的逻辑 Batch 1–15 使用已有 Codex 配置；Codex retry 耗尽后
 
 ## 6. Regression Tests
 
-Ignored Article Put Back 需要先通过 `npm run db:migrate` 应用 `0020_digest_put_back.sql`，再部署新代码并按现有流程重启服务；不回填历史记录，不运行 Daily Pipeline。无新增依赖或环境变量。接口复用管理员 Session / 同源校验，模型使用现有 Stage1 Provider / Model 配置，单次请求无自动重试；不会调用 Firecrawl。回归入口：`npm run test:digest-put-back`、`npm run test:digest-put-back-ui`，均使用 Mock，不连接真实数据库或付费服务。业务与字段定义见 `06-processing-workflow.md` §6.4.1、`05-data-model.md` §3。
+Put Back 部署需通过 `npm run db:migrate` 应用 `0020_digest_put_back.sql` 并重启服务；不需回填或运行 Daily。模型使用 Stage1 Provider / Model，无新增环境变量。安全回归：`npm run test:digest-put-back`、`npm run test:digest-put-back-ui`，均使用 Mock，不连接真实数据库或付费服务。业务与字段定义见 `06-processing-workflow.md` §6.4.1、`05-data-model.md` §3。
 
 Regression tests validate stable correctness contracts; they are not Production pipeline commands. The complete executable inventory is `package.json`'s `scripts`, which is the source of truth.
 
@@ -283,7 +281,7 @@ npm run test:discovery-d5
 
 ### In-depth「完善介绍」
 
-人工 URL 候选需要先应用 `0019_manual_in_depth.sql`（使用既有 `npm run db:migrate`），再部署并按既有方式重启 Web 和正在运行的 Discovery Worker；无需回填旧候选，人工提交本身不依赖 Worker。新增无付费回归：`npm run test:manual-in-depth`、`npm run test:manual-in-depth-ui`，验证查重、并发、正文复用、生成保存和公开边界。人工 Generate 使用 `DISCOVERY_LLM_PROVIDER`（回退 `LLM_PROVIDER`）及该 Provider 的模型配置，单次调用、不自动重试；只读已有正文，不追加 Firecrawl。Step 1 缓存未命中时才使用已有 `FIRECRAWL_API_KEY` 抓取，且不调用模型。
+人工 URL 候选需要先应用 `0019_manual_in_depth.sql`（使用既有 `npm run db:migrate`），再部署并按既有方式重启 Web 和正在运行的 Discovery Worker；无需回填旧候选，人工提交本身不依赖 Worker。新增无付费回归：`npm run test:manual-in-depth`、`npm run test:manual-in-depth-ui`。人工 Generate 使用 `DISCOVERY_LLM_PROVIDER`（回退 `LLM_PROVIDER`）及该 Provider 的模型配置，单次调用、不自动重试。人工候选行为与正文策略见 `01` §4.2、`04a` §6.4；Step 1 抓取需要已有 `FIRECRAWL_API_KEY`。
 
 本地无付费回归：`npm run test:in-depth-introduction` 验证模型 Mock、证据不足、自动保存及保存失败文本恢复；`npm run test:in-depth-introduction-ui` 验证人工编辑、Regenerate 确认、重复提交及异步输入保护；`npm run test:in-depth-review` 验证独立控制和公开读取边界。
 
@@ -291,7 +289,7 @@ Generate / Regenerate 通过共享 Structured Output Client 调用一次介绍�
 
 模型请求超时 120 秒，单次输入正文上限仍为 60,000 字符；超出时明确失败并保留已缓存原文，不截断后假称阅读全文。输出预算 8,000 tokens，每段 Markdown 存储 / 传输安全上限为 32,000 字符；这些是资源边界，不是写作字数要求。日志记录 Provider / Model / Prompt version / Usage、正文来源和 Cache 写入异常，不输出凭据。实际费用取决于配置模型和 Token 用量；Save changes 与 Save notes 不调用模型或 Firecrawl。
 
-新增本地无付费回归：`npm run test:discovery-fetch-cache`，覆盖成功正文保存、Candidate 选择前持久化、Daily 复用、并发去重及失败恢复。`npm run test:in-depth-introduction` 还覆盖三条路径的原文复用、固定 URL 抓取、三字段输出及公开响应；UI 回归覆盖第三个字段的确认与异步编辑保护。
+原文持久化 / 复用的 Mock 回归：`npm run test:discovery-fetch-cache`；技术边界见 `04a` §4.3。
 
 
 ### Discovery D2–D5 Workflow
@@ -369,6 +367,8 @@ sudo journalctl -u x-ai-discovery-worker -n 100 --no-pager
 
 ## 7. Reusable Diagnostics and Smoke Tests
 
+以下是人工诊断，不是安全 Mock 集合。
+
 这些命令可能调用真实外部服务、读取真实数据库或写入本地 `runtime/`；不要把它们当作无副作用 regression tests。
 
 | 命令 | 参数 / 前提 | 实际用途 |
@@ -399,7 +399,7 @@ Discovery Run 的正式恢复边界见 `06a-discovery-workflow.md` §8.3。操�
 |---|---|---|
 | `run-daily-workflow.ts` | Production / operational command | `daily` |
 | `run-model-evaluation.ts` | Production / operational command (manual Evaluation) | `eval:*` |
-| `test-codex-call.ts` | One-off / obsolete diagnostic | 无 |
+| `test-codex-call.ts` | 保留的手动 Codex diagnostic | 无 package 入口；按脚本头部示例调用 |
 | `test-content-completion-runtime.ts` | Regression test | `test:content-completion-runtime` |
 | `test-daily-scope.ts` | Regression test | `test:daily-scope` |
 | `test-daily-workflow-retry.ts` | Regression test | `test:daily-workflow-retry` |
