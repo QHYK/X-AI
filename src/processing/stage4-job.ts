@@ -17,7 +17,7 @@ import {
 } from './stage4-event-processing.js';
 import {
   persistStage4Events,
-  loadDraftReviewItemIds,
+  loadGeneratedReviewItemIds,
   loadLatestStage4Selection,
   loadOrCreateStage4Run,
   persistStage4Draft,
@@ -443,7 +443,7 @@ async function processStage4FromDb(
         key as import('../lib/prompts/contracts.js').PromptKey,
         id,
       );
-    const drafted = await loadDraftReviewItemIds(pool, stage4Run.id);
+    const generated = await loadGeneratedReviewItemIds(pool, stage4Run.id);
     const candidateIds = selected.flatMap((item) => item.processedContentIds);
     const sourceCandidates = await loadStage4SourceCandidates(pool, candidateIds);
     const failures: string[] = [];
@@ -451,7 +451,7 @@ async function processStage4FromDb(
     for (const item of selected) {
       const eventDir = join(eventsDir, item.eventGroupId);
       await mkdir(eventDir, { recursive: true });
-      if (drafted.has(item.reviewItemId)) {
+      if (generated.has(item.reviewItemId)) {
         enrichmentSuccessCount++;
         continue;
       }
@@ -485,7 +485,13 @@ async function processStage4FromDb(
         if (enriched.toolUsage.webSearchPerformed) webSearchEventCount++;
         totalWebSearchCalls += enriched.toolUsage.webSearchCallCount;
         const inserted = await persistStage4Draft(pool, stage4Run.id, toEventToPersist(enriched));
-        if (inserted || drafted.has(item.reviewItemId)) enrichmentSuccessCount++;
+        if (
+          !inserted &&
+          !(await loadGeneratedReviewItemIds(pool, stage4Run.id)).has(item.reviewItemId)
+        ) {
+          throw new Error('Existing Stage 4 Event does not match this Run and Review context.');
+        }
+        enrichmentSuccessCount++;
         await writeJson(join(eventDir, 'output.json'), enriched.output);
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : String(caught);

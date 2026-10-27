@@ -147,6 +147,17 @@ export async function getOrFetchArticle(
 
   const client = await db.connect();
   let fetched: ArticleDocument | undefined;
+  let releaseError: Error | undefined;
+  // Checked-out pg clients have no Pool idle-error handler. An idle transaction can
+  // be terminated while awaiting Firecrawl; keep that diagnostic from crashing the process.
+  const connectionLost = (error: Error) => {
+    releaseError = error;
+    console.error('Discovery Fetch Cache connection lost.', {
+      hostname: new URL(url).hostname,
+      error,
+    });
+  };
+  client.on?.('error', connectionLost);
   try {
     await client.query('begin');
     await client.query("set local lock_timeout = '120s'");
@@ -158,6 +169,7 @@ export async function getOrFetchArticle(
       return afterLock;
     }
     fetched = await options.fetchDocument();
+    if (releaseError) throw releaseError;
     if (fetched.status === 'success' && fetched.markdown.trim()) {
       await client.query(
         `insert into discovery_fetch_cache (
@@ -187,6 +199,8 @@ export async function getOrFetchArticle(
     try {
       await client.query('rollback');
     } catch (rollbackError) {
+      releaseError ??=
+        rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
       console.error('Discovery Fetch Cache rollback failed.', rollbackError);
     }
     console.error('Discovery Fetch Cache failed.', { hostname: new URL(url).hostname, error });
@@ -195,6 +209,7 @@ export async function getOrFetchArticle(
       return { ...fetched, cacheWarning: 'Article fetched but Fetch Cache persistence failed.' };
     throw error; // Cache lookup/lock failures must not trigger an unprotected paid fetch.
   } finally {
-    client.release();
+    client.off?.('error', connectionLost);
+    client.release(releaseError);
   }
 }

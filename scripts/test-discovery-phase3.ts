@@ -1,3 +1,4 @@
+import { mockAgentTraceRun } from './test-discovery-trace.js';
 import assert from 'node:assert/strict';
 import type { Pool } from 'pg';
 import type { Span, SpanData, Trace } from '@openai/agents';
@@ -23,6 +24,27 @@ const RUN_ID = '00000000-0000-4000-8000-000000000301';
 
 async function main(): Promise<void> {
   await testSingleAgentRunValidationPersistenceAndResume();
+  const traceFailureDb = new FakeD3Pool(selection());
+  const traceFailureResult = await runDiscoveryD3(traceFailureDb as unknown as Pool, RUN_ID, {
+    runtime: async () =>
+      mockAgentTraceRun(
+        'd3',
+        {
+          query: async () => {
+            throw new Error('Mock Trace write failure');
+          },
+        } as unknown as Pool,
+        { candidates: [candidate('lead-01', 'https://example.test/trace-failure')] },
+        [successfulFetch('https://example.test/trace-failure')],
+      ),
+  });
+  assert.equal(traceFailureResult.traceFlushed, false);
+  assert.equal(
+    traceFailureDb.reviewCandidateIds.size,
+    1,
+    'Trace failure must not discard the successfully generated Candidate.',
+  );
+  assert.equal(traceFailureDb.run.execution_state.d3?.status, 'completed');
   await testOpenSourcePersistence();
   await testNormalEmptyAndFailureReasons();
   await testTracePersistenceAndSanitization();
@@ -291,6 +313,18 @@ function testUsageNormalization(): void {
   assert.equal(explicitZero.usageComplete, true);
   assert.equal(discoveryCacheHitRate(explicitZero), 0);
 
+  const camelCase = usageFromAgentResponseUsage({
+    inputTokens: 20,
+    outputTokens: 3,
+    inputTokensDetails: { cached_tokens: 5 },
+  });
+  const multiple = mergeDiscoveryStageUsage(explicitZero, camelCase);
+  assert.equal(multiple.requests, 2);
+  assert.equal(multiple.inputTokens, 30);
+  assert.equal(multiple.outputTokens, 5);
+  assert.equal(multiple.cachedInputTokens, 5);
+  assert.equal(discoveryCacheHitRate(multiple), 5 / 30);
+  assert.equal(discoveryCacheHitRate({ ...explicitZero, inputTokens: 0 }), null);
   const missingCache = usageFromAgentResponseUsage({ input_tokens: 10, output_tokens: 2 });
   assert.equal(missingCache.cachedInputTokens, null);
   assert.equal(missingCache.usageComplete, false);

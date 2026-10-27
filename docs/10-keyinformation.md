@@ -29,3 +29,6 @@ qualified 且进入人工审核队列	selected
 LLM 返回 rejected	rejected
 LLM 返回 unverifiable	unverifiable
 
+## 已知问题，但是产品决策
+1. Stage2 重跑可能切断已发布 Event 的来源关联。这是**已知的**数据关联完整性**风险**，会影响历史追溯。
+2. 同一 Daily Date 的多个 Stage4 Run 可能同时发布，现有代码未保证按业务日期互斥，可能出现两套 Event 同时处于 published 状态，例如当天展示 20 个而非预期的 10 个。

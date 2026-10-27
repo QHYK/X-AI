@@ -2,10 +2,10 @@
  * Stage 4 Event 的事务内重建与关联写入。
  * 仅清理当前重建日期范围内的旧 Event，防止重跑误删除其他历史期次的数据。
  */
-import type { Pool, PoolClient } from "pg";
-import type { Stage4EventEnrichmentOutput } from "./stage4-contract.js";
+import type { Pool, PoolClient } from 'pg';
+import type { Stage4EventEnrichmentOutput } from './stage4-contract.js';
 
-type Queryable = Pick<Pool | PoolClient, "query">;
+type Queryable = Pick<Pool | PoolClient, 'query'>;
 
 export type Stage4EventToPersist = {
   eventGroupId: string;
@@ -52,15 +52,19 @@ export async function loadLatestStage4Selection(
   dailyDate: string,
   limit: number,
 ): Promise<Stage4SelectedEvent[]> {
-  const snapshot = await queryable.query<{ review_run_id: string }>(`
+  const snapshot = await queryable.query<{ review_run_id: string }>(
+    `
     select review_run_id from event_review_items
     where daily_date = $1::date
     group by review_run_id
     order by max(created_at) desc
-    limit 1`, [dailyDate]);
+    limit 1`,
+    [dailyDate],
+  );
   const reviewRunId = snapshot.rows[0]?.review_run_id;
   if (!reviewRunId) return [];
-  const result = await queryable.query<Stage4SelectedEvent>(`
+  const result = await queryable.query<Stage4SelectedEvent>(
+    `
     select eri.review_run_id as "reviewRunId", eri.id as "reviewItemId",
            eri.event_group_id as "eventGroupId", eri.event_hint as "eventHint",
            eri.ai_rank as "aiRank", eri.display_rank as "displayRank",
@@ -70,7 +74,9 @@ export async function loadLatestStage4Selection(
     where eri.review_run_id = $1::uuid and eri.daily_date = $2::date
     group by eri.review_run_id, eri.id, eri.event_group_id, eri.event_hint, eri.ai_rank, eri.display_rank
     order by eri.display_rank asc, eri.id asc
-    limit $3`, [reviewRunId, dailyDate, limit]);
+    limit $3`,
+    [reviewRunId, dailyDate, limit],
+  );
   return result.rows;
 }
 
@@ -80,13 +86,17 @@ export async function loadOrCreateStage4Run(
   reviewRunId: string,
   expectedCount: number,
 ): Promise<{ id: string; successCount: number; status: string }> {
-  const existing = await queryable.query<{ id: string; success_count: number; status: string }>(`
-    select id, success_count, status from stage4_runs where review_run_id = $1::uuid`, [reviewRunId]);
-  if (existing.rows[0]) return {
-    id: existing.rows[0].id,
-    successCount: existing.rows[0].success_count,
-    status: existing.rows[0].status,
-  };
+  const existing = await queryable.query<{ id: string; success_count: number; status: string }>(
+    `
+    select id, success_count, status from stage4_runs where review_run_id = $1::uuid`,
+    [reviewRunId],
+  );
+  if (existing.rows[0])
+    return {
+      id: existing.rows[0].id,
+      successCount: existing.rows[0].success_count,
+      status: existing.rows[0].status,
+    };
   const created = await queryable.query<{ id: string; success_count: number; status: string }>(
     `
     insert into stage4_runs (daily_date, review_run_id, status, expected_count)
@@ -96,14 +106,25 @@ export async function loadOrCreateStage4Run(
     [dailyDate, reviewRunId, expectedCount],
   );
   const row = created.rows[0];
-  if (!row) throw new Error("Failed to create Stage 4 run.");
+  if (!row) throw new Error('Failed to create Stage 4 run.');
   return { id: row.id, successCount: row.success_count, status: row.status };
 }
 
-export async function loadDraftReviewItemIds(queryable: Queryable, stage4RunId: string): Promise<Set<string>> {
-  const result = await queryable.query<{ event_review_item_id: string }>(`
-    select event_review_item_id from events
-    where stage4_run_id = $1::uuid and publication_status = 'draft'`, [stage4RunId]);
+/** Reuse only durable Events belonging to this Run's exact Review snapshot and Daily. */
+export async function loadGeneratedReviewItemIds(
+  queryable: Queryable,
+  stage4RunId: string,
+): Promise<Set<string>> {
+  const result = await queryable.query<{ event_review_item_id: string }>(
+    `
+    select e.event_review_item_id from events e
+    join stage4_runs r on r.id = e.stage4_run_id
+    join event_review_items eri on eri.id = e.event_review_item_id
+      and eri.review_run_id = r.review_run_id and eri.daily_date = r.daily_date
+    where e.stage4_run_id = $1::uuid and e.event_date = r.daily_date
+      and e.publication_status in ('draft', 'published', 'archived')`,
+    [stage4RunId],
+  );
   return new Set(result.rows.map((row) => row.event_review_item_id));
 }
 
@@ -113,19 +134,32 @@ export async function persistStage4Draft(
   stage4RunId: string,
   event: Stage4EventToPersist,
 ): Promise<boolean> {
-  const result = await queryable.query(`
+  const result = await queryable.query(
+    `
     insert into events (event_date, title, title_zh, tags, tags_zh, entities, entities_zh,
       summary, summary_zh, source_perspectives, external_context, event_review_item_id,
       stage4_run_id, publication_status, ai_rank, display_rank)
     values ($1::date, $2, $3, $4::text[], $5::text[], $6::text[], $7::text[], $8, $9,
       $10::jsonb, $11::jsonb, $12::uuid, $13::uuid, 'draft', $14, $15)
-    on conflict (stage4_run_id, event_review_item_id) do nothing`, [
-    event.eventDate, event.output.event_title, event.output.event_title_zh,
-    event.output.event_tags, event.output.event_tags_zh, event.output.event_entities,
-    event.output.event_entities_zh, event.output.event_summary, event.output.event_summary_zh,
-    JSON.stringify(event.output.source_perspectives), toExternalContextJson(event.output),
-    event.eventReviewItemId, stage4RunId, event.aiRank, event.displayRank,
-  ]);
+    on conflict (stage4_run_id, event_review_item_id) do nothing`,
+    [
+      event.eventDate,
+      event.output.event_title,
+      event.output.event_title_zh,
+      event.output.event_tags,
+      event.output.event_tags_zh,
+      event.output.event_entities,
+      event.output.event_entities_zh,
+      event.output.event_summary,
+      event.output.event_summary_zh,
+      JSON.stringify(event.output.source_perspectives),
+      toExternalContextJson(event.output),
+      event.eventReviewItemId,
+      stage4RunId,
+      event.aiRank,
+      event.displayRank,
+    ],
+  );
   return (result.rowCount ?? 0) === 1;
 }
 
@@ -139,8 +173,11 @@ export async function publishStage4ReviewSelection(
   stage4RunId: string,
   selectedReviewItemIds: string[],
 ): Promise<{ publishedCount: number; archivedCount: number; associationCount: number }> {
-  if (selectedReviewItemIds.length === 0 || new Set(selectedReviewItemIds).size !== selectedReviewItemIds.length) {
-    throw new Error("Stage 4 Review selection must contain unique selected Event Review items.");
+  if (
+    selectedReviewItemIds.length === 0 ||
+    new Set(selectedReviewItemIds).size !== selectedReviewItemIds.length
+  ) {
+    throw new Error('Stage 4 Review selection must contain unique selected Event Review items.');
   }
 
   const run = await client.query<{ expected_count: number }>(
@@ -149,7 +186,7 @@ export async function publishStage4ReviewSelection(
   );
   const expectedCount = run.rows[0]?.expected_count;
   if (expectedCount === undefined) {
-    throw new Error("Stage 4 run not found for Review publication.");
+    throw new Error('Stage 4 run not found for Review publication.');
   }
   if (expectedCount !== selectedReviewItemIds.length) {
     throw new Error("Stage 4 Review selection does not match the run's expected Event count.");
@@ -159,13 +196,19 @@ export async function publishStage4ReviewSelection(
     `select event_review_item_id
        from events
       where stage4_run_id = $1::uuid
-        and publication_status in ('draft', 'published')
+        and publication_status in ('draft', 'published', 'archived')
         and event_review_item_id = any($2::uuid[])
+        and exists (select 1 from event_review_items eri join stage4_runs r
+          on r.review_run_id = eri.review_run_id and r.daily_date = eri.daily_date
+          where eri.id = events.event_review_item_id and r.id = events.stage4_run_id
+            and events.event_date = r.daily_date)
       for update`,
     [stage4RunId, selectedReviewItemIds],
   );
   if (selected.rows.length !== selectedReviewItemIds.length) {
-    throw new Error("Every reviewed Top Event must have a durable Stage 4 Event before publication.");
+    throw new Error(
+      'Every reviewed Top Event must have a durable Stage 4 Event before publication.',
+    );
   }
 
   const outgoing = await client.query<{ id: string }>(
@@ -196,7 +239,7 @@ export async function publishStage4ReviewSelection(
     `update events
         set publication_status = 'published', updated_at = now()
       where stage4_run_id = $1::uuid
-        and publication_status = 'draft'
+        and publication_status in ('draft', 'archived')
         and event_review_item_id = any($2::uuid[])`,
     [stage4RunId, selectedReviewItemIds],
   );
@@ -220,35 +263,100 @@ export async function publishStage4ReviewSelection(
 }
 
 /** Publish is the only operation that changes live Events and processed_contents.event_id. */
-export async function publishStage4Run(pool: Pool, stage4RunId: string): Promise<{ publishedCount: number; associationCount: number }> {
+export async function publishStage4Run(
+  pool: Pool,
+  stage4RunId: string,
+): Promise<{ publishedCount: number; associationCount: number }> {
   const client = await pool.connect();
   try {
-    await client.query("begin");
-    const run = await client.query<{ daily_date: string; expected_count: number }>(`
-      select daily_date::text, expected_count from stage4_runs where id = $1::uuid for update`, [stage4RunId]);
+    await client.query('begin');
+    const run = await client.query<{
+      daily_date: string;
+      review_run_id: string;
+      expected_count: number;
+    }>(
+      `
+      select daily_date::text, review_run_id, expected_count from stage4_runs where id = $1::uuid`,
+      [stage4RunId],
+    );
     const row = run.rows[0];
-    if (!row) throw new Error("Stage 4 run not found.");
-    const drafts = await client.query<{ count: string }>(`select count(*) as count from events where stage4_run_id=$1::uuid and publication_status='draft'`, [stage4RunId]);
-    if (Number(drafts.rows[0]?.count ?? 0) !== row.expected_count) throw new Error("Stage 4 run does not have every expected draft.");
-    const old = await client.query<{ id: string }>(`
+    if (!row) throw new Error('Stage 4 run not found.');
+    // Re-read human ordering at publication, rather than using ranks captured before LLM calls.
+    const selected = await client.query<{ id: string }>(
+      `
+      select eri.id from event_review_items eri
+      where eri.review_run_id = $1::uuid and eri.daily_date = $2::date
+        and exists (select 1 from event_group_items egi where egi.event_group_id = eri.event_group_id)
+      order by eri.display_rank, eri.id limit $3 for update of eri`,
+      [row.review_run_id, row.daily_date, row.expected_count],
+    );
+    // Review also locks ranking rows first; keep that order and hold the selection until commit.
+    await client.query('select id from stage4_runs where id = $1::uuid for update', [stage4RunId]);
+    const selectedIds = selected.rows.map((item) => item.id);
+    const generated = await loadGeneratedReviewItemIds(client, stage4RunId);
+    if (
+      selectedIds.length !== row.expected_count ||
+      !selectedIds.every((id) => generated.has(id))
+    ) {
+      throw new Error(
+        'Stage 4 run does not have every expected Event for the current Review selection.',
+      );
+    }
+    const old = await client.query<{ id: string }>(
+      `
       select e.id from events e join stage4_runs r on r.id=e.stage4_run_id
-      where r.daily_date=$1::date and e.publication_status='published' for update`, [row.daily_date]);
+      where r.daily_date=$1::date and e.publication_status='published' for update`,
+      [row.daily_date],
+    );
     const oldIds = old.rows.map((item) => item.id);
     if (oldIds.length) {
-      await client.query(`update processed_contents set event_id=null, updated_at=now() where event_id=any($1::uuid[])`, [oldIds]);
-      await client.query(`update events set publication_status='archived', updated_at=now() where id=any($1::uuid[])`, [oldIds]);
+      await client.query(
+        `update processed_contents set event_id=null, updated_at=now() where event_id=any($1::uuid[])`,
+        [oldIds],
+      );
+      await client.query(
+        `update events set publication_status='archived', updated_at=now() where id=any($1::uuid[])`,
+        [oldIds],
+      );
     }
-    const published = await client.query(`update events set publication_status='published', updated_at=now() where stage4_run_id=$1::uuid and publication_status='draft'`, [stage4RunId]);
+    const published = await client.query(
+      `update events set publication_status='published', updated_at=now() where stage4_run_id=$1::uuid and event_review_item_id=any($2::uuid[]) and publication_status in ('draft', 'published', 'archived')`,
+      [stage4RunId, selectedIds],
+    );
+    await client.query(
+      `update events e set display_rank=eri.display_rank, updated_at=now()
+      from event_review_items eri where e.stage4_run_id=$1::uuid
+        and e.event_review_item_id=eri.id and eri.id=any($2::uuid[])`,
+      [stage4RunId, selectedIds],
+    );
     const associationCount = await syncPublishedProcessedContentBacklinks(client, stage4RunId);
-    await client.query(`update stage4_runs set status='success', success_count=$2, completed_at=now() where id=$1::uuid`, [stage4RunId, row.expected_count]);
-    await client.query("commit");
+    await client.query(
+      `update stage4_runs set status='success', success_count=$2, completed_at=now() where id=$1::uuid`,
+      [stage4RunId, row.expected_count],
+    );
+    await client.query('commit');
     return { publishedCount: published.rowCount ?? 0, associationCount };
-  } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
-export async function updateStage4RunProgress(pool: Pool, stage4RunId: string, status: "running" | "partial" | "failed") {
-  const result = await pool.query<{ count: string }>(`select count(*) as count from events where stage4_run_id=$1::uuid and publication_status='draft'`, [stage4RunId]);
-  await pool.query(`update stage4_runs set status=$2, success_count=$3, completed_at=case when $2 in ('partial','failed') then now() else completed_at end where id=$1::uuid`, [stage4RunId, status, Number(result.rows[0]?.count ?? 0)]);
+export async function updateStage4RunProgress(
+  pool: Pool,
+  stage4RunId: string,
+  status: 'running' | 'partial' | 'failed',
+) {
+  const result = await pool.query<{ count: string }>(
+    `select count(*) as count from events where stage4_run_id=$1::uuid and publication_status='draft'`,
+    [stage4RunId],
+  );
+  await pool.query(
+    `update stage4_runs set status=$2, success_count=$3, completed_at=case when $2 in ('partial','failed') then now() else completed_at end where id=$1::uuid`,
+    [stage4RunId, status, Number(result.rows[0]?.count ?? 0)],
+  );
 }
 
 /**
@@ -263,8 +371,8 @@ async function syncPublishedProcessedContentBacklinks(
   selectedReviewItemIds?: string[],
 ): Promise<number> {
   const selectionClause = selectedReviewItemIds
-    ? "and e.event_review_item_id = any($2::uuid[])"
-    : "";
+    ? 'and e.event_review_item_id = any($2::uuid[])'
+    : '';
   const parameters = selectedReviewItemIds ? [stage4RunId, selectedReviewItemIds] : [stage4RunId];
   const result = await queryable.query(
     `with memberships as (
@@ -303,10 +411,7 @@ export async function persistStage4Events(
   let cleanupEventDates: string[] = [];
 
   if (plan.previousCreatedEventIds.length > 0) {
-    const previousEvents = await loadExistingPreviousEvents(
-      client,
-      plan.previousCreatedEventIds,
-    );
+    const previousEvents = await loadExistingPreviousEvents(client, plan.previousCreatedEventIds);
     const rebuildEventDates = uniqueSorted(plan.events.map((event) => event.eventDate));
     cleanupEventDates = uniqueSorted(previousEvents.map((event) => event.event_date));
     cleanupEventCount = previousEvents.length;
@@ -316,10 +421,10 @@ export async function persistStage4Events(
     if (outOfScopeEventDates.length > 0) {
       throw new Error(
         [
-          "Refusing to delete Stage 4 Events outside the current rebuild scope.",
-          `rebuild_event_dates=${rebuildEventDates.join(",") || "none"}`,
-          `cleanup_event_dates=${cleanupEventDates.join(",")}`,
-        ].join(" "),
+          'Refusing to delete Stage 4 Events outside the current rebuild scope.',
+          `rebuild_event_dates=${rebuildEventDates.join(',') || 'none'}`,
+          `cleanup_event_dates=${cleanupEventDates.join(',')}`,
+        ].join(' '),
       );
     }
 
@@ -345,7 +450,7 @@ export async function persistStage4Events(
 
   const createdEventIds: string[] = [];
   const eventGroupToEventId: Record<string, string> = {};
-  const associations: Stage4PersistenceResult["associations"] = [];
+  const associations: Stage4PersistenceResult['associations'] = [];
 
   for (const event of plan.events) {
     const insertResult = await client.query<{ id: string }>(

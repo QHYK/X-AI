@@ -29,7 +29,7 @@ import {
   DISCOVERY_D3_PROMPT_VERSION,
   DISCOVERY_EDITORIAL_PROMPT_VERSION,
 } from '../prompts/discovery-topic-agent.js';
-import { PostgresDiscoveryTracingProcessor } from './agent-tracing.js';
+import { PostgresDiscoveryTracingProcessor, finishDiscoveryTrace } from './agent-tracing.js';
 import {
   buildDiscoveryStageState,
   emptyDiscoveryStageUsage,
@@ -378,6 +378,7 @@ export async function runDiscoveryD3Agent(input: {
   });
 
   const startedAt = Date.now();
+  let runtimeResult: DiscoveryD3RuntimeResult | undefined;
   try {
     const result = await runner.run(agent, prompt.input, {
       context,
@@ -385,14 +386,15 @@ export async function runDiscoveryD3Agent(input: {
       signal: AbortSignal.timeout(input.config.timeoutMs),
     });
     if (!result.finalOutput) throw new Error('D3 Agent returned no final output.');
-    return {
+    runtimeResult = {
       output: result.finalOutput,
       fetches: context.fetches,
       usage: processor.getUsage(),
       elapsedMs: Date.now() - startedAt,
       traceIds: [...processor.traceIds],
-      traceFlushed: true,
+      traceFlushed: false,
     };
+    return runtimeResult;
   } catch (error) {
     const failure = error instanceof Error ? error : new Error(String(error));
     Object.assign(failure, {
@@ -403,8 +405,10 @@ export async function runDiscoveryD3Agent(input: {
     });
     throw failure;
   } finally {
-    await getGlobalTraceProvider().forceFlush();
-    await processor.shutdown();
+    const flushed = await finishDiscoveryTrace(processor, () =>
+      getGlobalTraceProvider().forceFlush(),
+    );
+    if (runtimeResult) runtimeResult.traceFlushed = flushed;
   }
 }
 

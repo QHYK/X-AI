@@ -56,7 +56,7 @@ Daily Brief API / Dashboard
 
 系统同时包含 Human Review 和独立的 Model Evaluation Workflow。
 Discovery 独立消费已完成的 Daily 数据，不接入 Daily Job；技术边界见
-[`04a`](docs/04a-discovery-technical-spec.md)，执行规则见 [`06a`](docs/06a-discovery-workflow.md)。
+[`docs/04-technical-spec/discovery.md`](docs/04-technical-spec/discovery.md)，执行规则见 [`docs/06-workflow-spec/discovery.md`](docs/06-workflow-spec/discovery.md)。
 
 完整高层工作流见
 [`docs/02-workflow-overview.md`](docs/02-workflow-overview.md)。
@@ -123,12 +123,10 @@ Recovery 等操作入口统一见
 | [`01-product-spec.md`](docs/01-product-spec.md)               | 产品目标、产品规则、Daily Brief 结构、内容与 Review |
 | [`02-workflow-overview.md`](docs/02-workflow-overview.md)     | 系统高层工作流与主要模块关系 |
 | [`03-ai-workflow-spec.md`](docs/03-ai-workflow-spec.md)       | Stage 1--4 AI Capability Semantic Contract |
-| [`04-technical-spec.md`](docs/04-technical-spec.md)           | 技术架构、模块边界与稳定技术决策 |
-| [`04a-discovery-technical-spec.md`](docs/04a-discovery-technical-spec.md) | Discovery 技术边界、Agent、原文复用与执行追踪 |
+| [`04-technical-spec`](docs/04-technical-spec)           | 技术架构、模块边界与稳定技术决策 |
 | [`05-data-model.md`](docs/05-data-model.md)                   | Production / Review / Evaluation / Discovery 数据模型 |
-| [`06-processing-workflow.md`](docs/06-processing-workflow.md) | Production execution、Daily Scope、persistence、retry、lineage |
-| [`06a-discovery-workflow.md`](docs/06a-discovery-workflow.md) | Discovery 输入窗口、分支、审核与恢复流程 |
-| [`07-prompt-spec.md`](docs/07-prompt-spec.md)                 | Application ↔ LLM Prompt / Structured Output Contract |
+| [`06-workflow-spec`](docs/06-workflow-spec) | Production Daily｜Discovery 流程 |
+| [`07-prompt-spec`](docs/07-prompt-spec)                 | Application ↔ LLM Prompt / Structured Output Contract |
 | [`08-source-list.md`](docs/08-source-list.md)                 | Source 配置 |
 | [`09-operations.md`](docs/09-operations.md)                   | Commands、CLI、环境变量、测试、诊断与人工操作 |
 

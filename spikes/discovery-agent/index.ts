@@ -1,3 +1,6 @@
+import { databasePoolOptions } from '../../src/db/pool-options.js';
+import { Pool } from 'pg';
+import { withDiscoveryExecutionLock } from '../../src/discovery/background-jobs.js';
 import {
   Agent,
   getGlobalTraceProvider,
@@ -64,6 +67,27 @@ loadPipelineEnvironment();
 
 async function main(): Promise<void> {
   const options = parseArguments(process.argv.slice(2));
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) throw new Error('DATABASE_URL is required for the Discovery execution lock.');
+  const pool = new Pool({
+    ...databasePoolOptions('cli'),
+    connectionString: databaseUrl,
+    ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
+  });
+  try {
+    const executed = await withDiscoveryExecutionLock(pool, async () => {
+      await runDiagnostic(options);
+      return true;
+    });
+    if (executed === null) {
+      throw new Error('Another Discovery executor is running; diagnostic was not started.');
+    }
+  } finally {
+    await pool.end();
+  }
+}
+
+async function runDiagnostic(options: CliOptions): Promise<void> {
   const startedAt = new Date();
   const runDirectory = join(
     process.cwd(),

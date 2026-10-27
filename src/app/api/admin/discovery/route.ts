@@ -2,18 +2,32 @@ import { z } from 'zod';
 import { adminApiError } from '@/lib/admin-auth.js';
 import { getDatabasePool } from '@/db/index.js';
 import { getDiscoveryRun } from '@/discovery/run-service.js';
-import { DiscoveryJobConflict, submitDiscoveryJob } from '@/discovery/background-jobs.js';
+import {
+  DiscoveryJobConflict,
+  submitDiscoveryJob,
+  submitDiscoveryD2Retry,
+} from '@/discovery/background-jobs.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-const Input = z
-  .object({
-    date: z.iso.date(),
-    mode: z.enum(['regular', 'open']),
-    requestId: z.string().regex(/^[a-f0-9]{32}$/),
-    confirmPaid: z.literal(true),
-  })
-  .strict();
+const Input = z.union([
+  z
+    .object({
+      date: z.iso.date(),
+      mode: z.enum(['regular', 'open']),
+      requestId: z.string().regex(/^[a-f0-9]{32}$/),
+      confirmPaid: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal('d2'),
+      runId: z.uuid(),
+      requestId: z.string().regex(/^[a-f0-9]{32}$/),
+      confirmPaid: z.literal(true),
+    })
+    .strict(),
+]);
 export async function POST(request: Request) {
   const denied = await adminApiError(request);
   if (denied) return denied;
@@ -24,7 +38,10 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   try {
-    const run = await submitDiscoveryJob(getDatabasePool(), parsed.data);
+    const run =
+      parsed.data.mode === 'd2'
+        ? await submitDiscoveryD2Retry(getDatabasePool(), parsed.data)
+        : await submitDiscoveryJob(getDatabasePool(), parsed.data);
     return Response.json(
       { id: run.id, status: run.status, errorSummary: run.errorSummary },
       { status: 202 },

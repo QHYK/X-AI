@@ -1,5 +1,12 @@
+import './test-discovery-d2-retry.js';
+import './test-discovery-interrupted.js';
+import './test-discovery-submission-pool.js';
+import { databasePoolOptions } from '../src/db/pool-options.js';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { readFile } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
+import ts from 'typescript';
 import type { Pool } from 'pg';
 import {
   submitDiscoveryJob,
@@ -285,6 +292,178 @@ for (const handler of [POST, GET])
     (await handler(new Request('http://example.test/ai/api/admin/discovery'))).status,
     401,
   );
+// Exercise the real CLI main functions with the existing lock and an in-memory
+// pg client. Loading the CLI modules themselves would run main and load .env.local.
+for (const file of [
+  'scripts/test-discovery-d3.ts',
+  'scripts/test-discovery-provider.ts',
+  'spikes/discovery-agent/index.ts',
+]) {
+  const source = await readFile(file, 'utf8');
+  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const main = parsed.statements.find(
+    (node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) && node.name?.text === 'main',
+  );
+  assert.ok(main, `${file} must retain its CLI entry point.`);
+  const code = ts.transpileModule(`${main.getText(parsed)}\nmain();`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText;
+  let held = true; // A Worker or another CLI already owns the global lock.
+  let diagnosticCalls = 0;
+  let ends = 0;
+  let releases = 0;
+  let fail = false;
+  const connections: EventEmitter[] = [];
+  const fakePool = {
+    async connect() {
+      const connection = new EventEmitter();
+      connections.push(connection);
+      return Object.assign(connection, {
+        async query(sql: string) {
+          if (sql.includes('pg_try_advisory_lock(736210, 1)')) {
+            if (held) return { rows: [{ locked: false }] };
+            held = true;
+            return { rows: [{ locked: true }] };
+          }
+          assert.equal(sql, 'select pg_advisory_unlock(736210, 1)');
+          assert.equal(held, true);
+          held = false;
+          return { rows: [] };
+        },
+        release() {
+          releases++;
+        },
+      });
+    },
+    async end() {
+      ends++;
+    },
+  };
+  const invoke = () =>
+    runInNewContext(code, {
+      Pool: class {
+        constructor() {
+          return fakePool;
+        }
+      },
+      process: { argv: [], env: { DATABASE_URL: 'mock-only' } },
+      parseArguments: () => ({ runId: input.requestId, confirmPaid: true }),
+      withDiscoveryExecutionLock,
+      databasePoolOptions,
+      runDiagnostic: async () => {
+        assert.equal(held, true, `${file} must hold the global lock during all diagnostic work.`);
+        diagnosticCalls++;
+        if (fail) throw new Error('Mock diagnostic failure');
+      },
+    }) as Promise<void>;
+
+  await assert.rejects(invoke(), /Another Discovery executor is running/);
+  assert.equal(
+    diagnosticCalls,
+    0,
+    `${file} must not read/change Run state or call a model when busy.`,
+  );
+  assert.equal(held, true, 'A refused diagnostic must not release the other executor lock.');
+  assert.equal(ends, 1);
+  assert.equal(releases, 1);
+
+  held = false; // The other executor finishes normally.
+  await invoke();
+  assert.equal(diagnosticCalls, 1);
+  assert.equal(held, false);
+  assert.equal(ends, 2);
+  assert.equal(releases, 2);
+
+  fail = true;
+  await assert.rejects(invoke(), /Mock diagnostic failure/);
+  assert.equal(held, false, 'Unexpected failures must still release lock ownership.');
+  assert.equal(ends, 3);
+  assert.equal(releases, 3);
+  fail = false;
+  await invoke();
+  assert.equal(diagnosticCalls, 3, 'A later diagnostic can execute after failure cleanup.');
+  assert.equal(held, false);
+  assert.equal(ends, 4);
+  assert.equal(releases, 4);
+  assert.ok(connections.every((connection) => connection.listenerCount('error') === 0));
+}
+console.log('Real Discovery diagnostic entry lock refusal, release and retry passed (Mock only).');
 console.log(
   'Discovery durable submission/idempotency, concurrent guard, independent retries, restart failure, exclusive execution, usage and auth passed.',
 );
+
+// Exercise the actual Retry/Polling handlers with an existing shared Web Pool.
+const retrySource = await readFile(
+  new URL('../src/app/api/admin/dashboard/step/retry/route.ts', import.meta.url),
+  'utf8',
+);
+const retryParsed = ts.createSourceFile('route.ts', retrySource, ts.ScriptTarget.Latest, true);
+const handlers = retryParsed.statements
+  .filter((node) => ts.isFunctionDeclaration(node))
+  .map((node) => node.getText(retryParsed))
+  .join('\n');
+const retryExports: {
+  GET?: (request: Request) => Promise<Response>;
+  POST?: (request: Request) => Promise<Response>;
+} = {};
+let denied = false;
+let databaseAccesses = 0;
+const sharedPool = {
+  end() {
+    throw new Error('An HTTP handler must not close the shared Web Pool.');
+  },
+};
+runInNewContext(
+  ts.transpileModule(handlers, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText,
+  {
+    exports: retryExports,
+    Response,
+    URL,
+    adminApiError: async () => (denied ? new Response(null, { status: 401 }) : null),
+    parseBriefDate: () => true,
+    isDashboardRetryStep: () => true,
+    getDatabasePool: () => {
+      databaseAccesses++;
+      return sharedPool;
+    },
+    startDashboardStepRetry: async (db: unknown) => {
+      assert.equal(db, sharedPool);
+      return { status: 'started' };
+    },
+    getDashboardStepRunStatus: async (db: unknown) => {
+      assert.equal(db, sharedPool);
+      return 'success';
+    },
+  },
+);
+assert.equal(
+  (
+    await retryExports.POST!(
+      new Request('http://localhost/api/retry', {
+        method: 'POST',
+        body: JSON.stringify({ dailyDate: '2026-10-22', step: 'stage3' }),
+      }),
+    )
+  ).status,
+  202,
+);
+for (let i = 0; i < 2; i++)
+  assert.equal(
+    (
+      await retryExports.GET!(
+        new Request('http://localhost/api/retry?dailyDate=2026-10-22&step=stage3'),
+      )
+    ).status,
+    200,
+  );
+assert.equal(databaseAccesses, 3);
+denied = true;
+assert.equal(
+  (await retryExports.POST!(new Request('http://localhost/api/retry', { method: 'POST' }))).status,
+  401,
+);
+assert.equal(databaseAccesses, 3, 'Unauthorized handlers do not acquire a database Pool.');
+console.log('Dashboard Retry/Polling shared Pool lifetime and server auth passed.');

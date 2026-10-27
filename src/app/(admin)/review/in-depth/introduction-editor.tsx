@@ -23,6 +23,7 @@ export function IntroductionEditor(props: {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [recovery, setRecovery] = useState<EditorialIntroduction | null>(null);
+  const [conflict, setConflict] = useState<EditorialIntroduction | null>(null);
   const locked = useRef(false);
   const revision = useRef(0);
   const active = useRef(true);
@@ -72,19 +73,22 @@ export function IntroductionEditor(props: {
         body: JSON.stringify(
           generate
             ? { id: props.id, ...(props.manual ? { regenerate: hasContent } : {}) }
-            : { id: props.id, action: 'editorial', ...submitted },
+            : { id: props.id, action: 'editorial', ...submitted, baseline: saved },
         ),
       });
       const payload = (await response.json()) as {
         introduction?: unknown;
+        currentEditorial?: unknown;
         item?: InDepthReviewItem;
         error?: string;
         saved?: boolean;
       };
       if (!active.current) return;
+      if (response.status === 409 && payload.currentEditorial)
+        setConflict(EditorialIntroductionSchema.parse(payload.currentEditorial));
       if (generate && payload.introduction) {
         const generated = EditorialIntroductionSchema.parse(payload.introduction);
-        if (revision.current === startedRevision) {
+        if (revision.current === startedRevision && response.status !== 409) {
           setDraft(generated);
           setRecovery(null);
         } else {
@@ -165,13 +169,53 @@ export function IntroductionEditor(props: {
       <div className={styles.inDepthActions}>
         <button
           type="button"
-          disabled={Boolean(busy) || !dirty}
+          disabled={Boolean(busy) || !dirty || Boolean(conflict)}
           onClick={() => void submit(false)}
         >
           {busy === 'save' ? 'Saving…' : 'Save changes'}
         </button>
       </div>
       {dirty ? <p>有未保存的修改。</p> : null}
+      {conflict ? (
+        <details open>
+          <summary>其他操作已保存的介绍（当前输入已保留）</summary>
+          <textarea
+            aria-label="最新保存：讲了什么"
+            readOnly
+            value={conflict.summary}
+            rows={6}
+          />
+          <textarea
+            aria-label="最新保存：为什么值得用心阅读"
+            readOnly
+            value={conflict.whyWorthReading}
+            rows={6}
+          />
+          <textarea
+            aria-label="最新保存：其他具体评估"
+            readOnly
+            value={conflict.extra_info}
+            rows={6}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                window.confirm(
+                  '已检查最新内容？继续后保留当前输入，下次 Save changes 将以当前输入替换这些已保存内容。',
+                )
+              ) {
+                setSaved(conflict);
+                setConflict(null);
+                setError(null);
+              }
+            }}
+          >
+            确认最新内容，继续编辑
+          </button>
+        </details>
+      ) : null}
+
       {recovery ? (
         <details open>
           <summary>本次生成文本（未覆盖当前输入）</summary>

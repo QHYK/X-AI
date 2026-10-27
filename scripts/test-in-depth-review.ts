@@ -114,6 +114,11 @@ await updateInDepthReviewItem(db, {
 await updateInDepthReviewItem(db, {
   id: firstId,
   action: 'editorial',
+  baseline: {
+    summary: String(rows[0]?.editorialOverrides?.summary ?? ''),
+    whyWorthReading: String(rows[0]?.editorialOverrides?.whyWorthReading ?? ''),
+    extra_info: String(rows[0]?.editorialOverrides?.extra_info ?? ''),
+  },
   extra_info: '面向读者的具体评估',
   summary: '## 讲了什么\n中文概要',
   whyWorthReading: '中文阅读价值',
@@ -137,6 +142,11 @@ assert.equal(approved?.editorialNotes, 'Checked original');
 await updateInDepthReviewItem(db, {
   id: firstId,
   action: 'editorial',
+  baseline: {
+    summary: String(rows[0]?.editorialOverrides?.summary ?? ''),
+    whyWorthReading: String(rows[0]?.editorialOverrides?.whyWorthReading ?? ''),
+    extra_info: String(rows[0]?.editorialOverrides?.extra_info ?? ''),
+  },
   extra_info: '面向读者的具体评估',
   summary: '更新的 Markdown',
   whyWorthReading: '新理由',
@@ -204,6 +214,11 @@ for (const input of [
   {
     id: firstId,
     action: 'editorial',
+    baseline: {
+      summary: String(rows[0]?.editorialOverrides?.summary ?? ''),
+      whyWorthReading: String(rows[0]?.editorialOverrides?.whyWorthReading ?? ''),
+      extra_info: String(rows[0]?.editorialOverrides?.extra_info ?? ''),
+    },
     extra_info: '面向读者的具体评估',
     summary: 'Summary',
     whyWorthReading: 'Reason',

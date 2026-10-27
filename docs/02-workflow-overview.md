@@ -5,10 +5,10 @@
 具体规则分别由对应 Source of Truth 定义：
 
 - AI 判断语义 → `03-ai-workflow-spec.md`
-- Daily Production Pipeline 执行、scope、retry、persistence、lineage → `06-processing-workflow.md`
-- Discovery 执行流程、分支与验证规则 → `06a-discovery-workflow.md`
+- Daily Production Pipeline 执行、scope、retry、persistence、lineage → `06-workflow-spec/daily.md`
+- Discovery 执行流程、分支与验证规则 → `06-workflow-spec/discovery.md`
 - 数据结构与关联 → `05-data-model.md`
-- Prompt / Structured Output → `07-prompt-spec.md`
+- Prompt / Structured Output → `00-index.md#prompt-contracts`
 - Commands / Tests / Diagnostics → `09-operations.md`
 
 ---
@@ -101,7 +101,7 @@ flowchart TD
 - `[Tool]`：按需调用的外部工具
 - `[UI]`：用户界面
 
-这张图只表达主要数据流。具体 dedup、enrichment、Review Snapshot、ranking persistence、retry 和 lineage 等执行规则见 `06-processing-workflow.md`。
+这张图只表达主要数据流。具体 dedup、enrichment、Review Snapshot、ranking persistence、retry 和 lineage 等执行规则见 `06-workflow-spec/daily.md`。
 
 ---
 
@@ -114,7 +114,7 @@ flowchart TD
 | Stage 3 | 各 Channel：判断相对重要性 / 阅读价值 |
 | Stage 4 | Selected Events：生成最终事件内容，必要时 Web Search 补充外部上下文 |
 
-AI 判断规则见 `03-ai-workflow-spec.md`；Prompt、Structured Output 和模型 Contract 见 `07-prompt-spec.md`。
+AI 判断规则见 `03-ai-workflow-spec.md`；Prompt、Structured Output 和模型 Contract 见 `00-index.md#prompt-contracts`。
 
 ---
 
@@ -152,7 +152,7 @@ flowchart TD
 - **Open Discovery**：常规路径没有合格作品时自动运行；人工审核后也可以独立发起补充 Open Run。
 - **审核边界**：机器选出的作品先进入待审核数据，不自动上架。
 
-运行窗口、具体输入规则、URL 去重时机、内容验证、候选数量、失败与重跑见 `06a-discovery-workflow.md`；Agent / LLM 判断语义见 `03-ai-workflow-spec.md`。
+运行窗口、具体输入规则、URL 去重时机、内容验证、候选数量、失败与重跑见 `06-workflow-spec/discovery.md`；Agent / LLM 判断语义见 `03-ai-workflow-spec.md`。
 
 ---
 

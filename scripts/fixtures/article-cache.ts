@@ -98,7 +98,20 @@ export class ArticleStore {
       return { rows };
     }
     if (sql.includes('select dc.title') || sql.includes('select dc.id as candidate_id'))
-      return { rows: this.source ? [this.source] : [] };
+      return {
+        rows: this.source
+          ? [
+              {
+                ...this.source,
+                editorial_summary: this.editorial?.summary ?? null,
+                editorial_why_worth_reading: this.editorial?.whyWorthReading ?? null,
+                editorial_extra_info: this.editorial?.extra_info ?? null,
+              },
+            ]
+          : [],
+      };
+    if (sql.includes('select editorial_summary as summary'))
+      return { rows: this.source ? [{ ...this.editorial }] : [] };
     if (sql.includes('update in_depth_candidates')) {
       assert.ok(sql.includes('set editorial_summary = $2'));
       assert.ok(sql.includes('editorial_why_worth_reading = $3'));
@@ -110,6 +123,15 @@ export class ArticleStore {
           !sql.includes('reviewed_at'),
       );
       if (this.failEditorial) throw new Error('Mock Editorial save failure');
+      assert.ok(sql.includes("coalesce(editorial_summary, '') = $5"));
+      if (
+        [
+          this.editorial?.summary ?? '',
+          this.editorial?.whyWorthReading ?? '',
+          this.editorial?.extra_info ?? '',
+        ].some((v, i) => v !== values[i + 4])
+      )
+        return { rows: [] };
       this.editorial = {
         summary: values[1],
         whyWorthReading: values[2],

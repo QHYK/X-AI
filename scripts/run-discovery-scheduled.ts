@@ -1,3 +1,4 @@
+import { databasePoolOptions } from '../src/db/pool-options.js';
 import { Pool } from 'pg';
 import { loadPipelineEnvironment } from '../src/lib/pipeline-env.js';
 import { submitDiscoveryJob } from '../src/discovery/background-jobs.js';
@@ -11,6 +12,7 @@ async function main(): Promise<void> {
     await submitScheduledDiscovery(new Date(), async (input) => {
       if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required.');
       pool = new Pool({
+        ...databasePoolOptions('submission'),
         connectionString: process.env.DATABASE_URL,
         ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
       });

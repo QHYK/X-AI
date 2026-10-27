@@ -1,5 +1,6 @@
 import {
   EditorialIntroductionSchema,
+  EditorialConflictError,
   readEditorialIntroduction,
   type EditorialIntroduction,
 } from './in-depth-editorial.js';
@@ -33,7 +34,12 @@ const ReviewUpdateSchema = z.discriminatedUnion('action', [
     })
     .strict(),
   z
-    .object({ id: z.uuid(), action: z.literal('editorial'), ...EditorialIntroductionSchema.shape })
+    .object({
+      id: z.uuid(),
+      action: z.literal('editorial'),
+      baseline: EditorialIntroductionSchema,
+      ...EditorialIntroductionSchema.shape,
+    })
     .strict(),
 ]);
 
@@ -239,7 +245,7 @@ export async function updateInDepthReviewItem(
 ): Promise<InDepthReviewItem | null> {
   const input = parseInDepthReviewUpdate(value);
   if (input.action === 'editorial') {
-    return (await saveInDepthEditorial(db, input.id, input))
+    return (await saveInDepthEditorial(db, input.id, input, input.baseline))
       ? getInDepthReviewItem(db, input.id)
       : null;
   }
@@ -264,6 +270,7 @@ export async function saveInDepthEditorial(
   db: Queryable,
   id: string,
   value: EditorialIntroduction,
+  baseline: EditorialIntroduction,
 ): Promise<boolean> {
   const parsed = EditorialIntroductionSchema.parse({
     extra_info: value.extra_info,
@@ -276,10 +283,33 @@ export async function saveInDepthEditorial(
           editorial_why_worth_reading = $3,
           editorial_extra_info = $4,
           updated_at = now()
-      where id = $1::uuid returning id`,
-    [id, parsed.summary, parsed.whyWorthReading, parsed.extra_info],
+      where id = $1::uuid
+        and coalesce(editorial_summary, '') = $5
+        and coalesce(editorial_why_worth_reading, '') = $6
+        and coalesce(editorial_extra_info, '') = $7
+      returning id`,
+    [
+      id,
+      parsed.summary,
+      parsed.whyWorthReading,
+      parsed.extra_info,
+      baseline.summary,
+      baseline.whyWorthReading,
+      baseline.extra_info,
+    ],
   );
-  return Boolean(result.rows[0]);
+  if (result.rows[0]) return true;
+  const current = await db.query<{
+    summary: string | null;
+    whyWorthReading: string | null;
+    extra_info: string | null;
+  }>(
+    `select editorial_summary as summary, editorial_why_worth_reading as "whyWorthReading",
+       editorial_extra_info as extra_info from in_depth_candidates where id = $1::uuid`,
+    [id],
+  );
+  if (!current.rows[0]) return false;
+  throw new EditorialConflictError(readEditorialIntroduction(current.rows[0]));
 }
 
 /** Editorial values affect presentation only; original Candidate fields stay intact. */

@@ -229,14 +229,14 @@ export async function runDiscoveryWorkflow(
   // A D3 failure must not prevent Direct verification from preserving work.
   let d3Error: string | null = null;
   try {
-    await services.runD3(pool, run.id);
+    if (run.executionState.d3?.status !== 'completed') await services.runD3(pool, run.id);
   } catch (error) {
     d3Error = errorMessage(error);
   }
 
   let d4Error: string | null = null;
   try {
-    await services.runD4(pool, run.id);
+    if (run.executionState.d4?.status !== 'completed') await services.runD4(pool, run.id);
   } catch (error) {
     d4Error = errorMessage(error);
   }

@@ -5,13 +5,13 @@
 它回答：每个 AI 能力负责什么、接收什么输入、需要做什么判断、输出什么业务结果，以及什么样的结果才算完成。
 
 本文档不定义 Pipeline 执行、数据持久化、Prompt 文本或 Structured Output 的具体 Schema。
-所有 AI Stages 的 Structured Output Schema 见 `07-prompt-spec.md`。
+所有 AI Stages 的 Structured Output Schema 见 `00-index.md#prompt-contracts`。
 
 相关 **Source of Truth**：
 - 系统整体流程 → `02-workflow-overview.md`
-- Daily Production execution / scope / retry / persistence / lineage → `06-processing-workflow.md`
-- Discovery 业务执行流程 → `06a-discovery-workflow.md`
-- Prompt / Structured Output Contract → `07-prompt-spec.md`
+- Daily Production execution / scope / retry / persistence / lineage → `06-workflow-spec/daily.md`
+- Discovery 业务执行流程 → `06-workflow-spec/discovery.md`
+- Prompt / Structured Output Contract → `00-index.md#prompt-contracts`
 - Data Model → `05-data-model.md`
 
 ---
@@ -48,7 +48,7 @@ flowchart LR
     HR -.->|人工主动补充| OA
 ```
 
-图中仅表达 AI 能力及其判断关系；Direct 依 Topic Selection 优先级处理合格结果，Topic Agent 不负责候选排序；各路径的 Code 去重、证据核查、候选汇总与持久化由 `02-workflow-overview.md` 和 `06a-discovery-workflow.md` 定义。Open Discovery 自行完成编辑评价，Code 核查后进入人工审核，不再调用 Final Candidate Evaluation。
+图中仅表达 AI 能力及其判断关系；Direct 依 Topic Selection 优先级处理合格结果，Topic Agent 不负责候选排序；各路径的 Code 去重、证据核查、候选汇总与持久化由 `02-workflow-overview.md` 和 `06-workflow-spec/discovery.md` 定义。Open Discovery 自行完成编辑评价，Code 核查后进入人工审核，不再调用 Final Candidate Evaluation。
 
 | Capability | Core AI Question |
 |---|---|
@@ -300,15 +300,15 @@ Full article content
 
 ## 7. In-depth Discovery — 内容发现
 
-本节定义 Discovery 中 AI 的语义职责。业务流程以 `06a-discovery-workflow.md` 为准；具体 Prompt 和 Structured Output Schema 见 `07-prompt-spec.md`。Discovery 不属于 Daily Production Stage 1–4。
+本节定义 Discovery 中 AI 的语义职责。业务流程以 `06-workflow-spec/discovery.md` 为准；具体 Prompt 和 Structured Output Schema 见 `07-prompt-spec/discovery.md`。Discovery 不属于 Daily Production Stage 1–4。
 
-### 7.1 Topic Selection — 知识机会筛选
+### 7.1 Topic Selection
 
 **Responsibility**  
 综合最近两期 Daily Brief 的有效内容，识别值得直接验证的现有作品，以及值得进一步寻找优秀解释性作品的知识探索问题。新闻的重要性不是学习价值的充分条件。
 
 **Input**  
-- 按 `06a` 定义规则取得的 Daily Brief 输入（Event 可覆盖窗口内全部 Event）；
+- 按 `06-workflow-spec/discovery.md` 定义规则取得的 Daily Brief 输入（Event 可覆盖窗口内全部 Event）；
 - X-field 编辑标准、少量用于校准判断的 Few-shot 示例，以及相关的显式 Memory（如有）。
 
 **AI Decision**
@@ -331,7 +331,7 @@ Full article content
 - 问题足够具体，能引导实际内容搜索；
 - 不把 Selection 的潜力判断当成最终质量验证。
 
-### 7.2 Direct Candidate Evaluation — 现有作品验证
+### 7.2 Direct Candidate Evaluation
 
 **Responsibility**  
 对 Topic Selection 提名的现有作品进行实质阅读和编辑评价，判断其是否值得进入统一 Candidate Pool。
@@ -346,14 +346,14 @@ Direct Candidate、可获取的作品内容、来源信息和编辑标准。
 - 评估其原创性、结构、解释质量和长期学习价值；不因媒体或作者知名而自动通过。
 
 **Output**  
-候选的编辑判断、支持该判断的内容证据、已知局限与建议是否继续考虑。合格作品同时提供面向读者的忠实中文标题、内容概要与推荐理由；这些介绍与筛选判断、证据保持独立。具体输出契约见 `07-prompt-spec.md` 的 D4 章节。
+候选的编辑判断、支持该判断的内容证据、已知局限与建议是否继续考虑。合格作品同时提供面向读者的忠实中文标题、内容概要与推荐理由；这些介绍与筛选判断、证据保持独立。具体输出契约见 `07-prompt-spec/discovery.md` 的 D4 章节。
 
 **Definition of Done**
 - 判断与可追溯的阅读证据一致；
 - 证据不足时不伪装成通过全文验证；
 - 不把一般性合格误判为值得 X-field 推荐。
 
-### 7.3 Topic Discovery Agent — Topic 探索
+### 7.3 Topic Discovery Agent
 
 **Responsibility**  
 围绕知识探索问题，自主决定搜索、阅读、追踪线索、调整方向和结束时机，发现值得完整阅读的外部作品。Agent 的目标是**找到作品**，不是回答知识问题。
@@ -377,7 +377,7 @@ Direct Candidate、可获取的作品内容、来源信息和编辑标准。
 - 对未验证、无法访问或资源耗尽的情况如实说明；
 - 找到最多 3 篇合格作品即可停止；不足 3 篇时可如实结束，不为补足数量降低标准。
 
-### 7.4 Open Discovery — 开放式补充
+### 7.4 Open Discovery
 
 **Responsibility**  
 当常规路径没有任何合格候选时，复用同一个 Discovery Agent，在不受本期新闻知识问题限制的情况下寻找符合 X-field 标准的作品。此外，**人工审核者仍可手动触发 Open Discovery**。
@@ -393,7 +393,7 @@ X-field 编辑标准、相关显式 Memory（如有）及已有候选信息；�
 - 不为填满名额而降低标准。
 
 **Output / Definition of Done**  
-通过统一验证后最多提交 3 篇候选供人工审核；允许空结果。自动触发仅发生在常规路径整体没有任何合格候选时；人工触发则是独立的补充探索，不应自动删除或覆盖已有 Direct / Topic 审核候选。触发入口、运行关联及持久化细节见 `06a-discovery-workflow.md`、`04a-discovery-technical-spec.md`。
+通过统一验证后最多提交 3 篇候选供人工审核；允许空结果。自动触发仅发生在常规路径整体没有任何合格候选时；人工触发则是独立的补充探索，不应自动删除或覆盖已有 Direct / Topic 审核候选。触发入口、运行关联及持久化细节见 `06-workflow-spec/discovery.md`、`04-technical-spec/discovery.md`。
 
 ### 7.5 Human Review 与 Memory 边界
 

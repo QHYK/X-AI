@@ -3,9 +3,10 @@
  *
  * 进程内复用 pg 连接池，供 API、Dashboard 与 Workflow job 共享。
  */
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
-import * as schema from "./schema.js";
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import { databasePoolOptions } from './pool-options.js';
+import * as schema from './schema.js';
 
 let pool: Pool | null = null;
 
@@ -14,13 +15,14 @@ export function getDatabasePool() {
   const connectionString = process.env.DATABASE_URL;
 
   if (!connectionString) {
-    throw new Error("DATABASE_URL is required to initialize the database connection.");
+    throw new Error('DATABASE_URL is required to initialize the database connection.');
   }
 
   pool ??= new Pool({
+    ...databasePoolOptions('web'),
     connectionString,
     ssl:
-      process.env.DATABASE_SSL === "true"
+      process.env.DATABASE_SSL === 'true'
         ? {
             rejectUnauthorized: false,
           }

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import type { Pool } from 'pg';
-import { getDiscoveryRunForDate } from '../src/lib/discovery-dashboard.js';
+import {
+  getDiscoveryRunForDate,
+  discoveryStageTokenMetrics,
+} from '../src/lib/discovery-dashboard.js';
 
 const base = {
   run_type: 'regular',
@@ -215,4 +218,65 @@ assert.match(page, /'Open Run ID' : 'Regular Run ID'/);
 await assert.rejects(getDiscoveryRunForDate(db, '2026-02-30'));
 console.log(
   'Discovery Dashboard business date, timezones, date switching, statuses, latest/count and empty-state tests passed.',
+);
+
+for (const cached of [0, 25, null]) {
+  const metrics = discoveryStageTokenMetrics({
+    requests: 2,
+    inputTokens: 100,
+    outputTokens: 20,
+    cachedInputTokens: cached,
+    usageComplete: cached !== null,
+  });
+  assert.equal(metrics.totalTokens, 120);
+  assert.equal(metrics.cachedInputTokens, cached);
+  assert.equal(metrics.cacheHitRate, cached === null ? null : cached / 100);
+}
+assert.equal(discoveryStageTokenMetrics(undefined).cachedInputTokens, null);
+assert.equal(
+  discoveryStageTokenMetrics({
+    requests: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    usageComplete: true,
+  }).cacheHitRate,
+  null,
+);
+assert.match(page, /label="Total tokens"/);
+assert.match(page, /label="Cached input tokens"/);
+assert.match(page, /mode="d2"/);
+console.log(
+  'Discovery Card token totals, explicit zero, missing cache, percentages and zero denominator passed.',
+);
+
+const retryDb = {
+  query: async (sql: string) => ({
+    rows: sql.includes("execution_state->'d5' as d5")
+      ? []
+      : [
+          {
+            ...base,
+            id: 'retry-d2',
+            started_at: '2026-10-26T00:00:00Z',
+            status: 'failed',
+            run_count: 1,
+            candidate_count: 0,
+            execution_state: { d2: { status: 'failed' } },
+            window_start_date: '2026-10-18',
+            window_end_date: '2026-10-19',
+            input_content_ids: { event: [], digest: [], longForm: [] },
+            selection_output: null,
+            config_snapshot: {
+              promptVersions: {
+                'discovery.d2.topic_selection': '00000000-0000-4000-8000-000000000001',
+              },
+            },
+          },
+        ],
+  }),
+} as unknown as Pool;
+assert.equal(
+  (await getDiscoveryRunForDate(retryDb, '2026-10-19'))?.regularRun?.d2RetryAvailable,
+  true,
 );

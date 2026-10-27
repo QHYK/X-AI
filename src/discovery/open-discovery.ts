@@ -25,7 +25,7 @@ import {
   DISCOVERY_D5_PROMPT_VERSION,
   DISCOVERY_EDITORIAL_PROMPT_VERSION,
 } from '../prompts/discovery-open-agent.js';
-import { PostgresDiscoveryTracingProcessor } from './agent-tracing.js';
+import { PostgresDiscoveryTracingProcessor, finishDiscoveryTrace } from './agent-tracing.js';
 import {
   buildDiscoveryStageState,
   emptyDiscoveryStageUsage,
@@ -302,6 +302,7 @@ export async function runDiscoveryD5Agent(input: {
     outputType: DiscoveryD5OutputSchema,
   });
   const startedAt = Date.now();
+  let runtimeResult: DiscoveryD5RuntimeResult | undefined;
   try {
     const agentResult = await runner.run(agent, prompt.input, {
       context,
@@ -309,14 +310,15 @@ export async function runDiscoveryD5Agent(input: {
       signal: AbortSignal.timeout(input.config.timeoutMs),
     });
     if (!agentResult.finalOutput) throw new Error('D5 Agent returned no final output.');
-    return {
+    runtimeResult = {
       output: agentResult.finalOutput,
       fetches: context.fetches,
       usage: processor.getUsage(),
       elapsedMs: Date.now() - startedAt,
       traceIds: [...processor.traceIds],
-      traceFlushed: true,
+      traceFlushed: false,
     };
+    return runtimeResult;
   } catch (error) {
     const failure = error instanceof Error ? error : new Error(String(error));
     Object.assign(failure, {
@@ -324,8 +326,10 @@ export async function runDiscoveryD5Agent(input: {
     });
     throw failure;
   } finally {
-    await getGlobalTraceProvider().forceFlush();
-    await processor.shutdown();
+    const flushed = await finishDiscoveryTrace(processor, () =>
+      getGlobalTraceProvider().forceFlush(),
+    );
+    if (runtimeResult) runtimeResult.traceFlushed = flushed;
   }
 }
 

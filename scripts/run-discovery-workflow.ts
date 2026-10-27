@@ -1,3 +1,4 @@
+import { databasePoolOptions } from '../src/db/pool-options.js';
 import { Pool } from 'pg';
 import { withDiscoveryExecutionLock } from '../src/discovery/background-jobs.js';
 import {
@@ -11,6 +12,7 @@ loadPipelineEnvironment();
 
 type Options = {
   confirmPaid: boolean;
+  recoverInterrupted?: boolean;
   runId?: string;
   dailyDates?: DiscoveryDailyDatePair;
   openParentRunId?: string;
@@ -25,18 +27,22 @@ async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error('DATABASE_URL is required.');
   const pool = new Pool({
+    ...databasePoolOptions('cli'),
     connectionString: databaseUrl,
     ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
   });
   try {
-    const report = await withDiscoveryExecutionLock(pool, () =>
-      runDiscoveryWorkflow(pool, {
-        runId: options.runId,
-        dailyDates: options.dailyDates,
-        openParentRunId: options.openParentRunId,
-        openContext: options.openContext,
-        triggerSource: 'manual',
-      }),
+    const report = await withDiscoveryExecutionLock(
+      pool,
+      () =>
+        runDiscoveryWorkflow(pool, {
+          runId: options.runId,
+          dailyDates: options.dailyDates,
+          openParentRunId: options.openParentRunId,
+          openContext: options.openContext,
+          triggerSource: 'manual',
+        }),
+      { recoverRunId: options.recoverInterrupted ? options.runId : undefined },
     );
     if (!report) throw new Error('Another Discovery executor is running; try later.');
     console.log(JSON.stringify(formatDiscoveryWorkflowReport(report), null, 2));
@@ -48,12 +54,14 @@ async function main(): Promise<void> {
 
 function parseOptions(args: string[]): Options {
   let confirmPaid = false;
+  let recoverInterrupted = false;
   let runId: string | undefined;
   let dailyDates: DiscoveryDailyDatePair | undefined;
   let openParentRunId: string | undefined;
   let openContext: string | undefined;
   for (const argument of args) {
     if (argument === '--confirm-paid') confirmPaid = true;
+    else if (argument === '--recover-interrupted') recoverInterrupted = true;
     else if (argument.startsWith('--run-id=')) runId = argument.slice('--run-id='.length);
     else if (argument.startsWith('--open-parent-run-id=')) {
       openParentRunId = argument.slice('--open-parent-run-id='.length);
@@ -73,9 +81,10 @@ function parseOptions(args: string[]): Options {
       'Provide exactly one of --dates=YYYY-MM-DD,YYYY-MM-DD, --run-id=UUID, or --open-parent-run-id=UUID.',
     );
   }
+  if (recoverInterrupted && !runId) throw new Error('--recover-interrupted requires --run-id.');
   if (openContext && !openParentRunId)
     throw new Error('--open-context requires --open-parent-run-id.');
-  return { confirmPaid, runId, dailyDates, openParentRunId, openContext };
+  return { confirmPaid, recoverInterrupted, runId, dailyDates, openParentRunId, openContext };
 }
 
 main().catch((error) => {

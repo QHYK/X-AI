@@ -66,7 +66,7 @@ RSS GUID
 Atom ID
 Gmail Message ID
 ```
-系统内部关联始终使用 `raw_articles.id`。具体 Collection / Dedup 行为见 `06-processing-workflow.md`。
+系统内部关联始终使用 `raw_articles.id`。具体 Collection / Dedup 行为见 `06-workflow-spec/daily.md`。
 
 #### metadata
 用于保存来源特有但暂时不值得升格为正式字段的信息，例如：
@@ -128,11 +128,11 @@ created_at, updated_at
 event | digest | long_form | inspiration
 ```
 
-`daily_date` 表示该内容首次进入 Production Workflow 时所属的 Daily attribution date；具体归属与 late-arrival 规则见 `06-processing-workflow.md`。
+`daily_date` 表示该内容首次进入 Production Workflow 时所属的 Daily attribution date；具体归属与 late-arrival 规则见 `06-workflow-spec/daily.md`。
 
 `ai_rank` 保存 AI 排序；`display_rank` 是页面最终顺序。人工调整只改 `display_rank`。
 
-Put Back 复用 `raw_article_id` 唯一记录，追加阶段为 `routing = digest`、`ai_rank = NULL`，准备结果位于 Raw metadata。归属校验、状态写入、排序和后续 Stage3 重排规则统一见 `06-processing-workflow.md` §6.4.1。
+Put Back 复用 `raw_article_id` 唯一记录，追加阶段为 `routing = digest`、`ai_rank = NULL`，准备结果位于 Raw metadata。归属校验、状态写入、排序和后续 Stage3 重排规则统一见 `06-workflow-spec/manual-operations.md` §2。
 
 ### `content_read_more`
 
@@ -183,7 +183,7 @@ created_at, updated_at
 
 一个 Event 可关联多条 `processed_contents`。正式 source membership 由 `event_review_items.event_group_id → event_group_items` 表达，允许同一 `processed_content` 属于多个不同 Event Groups；Daily Brief 也由这条链读取来源。`processed_contents.event_id` 不能表达多对多，只保留为兼容 convenience backlink：仅当当前 published Stage 4 Run 中该内容恰好对应一个 Event 时写入；共享内容保持 `NULL`，不得用它判断正式 membership。
 
-`event_date` 表示 Event 在 Production 中所属的 Daily attribution date，与对应 `stage4_runs.daily_date` 一致。它不表示 source article 的原始发布时间，也不单独推导现实事件发生时间。具体 Daily attribution 与 late-arrival 处理语义见 `06-processing-workflow.md`。
+`event_date` 表示 Event 在 Production 中所属的 Daily attribution date，与对应 `stage4_runs.daily_date` 一致。它不表示 source article 的原始发布时间，也不单独推导现实事件发生时间。具体 Daily attribution 与 late-arrival 处理语义见 `06-workflow-spec/daily.md`。
 
 `external_context`：未发生真实 Web Search 时为 `NULL`；发生搜索时保存真实 provenance URLs 和简短 summary。
 
@@ -290,7 +290,7 @@ Evaluation 数据与 Production 数据隔离，不自动写回 `processed_conten
 
 `process_pid` 是 Evaluation Run 的服务端运行时关联信息，用于支持对对应 Run 的进程管理；它不是客户端可提交的业务标识。
 
-Evaluation 的触发、并发控制、Polling、进程生命周期与取消流程属于运行 / Workflow 行为，见 `06-processing-workflow.md` 与 `09-operations.md`。
+Evaluation 的触发、并发控制、Polling、进程生命周期与取消流程属于运行 / Workflow 行为，见 `06-workflow-spec/manual-operations.md` 与 `09-operations.md`。
 
 ## 10 Initial Indexes
 
@@ -329,7 +329,7 @@ source_id + date
 
 ## 11 Discovery 数据模型
 
-Discovery 与 Daily Production 独立，不修改既有 `feedback`、`pipeline_runs` 或 `raw_articles`。**Implemented**：本节各业务表、Trace 表及 Fetch Cache 已有 Schema 与 Migration。**Planned**：`single_lead` 的执行入口尚未实现，其数据库预留字段与约束仍保留。执行流程见 `06a-discovery-workflow.md`，技术边界见 `04a-discovery-technical-spec.md`。
+Discovery 与 Daily Production 独立，不修改既有 `feedback`、`pipeline_runs` 或 `raw_articles`。**Implemented**：本节各业务表、Trace 表及 Fetch Cache 已有 Schema 与 Migration。**Planned**：`single_lead` 的执行入口尚未实现，其数据库预留字段与约束仍保留。执行流程见 `06-workflow-spec/discovery.md`，技术边界见 `04-technical-spec/discovery.md`。
 
 ### 11.1 `discovery_runs`
 
@@ -364,9 +364,9 @@ Discovery 与 Daily Production 独立，不修改既有 `feedback`、`pipeline_r
 - `CHECK(parent_run_id IS NULL OR parent_run_id <> id)` 防止 Run 自引用；父 Run 的类型与 Lead 归属由应用层验证。
 - 日期字段记录**计划输入窗口**，不从实际执行时间推导；`input_content_ids` 记录当次选入的 Event / Digest / Long-form 内容成员 ID，避免复制 Daily 正文。当前没有 `input_snapshot`，不得将成员 ID 记录视为完整模型输入文本快照。
 - 上游 Daily 未就绪可记录 `blocked` 和 `upstream_not_ready`，不冒充已完成 Discovery。
-- `source_lead_id` 对应应用生成并保存的 D2 Lead ID；Planned 单条执行的技术边界见 `04a` §6.3。
+- `source_lead_id` 对应应用生成并保存的 D2 Lead ID；Planned 单条执行的技术边界见 `04-technical-spec/discovery.md` §6.3。
 - **Planned**：单条 Lead 执行入口实现后，各 Lead 的执行状态及关联结果通过 Run 的 `selection_output`、关联的 `single_lead` Run 和候选记录查询计算，不新增 Lead 表或冗余状态字段。
-- 自动 / 人工 Open、分支失败与 Resume 的执行语义见 `06a-discovery-workflow.md` §6、§8。
+- 自动 / 人工 Open、分支失败与 Resume 的执行语义见 `06-workflow-spec/discovery.md` §6、§8。
 - `status` 与 `end_reason` 分开：例如 `partial + timeout`、`completed + candidates_found` 与 `completed + no_candidates` 的业务含义不同；`end_reason` 只在运行结束时填写。
 - `execution_state` 仅接受 JSON 对象。已执行阶段以 `d2` / `d3` / `d4` / `d5` 键保存 `status`、`endReason`、`completedAt`、错误摘要、Provider / Model / API mode、累计 `elapsedMs` 与 `usage`；更新单个阶段时不得覆盖其他阶段。`running` 或字段缺失均不表示完成，历史 Run 不从缺失状态推断成功。D3 / D5 正常空结果也写入对应 `status = 'completed'` 与 `endReason = 'no_candidates'`，供 Resume 作确定性判断。
 - `usage` 包含 `requests`、`inputTokens`、`outputTokens`、`cachedInputTokens` 与 `usageComplete`。缓存输入已包含在输入 Token 内，不得再次加到总 Token；Provider 未返回某字段使用 `null`，任一请求缺失完整 Usage 时 `usageComplete = false`。缓存命中率是读取端派生指标（`cachedInputTokens / inputTokens`），不持久化；统计不完整时不得展示为完整命中率。
@@ -416,7 +416,7 @@ Discovery 与 Daily Production 独立，不修改既有 `feedback`、`pipeline_r
 | `title` | text | nullable；作品原始标题 |
 | `title_zh` | text | nullable；中文标题，来自 D3 / D5 输出或后续编辑补充 |
 | `author` | text | nullable |
-| `publication` | text | nullable；作品发布来源；各路径共用归一化规则，见 `04a-discovery-technical-spec.md` §5.1 |
+| `publication` | text | nullable；作品发布来源；各路径共用归一化规则，见 `04-technical-spec/discovery.md` §5.1 |
 | `content_type` | text | nullable；`article` / `video` / `podcast` |
 | `published_at` | timestamptz | nullable |
 | `estimated_duration_minutes` | integer | nullable |
@@ -468,7 +468,7 @@ Discovery 与 Daily Production 独立，不修改既有 `feedback`、`pipeline_r
 | `updated_at` | timestamptz | NOT NULL |
 
 - `UNIQUE(discovery_candidate_id)`；同一候选不重复进入审核队列。
-- 候选提交数量由 `06a-discovery-workflow.md` 定义，不通过数据库复杂 CHECK 实现。
+- 候选提交数量由 `06-workflow-spec/discovery.md` 定义，不通过数据库复杂 CHECK 实现。
 - 人工触发 Open 后，新增 Run 和审核候选，不覆盖原有记录。
 - In-depth Reads 以 `review_status = 'approved'` 作为上架与前台可见条件；`pending` / `rejected` 不可见。`approved` 改为 `rejected` 即撤下。标题和作者使用 Candidate 客观字段。
 - 「完善介绍」独立保存到以上三个 TEXT 列；Generate 自动保存与 Save changes 写入同一组列，不覆盖 Candidate 原始 Agent 字段。非空 Editorial summary / why worth reading 优先于 Candidate 原字段；NULL / 空字符串按无覆盖处理。Editorial extra_info 缺失时返回空字符串，禁止回退到内部 `discovery_candidates.extra_info`。
@@ -493,7 +493,7 @@ Discovery 与 Daily Production 独立，不修改既有 `feedback`、`pipeline_r
 
 `metadata` 只保留有用站点信息：title、description、author、publishedTime、sourceURL / url、HTTP 状态、站点 / publisher、OG / Twitter 图像及可得尺寸、语言和完整性提示；同次 HTML 的 meta 可补齐相应字段。`metadata.coverImage` 保存 Code 验证的优选封面。不保存大型 HTML、截图或整个原始 Firecrawl 响应。元数据缺失允许，不让模型生成来源或封面 URL。
 
-同一规范化 URL 使用 UPSERT 更新，不维护正文版本历史；不完整结果不能覆盖已有完整正文。成功结果在工具返回前独立提交，后续 Agent / Candidate / Editorial 失败不回滚原文 Cache。并发和错误处理见 `04a-discovery-technical-spec.md` §4.3；部署 Migration 见 `09-operations.md`。
+同一规范化 URL 使用 UPSERT 更新，不维护正文版本历史；不完整结果不能覆盖已有完整正文。成功结果在工具返回前独立提交，后续 Agent / Candidate / Editorial 失败不回滚原文 Cache。并发和错误处理见 `04-technical-spec/discovery.md` §4.3；部署 Migration 见 `09-operations.md`。
 
 ### 11.6 索引与实现边界
 
@@ -511,11 +511,11 @@ in_depth_candidates(review_status, created_at DESC)
 
 当前实现边界：
 
-1. **Implemented**：Daily 输入适配和 Trace 持久化已有代码；执行与技术边界分别见 `06a-discovery-workflow.md` 和 `04a-discovery-technical-spec.md`。Trace 列是业务持久化字段，不代表 SDK 提供完全相同字段。
+1. **Implemented**：Daily 输入适配和 Trace 持久化已有代码；执行与技术边界分别见 `06-workflow-spec/discovery.md` 和 `04-technical-spec/discovery.md`。Trace 列是业务持久化字段，不代表 SDK 提供完全相同字段。
 2. **Implemented**：审核通过 Candidate → Run → Parent Run 关联，不额外建立审核批次表。上架及公开读取使用 §11.4 的审核状态，无需迁移到另一张内容库表。
 3. **Planned**：单条 Lead 执行保留 §11.1 的字段和约束，不能据此认定已有 CLI / API / UI 支持。
 
-## 12 Prompt Registry / Versions
+## 12 prompt_registry / prompt_versions
 
 `prompt_registry` 保存稳定唯一 key、kind（request / fragment）、workflow、step、request_type、display_name、active_version_id 与时间戳。`prompt_versions` 保存 UUID、registry_id、递增 version、draft / published、body JSONB、content_hash、source_commit、legacy_version、change_note、created_at。body 的明确 TypeScript / 校验形状见 `src/lib/prompts/contracts.ts`：System / User 可 null 或空，variants 为角色模板对象，fragments 为有序 slot / Version ID 列表。
 
@@ -528,7 +528,7 @@ in_depth_candidates(review_status, created_at DESC)
 
 发布不可变、引用校验等 Trigger 由 `0021_prompt_registry.sql` 管理，不能只依赖 ORM Schema 推断其存在。
 
-### 12.1 B3.2 版本绑定载体
+### 12.1 版本绑定载体
 
 - Daily Stage1–3：对应 `run.json.promptVersionIds` 保存 Request Key → 精确 UUID；`promptVersions` 保存同一映射的可读编号（如 `v5`），仅用于展示。Daily Orchestrator 同步汇总，不存 Prompt 文本。读取兼容此前仅有 UUID `promptVersions` 的文件；Resume 始终用 UUID，不能只凭 `vN` 恢复。`prompt_version` 等诊断展示字段写可读编号时，精确引用保留在 `prompt_version_id` / `promptVersionIds`。原 `legacy_prompt_version(s)` 仅为静态基线标签。
 - Stage4：`stage4_runs.prompt_versions` 为权威，runtime JSON 只镜像；同一 Review snapshot 的 Run 唯一，Decision / Enrichment 分开存 UUID。

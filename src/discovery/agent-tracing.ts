@@ -26,6 +26,31 @@ export class PostgresDiscoveryTracingProcessor implements TracingProcessor {
   readonly traceIds = new Set<string>();
   private readonly pending = new Map<string, PendingTraceSpan>();
   private flushes = 0;
+  private flushing: Promise<void> | null = null;
+  private closed = false;
+  private dropped = 0;
+  private static readonly MAX_PENDING = 1000;
+
+  get traceFlushed(): boolean {
+    return this.pending.size === 0 && this.dropped === 0;
+  }
+
+  private buffer(key: string, span: PendingTraceSpan): void {
+    if (this.closed) return;
+    if (
+      !this.pending.has(key) &&
+      this.pending.size >= PostgresDiscoveryTracingProcessor.MAX_PENDING
+    ) {
+      this.dropped++;
+      if (this.dropped === 1)
+        console.error('Discovery Trace buffer limit reached; dropping new spans.', {
+          runId: this.runId,
+          limit: PostgresDiscoveryTracingProcessor.MAX_PENDING,
+        });
+      return;
+    }
+    this.pending.set(key, span);
+  }
   private usage: DiscoveryStageUsage = emptyDiscoveryStageUsage();
 
   constructor(
@@ -43,8 +68,10 @@ export class PostgresDiscoveryTracingProcessor implements TracingProcessor {
   }
 
   async onTraceStart(trace: Trace): Promise<void> {
-    this.traceIds.add(trace.traceId);
-    this.pending.set(traceKey(trace.traceId), {
+    if (this.closed) return;
+    if (this.traceIds.size < PostgresDiscoveryTracingProcessor.MAX_PENDING)
+      this.traceIds.add(trace.traceId);
+    this.buffer(traceKey(trace.traceId), {
       traceId: trace.traceId,
       spanId: traceKey(trace.traceId),
       parentSpanId: null,
@@ -60,7 +87,7 @@ export class PostgresDiscoveryTracingProcessor implements TracingProcessor {
   async onTraceEnd(trace: Trace): Promise<void> {
     const key = traceKey(trace.traceId);
     const prior = this.pending.get(key);
-    this.pending.set(key, {
+    this.buffer(key, {
       traceId: trace.traceId,
       spanId: key,
       parentSpanId: null,
@@ -76,7 +103,9 @@ export class PostgresDiscoveryTracingProcessor implements TracingProcessor {
   async onSpanStart(): Promise<void> {}
 
   async onSpanEnd(span: Span<SpanData>): Promise<void> {
-    this.traceIds.add(span.traceId);
+    if (this.closed) return;
+    if (this.traceIds.size < PostgresDiscoveryTracingProcessor.MAX_PENDING)
+      this.traceIds.add(span.traceId);
     if (span.spanData.type === 'response') {
       const responseData = span.spanData as unknown as Record<string, unknown>;
       const response = isRecord(responseData._response) ? responseData._response : null;
@@ -85,7 +114,7 @@ export class PostgresDiscoveryTracingProcessor implements TracingProcessor {
         usageFromAgentResponseUsage(response?.usage),
       );
     }
-    this.pending.set(`${span.traceId}:${span.spanId}`, {
+    this.buffer(`${span.traceId}:${span.spanId}`, {
       traceId: span.traceId,
       spanId: span.spanId,
       parentSpanId: span.parentId,
@@ -102,13 +131,24 @@ export class PostgresDiscoveryTracingProcessor implements TracingProcessor {
   }
 
   async forceFlush(): Promise<void> {
-    const spans = [...this.pending.values()];
-    this.pending.clear();
+    // SDK and explicit shutdown may flush concurrently; serialize writes and preserve newer updates.
+    if (this.flushing) return this.flushing;
+    this.flushing = this.flushPending();
+    try {
+      await this.flushing;
+    } finally {
+      this.flushing = null;
+    }
+  }
+
+  private async flushPending(): Promise<void> {
+    const spans = [...this.pending.entries()];
     if (spans.length === 0) return;
     this.flushes += 1;
-    for (const span of spans) {
-      await this.pool.query(
-        `insert into discovery_trace_spans (
+    for (const [key, span] of spans) {
+      try {
+        await this.pool.query(
+          `insert into discovery_trace_spans (
             id, run_id, trace_id, span_id, parent_span_id, span_type,
             name, started_at, ended_at, status, payload
           ) values (
@@ -123,26 +163,73 @@ export class PostgresDiscoveryTracingProcessor implements TracingProcessor {
             ended_at = excluded.ended_at,
             status = excluded.status,
             payload = excluded.payload`,
-        [
-          randomUUID(),
-          this.runId,
-          span.traceId,
-          span.spanId,
-          span.parentSpanId,
-          span.spanType,
-          span.name,
-          span.startedAt,
-          span.endedAt,
-          span.status,
-          JSON.stringify(span.payload),
-        ],
-      );
+          [
+            randomUUID(),
+            this.runId,
+            span.traceId,
+            span.spanId,
+            span.parentSpanId,
+            span.spanType,
+            span.name,
+            span.startedAt,
+            span.endedAt,
+            span.status,
+            JSON.stringify(span.payload),
+          ],
+        );
+        if (this.pending.get(key) === span) this.pending.delete(key);
+      } catch (error) {
+        console.error('Discovery Trace persistence failed; spans retained for next flush.', {
+          runId: this.runId,
+          traceId: span.traceId,
+          spanId: span.spanId,
+          pendingCount: this.pending.size,
+          error: sanitizeUnknown(error instanceof Error ? error.message : String(error)),
+        });
+        break;
+      }
     }
   }
 
   async shutdown(): Promise<void> {
+    if (this.closed) return;
     await this.forceFlush();
+    this.closed = true;
+    if (this.pending.size || this.dropped) {
+      console.error('Discovery Trace shutdown discarded unwritten spans.', {
+        runId: this.runId,
+        pendingCount: this.pending.size,
+        droppedCount: this.dropped,
+      });
+      this.dropped += this.pending.size;
+      this.pending.clear();
+    }
   }
+}
+
+/** Diagnostics must never replace a successful Agent result or its original business error. */
+export async function finishDiscoveryTrace(
+  processor: PostgresDiscoveryTracingProcessor,
+  flushProvider: () => Promise<void>,
+): Promise<boolean> {
+  let providerFlushed = true;
+  try {
+    await flushProvider();
+  } catch (error) {
+    providerFlushed = false;
+    console.error('Discovery SDK Trace flush failed.', {
+      error: sanitizeUnknown(error instanceof Error ? error.message : String(error)),
+    });
+  }
+  try {
+    await processor.shutdown();
+  } catch (error) {
+    console.error('Discovery Trace shutdown failed.', {
+      error: sanitizeUnknown(error instanceof Error ? error.message : String(error)),
+    });
+    return false;
+  }
+  return providerFlushed && processor.traceFlushed;
 }
 
 export function sanitizeSpanData(spanData: Record<string, unknown>): Record<string, unknown> {

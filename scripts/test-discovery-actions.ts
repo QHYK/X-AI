@@ -41,9 +41,16 @@ globalThis.fetch = async (url, init) => {
   });
 };
 const root = createRoot(document.getElementById('root')!);
-for (const mode of ['regular', 'open'] as const) {
+for (const mode of ['regular', 'open', 'd2'] as const) {
   await act(async () =>
-    root.render(createElement(DiscoveryActions, { key: mode, date: '2026-10-19', mode })),
+    root.render(
+      createElement(DiscoveryActions, {
+        key: mode,
+        date: '2026-10-19',
+        mode,
+        ...(mode === 'd2' ? { runId: 'original-run' } : {}),
+      }),
+    ),
   );
   const button = () => document.querySelector('button')!;
   const before = requests.length;
@@ -61,7 +68,11 @@ for (const mode of ['regular', 'open'] as const) {
   assert.equal(requests.at(-1)!.url, './api/admin/discovery');
   const body = requests.at(-1)!.body;
   assert.equal(body.mode, mode);
-  assert.equal(body.date, '2026-10-19');
+  if (mode === 'd2') {
+    assert.equal(body.runId, 'original-run');
+    assert.equal('date' in body, false);
+    assert.match(confirmation, /复用原 Run/);
+  } else assert.equal(body.date, '2026-10-19');
   assert.equal(body.confirmPaid, true);
   assert.match(String(body.requestId), /^[a-f0-9]{32}$/);
   await act(async () =>
@@ -80,6 +91,18 @@ for (const mode of ['regular', 'open'] as const) {
   assert.match(document.body.textContent!, /pending/);
   allow = false;
 }
+await act(async () =>
+  root.render(
+    createElement(DiscoveryActions, {
+      key: 'unavailable',
+      date: '2026-10-19',
+      mode: 'd2',
+      runId: 'historical',
+      available: false,
+    }),
+  ),
+);
+assert.equal(document.querySelector('button')!.disabled, true);
 await act(async () => root.unmount());
 dom.window.close();
 console.log(

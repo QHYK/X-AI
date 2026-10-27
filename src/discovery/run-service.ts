@@ -54,7 +54,7 @@ export type CreateRegularDiscoveryRunResult = {
 
 /** Creates an isolated, manually requested Open Discovery child Run. */
 export async function createOpenDiscoveryRun(
-  pool: Pool,
+  pool: Pick<Pool, 'query'>,
   input: {
     parentRunId: string;
     manualContext?: string;
@@ -108,49 +108,58 @@ export async function createRegularDiscoveryRun(
   },
   dependencies: CreateRegularDiscoveryRunDependencies = defaultDependencies,
 ): Promise<CreateRegularDiscoveryRunResult> {
-  const dailyDates = validateDiscoveryDailyDates(input.dailyDates);
+  validateDiscoveryDailyDates(input.dailyDates);
   const client = await pool.connect();
-
   try {
     await client.query('begin isolation level repeatable read');
-    const completedDates = await loadCompletedDailyDates(client, dailyDates);
-    const missingDailyDates = dailyDates.filter((dailyDate) => !completedDates.has(dailyDate));
-
-    if (missingDailyDates.length > 0) {
-      const errorSummary = `Upstream Daily not completed: ${missingDailyDates.join(', ')}`;
-      const run = await insertRegularRun(client, {
-        dailyDates,
-        triggerSource: input.triggerSource,
-        status: 'blocked',
-        endReason: 'upstream_not_ready',
-        inputContentIds: null,
-        configSnapshot: input.configSnapshot ?? null,
-        finishedAt: new Date(),
-        errorSummary,
-      });
-      await client.query('commit');
-      return { run, input: null, missingDailyDates };
-    }
-
-    const windowInput = await dependencies.readWindow(client, dailyDates);
-    const run = await insertRegularRun(client, {
-      dailyDates,
-      triggerSource: input.triggerSource,
-      status: 'pending',
-      endReason: null,
-      inputContentIds: windowInput.contentIds,
-      configSnapshot: input.configSnapshot ?? null,
-      finishedAt: null,
-      errorSummary: null,
-    });
+    const result = await createRegularDiscoveryRunInTransaction(client, input, dependencies);
     await client.query('commit');
-    return { run, input: windowInput, missingDailyDates: [] };
+    return result;
   } catch (error) {
     await client.query('rollback');
     throw error;
   } finally {
     client.release();
   }
+}
+
+/** Caller owns transaction isolation, commit/rollback and connection lifetime. */
+export async function createRegularDiscoveryRunInTransaction(
+  client: PoolClient,
+  input: Parameters<typeof createRegularDiscoveryRun>[1],
+  dependencies: CreateRegularDiscoveryRunDependencies = defaultDependencies,
+): Promise<CreateRegularDiscoveryRunResult> {
+  const dailyDates = validateDiscoveryDailyDates(input.dailyDates);
+  const completedDates = await loadCompletedDailyDates(client, dailyDates);
+  const missingDailyDates = dailyDates.filter((dailyDate) => !completedDates.has(dailyDate));
+
+  if (missingDailyDates.length > 0) {
+    const errorSummary = `Upstream Daily not completed: ${missingDailyDates.join(', ')}`;
+    const run = await insertRegularRun(client, {
+      dailyDates,
+      triggerSource: input.triggerSource,
+      status: 'blocked',
+      endReason: 'upstream_not_ready',
+      inputContentIds: null,
+      configSnapshot: input.configSnapshot ?? null,
+      finishedAt: new Date(),
+      errorSummary,
+    });
+    return { run, input: null, missingDailyDates };
+  }
+
+  const windowInput = await dependencies.readWindow(client, dailyDates);
+  const run = await insertRegularRun(client, {
+    dailyDates,
+    triggerSource: input.triggerSource,
+    status: 'pending',
+    endReason: null,
+    inputContentIds: windowInput.contentIds,
+    configSnapshot: input.configSnapshot ?? null,
+    finishedAt: null,
+    errorSummary: null,
+  });
+  return { run, input: windowInput, missingDailyDates: [] };
 }
 
 export async function startDiscoveryRun(

@@ -5,7 +5,12 @@ import {
   resolveLlmProvider,
   resolveProviderLlmModel,
 } from '../processing/llm-client.js';
-import { EditorialIntroductionSchema, type EditorialIntroduction } from './in-depth-editorial.js';
+import {
+  EditorialIntroductionSchema,
+  readEditorialIntroduction,
+  EditorialConflictError,
+  type EditorialIntroduction,
+} from './in-depth-editorial.js';
 import { fetchDiscoveryArticle } from '../discovery/fetch-content.js';
 import {
   getOrFetchArticle,
@@ -23,6 +28,7 @@ export class IntroductionError extends Error {
     message: string,
     readonly status: number,
     readonly introduction?: EditorialIntroduction,
+    readonly currentEditorial?: EditorialIntroduction,
   ) {
     super(message);
   }
@@ -30,6 +36,9 @@ export class IntroductionError extends Error {
 
 type SourceRow = {
   candidate_id: string;
+  editorial_summary: string | null;
+  editorial_why_worth_reading: string | null;
+  editorial_extra_info: string | null;
   title: string | null;
   author: string | null;
   summary: string | null;
@@ -49,7 +58,8 @@ export async function generateAndSaveInDepthIntroduction(
 ): Promise<EditorialIntroduction> {
   const source = await db.query<SourceRow>(
     `select dc.id as candidate_id, dc.title, dc.author, dc.summary, dc.why_worth_reading, dc.evidence,
-            dc.url, dc.source_content_id, dc.publication, dc.published_at
+            dc.url, dc.source_content_id, dc.publication, dc.published_at,
+            idc.editorial_summary, idc.editorial_why_worth_reading, idc.editorial_extra_info
        from in_depth_candidates idc
        join discovery_candidates dc on dc.id = idc.discovery_candidate_id
       where idc.id = $1::uuid`,
@@ -57,6 +67,11 @@ export async function generateAndSaveInDepthIntroduction(
   );
   const row = source.rows[0];
   if (!row) throw new IntroductionError('Candidate not found.', 404);
+  const baseline = readEditorialIntroduction({
+    summary: row.editorial_summary,
+    whyWorthReading: row.editorial_why_worth_reading,
+    extra_info: row.editorial_extra_info,
+  });
   const fetch = row.evidence?.fetch;
   const storedFetch =
     fetch && typeof fetch === 'object' && !Array.isArray(fetch)
@@ -188,9 +203,11 @@ export async function generateAndSaveInDepthIntroduction(
     await client?.close();
   }
   try {
-    if (!(await saveInDepthEditorial(db, id, introduction)))
+    if (!(await saveInDepthEditorial(db, id, introduction, baseline)))
       throw new Error('Candidate disappeared before save.');
   } catch (error) {
+    if (error instanceof EditorialConflictError)
+      throw new IntroductionError(error.message, 409, introduction, error.currentEditorial);
     console.error('Generated In-depth introduction could not be saved.', error);
     throw new IntroductionError(
       '介绍已生成但保存失败。文本已保留，请使用 Save changes 重试保存，无需重新生成。',

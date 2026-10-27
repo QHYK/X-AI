@@ -1,3 +1,5 @@
+import { saveInDepthEditorial } from '../src/lib/in-depth-reads.js';
+import { EditorialConflictError } from '../src/lib/in-depth-editorial.js';
 import assert from 'node:assert/strict';
 import {
   generateAndSaveInDepthIntroduction,
@@ -287,4 +289,86 @@ assert.equal((await (await publicGet()).json()).items[0].summary, publicRows[0]!
 assert.equal((await (await publicGet()).json()).items[0].extra_info, '');
 console.log(
   'Anonymous public API: approval boundary, immediate Editorial updates, legacy fallback and private-field exclusion passed.',
+);
+
+const emptyBaseline = { summary: '', whyWorthReading: '', extra_info: '' };
+const human = { summary: '人工更新的介绍', whyWorthReading: '人工理由', extra_info: '人工评价' };
+const concurrent = new ArticleStore();
+concurrent.seed();
+await assert.rejects(
+  generateAndSaveInDepthIntroduction(concurrent.db, id, {
+    request: async (input) => {
+      await saveInDepthEditorial(concurrent.db, id, human, emptyBaseline);
+      return goodRequest(input);
+    },
+    fetchDocument: noFetch,
+  }),
+  (error: unknown) =>
+    error instanceof IntroductionError &&
+    error.status === 409 &&
+    error.introduction?.summary === introduction.summary &&
+    error.currentEditorial?.summary === human.summary,
+);
+assert.deepEqual(concurrent.editorial, human);
+await assert.rejects(
+  saveInDepthEditorial(concurrent.db, id, introduction, emptyBaseline),
+  EditorialConflictError,
+);
+assert.deepEqual(concurrent.editorial, human);
+const competing = new ArticleStore();
+competing.seed();
+let finishA!: () => void, finishB!: () => void, startedA!: () => void, startedB!: () => void;
+const beganA = new Promise<void>((r) => {
+  startedA = r;
+});
+const beganB = new Promise<void>((r) => {
+  startedB = r;
+});
+const firstGenerated = { ...introduction, summary: '后完成的生成内容' };
+const secondGenerated = { ...introduction, summary: '先完成的生成内容' };
+const firstAttempt = generateAndSaveInDepthIntroduction(competing.db, id, {
+  request: async () => {
+    startedA();
+    await new Promise<void>((r) => {
+      finishA = r;
+    });
+    return {
+      id: 'a',
+      output: [],
+      output_text: JSON.stringify(firstGenerated),
+      api_mode: 'chat_completions',
+    };
+  },
+  fetchDocument: noFetch,
+});
+const firstOutcome = assert.rejects(
+  firstAttempt,
+  (error: unknown) =>
+    error instanceof IntroductionError &&
+    error.status === 409 &&
+    error.introduction?.summary === firstGenerated.summary,
+);
+const secondAttempt = generateAndSaveInDepthIntroduction(competing.db, id, {
+  request: async () => {
+    startedB();
+    await new Promise<void>((r) => {
+      finishB = r;
+    });
+    return {
+      id: 'b',
+      output: [],
+      output_text: JSON.stringify(secondGenerated),
+      api_mode: 'chat_completions',
+    };
+  },
+  fetchDocument: noFetch,
+});
+await Promise.all([beganA, beganB]);
+finishB();
+await secondAttempt;
+finishA();
+await firstOutcome;
+assert.deepEqual(competing.editorial, secondGenerated);
+console.log(
+  'Editorial CAS: human Save versus Generate, stale manual Save, competing Generates and recoverable generated text passed.',
 );

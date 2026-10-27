@@ -1,3 +1,5 @@
+import { databasePoolOptions } from '../src/db/pool-options.js';
+import { withDiscoveryExecutionLock } from '../src/discovery/background-jobs.js';
 import { Pool } from 'pg';
 import { loadPipelineEnvironment } from '../src/lib/pipeline-env.js';
 import {
@@ -24,10 +26,25 @@ async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error('DATABASE_URL is required.');
   const pool = new Pool({
+    ...databasePoolOptions('cli'),
     connectionString: databaseUrl,
     ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
   });
 
+  try {
+    const executed = await withDiscoveryExecutionLock(pool, async () => {
+      await runDiagnostic(pool, runId);
+      return true;
+    });
+    if (executed === null) {
+      throw new Error('Another Discovery executor is running; diagnostic was not started.');
+    }
+  } finally {
+    await pool.end();
+  }
+}
+
+async function runDiagnostic(pool: Pool, runId: string): Promise<void> {
   try {
     let run = await getDiscoveryRun(pool, runId);
     if (!run) throw new Error(`Discovery Run not found: ${runId}`);
@@ -110,8 +127,6 @@ async function main(): Promise<void> {
       ),
     );
     process.exitCode = 1;
-  } finally {
-    await pool.end();
   }
 }
 

@@ -1,3 +1,4 @@
+import { EditorialConflictError } from '@/lib/in-depth-editorial.js';
 import {
   generateAndSaveInDepthIntroduction,
   IntroductionError,
@@ -66,6 +67,11 @@ export async function PATCH(request: Request): Promise<Response> {
     revalidatePath('/review/in-depth');
     return Response.json({ item }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
+    if (error instanceof EditorialConflictError)
+      return Response.json(
+        { error: error.message, currentEditorial: error.currentEditorial },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } },
+      );
     console.error('Failed to save In-depth Review.', error);
     return Response.json({ error: 'Failed to save In-depth Review.' }, { status: 500 });
   }
@@ -106,7 +112,12 @@ export async function POST(request: Request): Promise<Response> {
   } catch (error) {
     if (error instanceof IntroductionError)
       return Response.json(
-        { error: error.message, introduction: error.introduction, saved: false },
+        {
+          error: error.message,
+          introduction: error.introduction,
+          currentEditorial: error.currentEditorial,
+          saved: false,
+        },
         { status: error.status, headers: { 'Cache-Control': 'no-store' } },
       );
     console.error('Failed to generate In-depth introduction.', error);

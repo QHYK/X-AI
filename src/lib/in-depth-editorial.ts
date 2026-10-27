@@ -20,3 +20,9 @@ export function readEditorialIntroduction(
       typeof overrides?.whyWorthReading === 'string' ? overrides.whyWorthReading : '',
   };
 }
+
+export class EditorialConflictError extends Error {
+  constructor(readonly currentEditorial: EditorialIntroduction) {
+    super('介绍已被其他操作修改，未覆盖已保存内容。请检查最新内容后再保存。');
+  }
+}

@@ -168,15 +168,25 @@ class ManualStore {
             r.evaluation = { ...r.evaluation, ...JSON.parse(String(values[4])) };
             return { rows: [], rowCount: 1 };
           }
+          if (sql.includes('select editorial_summary as summary'))
+            return { rows: [{ ...writable().get(String(values[0]))?.editorialOverrides }] };
           if (sql.includes('update in_depth_candidates')) {
             assert.doesNotMatch(sql, /review_status|reviewed_at|editorial_notes/);
             const r = writable().get(String(values[0]))!;
+            if (
+              [
+                r.editorialOverrides?.summary ?? '',
+                r.editorialOverrides?.whyWorthReading ?? '',
+                r.editorialOverrides?.extra_info ?? '',
+              ].some((v, i) => v !== values[i + 4])
+            )
+              return { rows: [], rowCount: 0 };
             r.editorialOverrides = {
               summary: values[1],
               whyWorthReading: values[2],
               extra_info: values[3],
             };
-            return { rows: [], rowCount: 1 };
+            return { rows: [{ id: r.id }], rowCount: 1 };
           }
           return this.query(sql, values, pending ?? this.rows);
         },
@@ -492,4 +502,50 @@ assert.match(
 );
 console.log(
   'Manual candidate creation, normalized/legacy duplicates, concurrency, Cache/Daily reuse, Generate/Regenerate, tags, atomic failures and publication boundary passed.',
+);
+
+const concurrentEditorial = fresh();
+const concurrentItem = await createManualInDepthCandidate(
+  concurrentEditorial.db,
+  { url: articleUrl },
+  { fetchDocument: noFetch },
+);
+const humanEditorial = {
+  summary: '人工保存的介绍',
+  whyWorthReading: '人工理由',
+  extra_info: '人工评价',
+};
+const oldCandidate = structuredClone(concurrentEditorial.rows.get(concurrentItem.item.id)!);
+await assert.rejects(
+  generateManualInDepthIntroduction(concurrentEditorial.db, concurrentItem.item.id, {
+    request: async (input) => {
+      concurrentEditorial.rows.get(concurrentItem.item.id)!.editorialOverrides = humanEditorial;
+      return request(input);
+    },
+  }),
+  (error: unknown) =>
+    error instanceof IntroductionError &&
+    error.status === 409 &&
+    Boolean(error.introduction) &&
+    error.currentEditorial?.summary === humanEditorial.summary,
+);
+assert.deepEqual(
+  concurrentEditorial.rows.get(concurrentItem.item.id)!.editorialOverrides,
+  humanEditorial,
+);
+assert.equal(
+  concurrentEditorial.rows.get(concurrentItem.item.id)!.titleZh,
+  oldCandidate.titleZh,
+  'Conflict rolls back Candidate metadata updates with the Editorial write.',
+);
+assert.equal(
+  concurrentEditorial.rows.get(concurrentItem.item.id)!.reviewStatus,
+  oldCandidate.reviewStatus,
+);
+assert.equal(
+  concurrentEditorial.rows.get(concurrentItem.item.id)!.editorialNotes,
+  oldCandidate.editorialNotes,
+);
+console.log(
+  'Manual Generate optimistic conflict preserves Editorial and atomically rolls back metadata.',
 );

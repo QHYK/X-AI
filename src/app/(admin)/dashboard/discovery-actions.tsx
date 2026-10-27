@@ -9,9 +9,13 @@ export function DiscoveryActions({
   date,
   mode,
   active,
+  runId,
+  available = true,
 }: {
   date: string;
-  mode: 'regular' | 'open';
+  mode: 'regular' | 'open' | 'd2';
+  runId?: string;
+  available?: boolean;
   active?: Job | null;
 }) {
   const router = useRouter();
@@ -51,11 +55,11 @@ export function DiscoveryActions({
     };
   }, [job, running, router]);
   async function submit() {
-    if (lock.current || running) return;
+    if (lock.current || running || !available) return;
     const [start, end] = discoveryDatesForEndDate(date);
     if (
       !window.confirm(
-        `执行窗口：${start} 至 ${end}\n阶段：${mode === 'regular' ? 'D2 → D3 / D4 → 条件触发 D5' : '仅 D5 Open（不执行 D2–D4）'}\n将创建新 Run，可能调用付费模型、Web Search 和 Firecrawl。是否继续？`,
+        `执行窗口：${start} 至 ${end}\n阶段：${mode === 'd2' ? '重试 D2，成功后继续 D3 / D4 → 条件触发 D5' : mode === 'regular' ? 'D2 → D3 / D4 → 条件触发 D5' : '仅 D5 Open（不执行 D2–D4）'}\n${mode === 'd2' ? `复用原 Run ${runId}、输入成员和 Prompt Version` : '将创建新 Run'}，可能调用付费模型、Web Search 和 Firecrawl。是否继续？`,
       )
     )
       return;
@@ -70,7 +74,12 @@ export function DiscoveryActions({
       const response = await fetch('./api/admin/discovery', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date, mode, requestId: key.current, confirmPaid: true }),
+        body: JSON.stringify({
+          ...(mode === 'd2' ? { runId } : { date }),
+          mode,
+          requestId: key.current,
+          confirmPaid: true,
+        }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? '提交失败');
@@ -89,10 +98,21 @@ export function DiscoveryActions({
       <button
         type="button"
         className={styles.retryButton}
-        disabled={busy || running}
+        disabled={busy || running || !available}
+        title={
+          mode === 'd2' && !available
+            ? '该 Run 不满足安全重试条件或缺少历史输入/Prompt 记录；可使用 Retry Discovery 创建新 Run。'
+            : undefined
+        }
         onClick={submit}
       >
-        {busy ? 'Submitting…' : mode === 'regular' ? 'Retry Discovery' : 'Retry Open'}
+        {busy
+          ? 'Submitting…'
+          : mode === 'd2'
+            ? 'Retry D2'
+            : mode === 'regular'
+              ? 'Retry Discovery'
+              : 'Retry Open'}
       </button>
       {job ? (
         <p role="status">

@@ -139,6 +139,40 @@ try {
     '',
     'A different Candidate must not receive a stale response.',
   );
+  await render(null, 'conflict');
+  await click('Generate');
+  const currentEditorial = {
+    summary: '其他编辑保存的内容',
+    whyWorthReading: '最新理由',
+    extra_info: '最新评估',
+  };
+  await respond({ error: 'Editorial conflict', saved: false, introduction, currentEditorial }, 409);
+  assert.equal(textarea('讲了什么').value, '', 'Conflict never replaces local input.');
+  assert.equal(textarea('本次生成：讲了什么').value, introduction.summary);
+  assert.equal(textarea('最新保存：讲了什么').value, currentEditorial.summary);
+  await click('使用生成文本');
+  assert.equal(textarea('讲了什么').value, introduction.summary);
+  assert.equal(
+    button('Save changes').disabled,
+    true,
+    'Conflict requires explicit baseline acknowledgement.',
+  );
+  confirm = false;
+  await click('确认最新内容，继续编辑');
+  assert.equal(button('Save changes').disabled, true);
+  confirm = true;
+  await click('确认最新内容，继续编辑');
+  await click('Save changes');
+  assert.deepEqual(requests.at(-1)?.body.baseline, currentEditorial);
+  await respond(
+    { error: 'Another newer Save', currentEditorial: { ...currentEditorial, summary: '再次更新' } },
+    409,
+  );
+  assert.equal(
+    textarea('讲了什么').value,
+    introduction.summary,
+    'Manual 409 also preserves all unsaved text.',
+  );
   console.log(
     'Editorial UI: generation, manual save, confirmation, duplicate guard, async edits, DB failure recovery and Candidate switching passed.',
   );

@@ -3,22 +3,22 @@
  *
  * 只为用户主动触碰且最终 rank 改变的 item 写 feedback；被动位移只更新 display_rank。
  */
-import type { Pool, PoolClient } from "pg";
-import {
-  EVENT_DISPLAY_CUTOFF,
-  LONG_FORM_DISPLAY_CUTOFF,
-} from "./ranking-config.js";
-import type { EnrichedStage4Event, Stage4EventGroup } from "../processing/stage4-event-processing.js";
+import type { Pool, PoolClient } from 'pg';
+import { EVENT_DISPLAY_CUTOFF, LONG_FORM_DISPLAY_CUTOFF } from './ranking-config.js';
+import type {
+  EnrichedStage4Event,
+  Stage4EventGroup,
+} from '../processing/stage4-event-processing.js';
 import {
   loadOrCreateStage4Run,
   persistStage4Draft,
   publishStage4ReviewSelection,
   type Stage4EventToPersist,
-} from "../processing/stage4-persistence.js";
+} from '../processing/stage4-persistence.js';
 
-type Queryable = Pick<Pool | PoolClient, "query">;
+type Queryable = Pick<Pool | PoolClient, 'query'>;
 
-export type RankingFeedbackType = "ranking_error" | "false_positive" | "false_negative";
+export type RankingFeedbackType = 'ranking_error' | 'false_positive' | 'false_negative';
 
 export type RankingRow = {
   id: string;
@@ -97,12 +97,12 @@ export function classifyRankingFeedback(
   cutoff: number,
 ): RankingFeedbackType {
   if (beforeRank > cutoff && afterRank <= cutoff) {
-    return "false_negative";
+    return 'false_negative';
   }
   if (beforeRank <= cutoff && afterRank > cutoff) {
-    return "false_positive";
+    return 'false_positive';
   }
-  return "ranking_error";
+  return 'ranking_error';
 }
 
 /** 校验完整排序并生成 display rank 更新和仅针对 touched item 的 feedback。 */
@@ -113,14 +113,14 @@ export function buildRankingChangeSet(options: {
   cutoff: number;
 }): RankingChangeSet {
   if (options.currentRows.length === 0) {
-    throw new ReviewValidationError("Review scope has no ranked items.");
+    throw new ReviewValidationError('Review scope has no ranked items.');
   }
   const currentById = new Map(options.currentRows.map((row) => [row.id, row]));
-  assertUniqueIds(options.orderedIds, "orderedIds");
-  assertUniqueIds(options.touchedIds, "touchedIds");
+  assertUniqueIds(options.orderedIds, 'orderedIds');
+  assertUniqueIds(options.touchedIds, 'touchedIds');
 
   if (options.orderedIds.length !== options.currentRows.length) {
-    throw new ReviewValidationError("orderedIds must contain every item in the review scope.");
+    throw new ReviewValidationError('orderedIds must contain every item in the review scope.');
   }
   for (const id of options.orderedIds) {
     if (!currentById.has(id)) {
@@ -201,7 +201,7 @@ export async function saveEventReviewRanking(
     );
     if (!sameIdSet(missingTopIds, [...enrichedByReviewItemId.keys()])) {
       throw new ReviewValidationError(
-        "Review ranking changed while enrichment was in progress. Reload and save again.",
+        'Review ranking changed while enrichment was in progress. Reload and save again.',
       );
     }
 
@@ -234,7 +234,7 @@ export async function saveEventReviewRanking(
       `,
       [input.reviewRunId, input.dailyDate],
     );
-    await persistDisplayRanks(client, "event_review_items", changeSet.changes);
+    await persistDisplayRanks(client, 'event_review_items', changeSet.changes);
     let eventsUpdated = 0;
     for (const change of changeSet.changes) {
       const eventId = links.eventIdByReviewItemId.get(change.id);
@@ -247,7 +247,7 @@ export async function saveEventReviewRanking(
       );
       eventsUpdated += update.rowCount ?? 0;
     }
-    await persistFeedback(client, "event_review_item", changeSet.feedback);
+    await persistFeedback(client, 'event_review_item', changeSet.feedback);
     return {
       updatedCount: changeSet.changes.length,
       feedbackCount: changeSet.feedback.length,
@@ -276,7 +276,7 @@ async function loadEventReviewRows(
       where review_run_id = $1::uuid
         and daily_date = $2::date
       order by display_rank, id
-      ${lockRows ? "for update" : ""}
+      ${lockRows ? 'for update' : ''}
     `,
     [input.reviewRunId, input.dailyDate],
   );
@@ -303,14 +303,18 @@ async function loadEventReviewLinks(
   }
   const reviewItemIds = rows.map((row) => row.id);
   const memberContentIds = [...new Set(rows.flatMap((row) => row.memberContentIds))];
-  const lockClause = lockEvents ? "for update of e" : "";
+  const lockClause = lockEvents ? 'for update of e' : '';
   const direct = await queryable.query<{ id: string; event_review_item_id: string }>(
     `
       select e.id, e.event_review_item_id
       from events e
+      join stage4_runs r on r.id = e.stage4_run_id
+      join event_review_items eri on eri.id = e.event_review_item_id
+        and eri.review_run_id = r.review_run_id and eri.daily_date = r.daily_date
       where e.event_review_item_id = any($1::uuid[])
         and e.stage4_run_id is not null
-        and e.publication_status in ('draft', 'published')
+        and e.event_date = r.daily_date
+        and e.publication_status in ('draft', 'published', 'archived')
       ${lockClause}
     `,
     [reviewItemIds],
@@ -353,7 +357,7 @@ async function loadEventReviewLinks(
     memberIdsByEvent.set(member.event_id, ids);
   }
 
-  const legacyLinks: EventReviewLinks["legacyLinks"] = [];
+  const legacyLinks: EventReviewLinks['legacyLinks'] = [];
   for (const row of rows) {
     if (eventIdByReviewItemId.has(row.id)) {
       continue;
@@ -371,8 +375,8 @@ async function loadEventReviewLinks(
 
 /** 首次 Review 保存时，将唯一的 legacy 成员匹配转成明确外键。 */
 async function backfillLegacyEventReviewLinks(
-  client: Pick<PoolClient, "query">,
-  links: EventReviewLinks["legacyLinks"],
+  client: Pick<PoolClient, 'query'>,
+  links: EventReviewLinks['legacyLinks'],
 ): Promise<void> {
   for (const link of links) {
     const result = await client.query(
@@ -385,7 +389,7 @@ async function backfillLegacyEventReviewLinks(
       [link.eventId, link.reviewItemId],
     );
     if ((result.rowCount ?? 0) !== 1) {
-      throw new ReviewValidationError("A legacy Event association changed; reload and save again.");
+      throw new ReviewValidationError('A legacy Event association changed; reload and save again.');
     }
   }
 }
@@ -393,7 +397,7 @@ async function backfillLegacyEventReviewLinks(
 function toReviewStage4EventToPersist(event: EnrichedStage4Event): Stage4EventToPersist {
   const reviewItemId = event.group.eventReviewItemId;
   if (!reviewItemId) {
-    throw new Error("Review-triggered Stage 4 enrichment requires an event_review_item_id.");
+    throw new Error('Review-triggered Stage 4 enrichment requires an event_review_item_id.');
   }
   return {
     eventGroupId: reviewItemId,
@@ -452,8 +456,8 @@ export async function saveLongFormReviewRanking(
       cutoff: LONG_FORM_DISPLAY_CUTOFF,
     });
 
-    await persistDisplayRanks(client, "processed_contents", changeSet.changes);
-    await persistFeedback(client, "processed_content", changeSet.feedback);
+    await persistDisplayRanks(client, 'processed_contents', changeSet.changes);
+    await persistFeedback(client, 'processed_content', changeSet.feedback);
     return {
       updatedCount: changeSet.changes.length,
       feedbackCount: changeSet.feedback.length,
@@ -462,8 +466,8 @@ export async function saveLongFormReviewRanking(
 }
 
 async function persistDisplayRanks(
-  client: Pick<PoolClient, "query">,
-  table: "event_review_items" | "processed_contents",
+  client: Pick<PoolClient, 'query'>,
+  table: 'event_review_items' | 'processed_contents',
   changes: RankingChange[],
 ): Promise<void> {
   for (const change of changes) {
@@ -475,8 +479,8 @@ async function persistDisplayRanks(
 }
 
 async function persistFeedback(
-  client: Pick<PoolClient, "query">,
-  targetType: "event_review_item" | "processed_content",
+  client: Pick<PoolClient, 'query'>,
+  targetType: 'event_review_item' | 'processed_content',
   changes: RankingFeedbackChange[],
 ): Promise<void> {
   for (const change of changes) {
@@ -504,12 +508,12 @@ async function withTransaction<T>(
 ): Promise<T> {
   const client = await pool.connect();
   try {
-    await client.query("begin");
+    await client.query('begin');
     const result = await operation(client);
-    await client.query("commit");
+    await client.query('commit');
     return result;
   } catch (error) {
-    await client.query("rollback");
+    await client.query('rollback');
     throw error;
   } finally {
     client.release();

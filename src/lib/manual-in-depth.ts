@@ -24,9 +24,14 @@ import {
 } from './discovery-content-metadata.js';
 import { resolveDiscoveryPublication } from './discovery-source.js';
 import { loadDiscoverySources } from './discovery-source-list.js';
-import { getInDepthReviewItem, type InDepthReviewItem } from './in-depth-reads.js';
+import {
+  getInDepthReviewItem,
+  saveInDepthEditorial,
+  type InDepthReviewItem,
+} from './in-depth-reads.js';
 import {
   EditorialIntroductionSchema,
+  EditorialConflictError,
   readEditorialIntroduction,
   type EditorialIntroduction,
 } from './in-depth-editorial.js';
@@ -255,7 +260,7 @@ export async function createManualInDepthCandidate(
   return returnItem(id, false);
 }
 
-/** Manual Generate reads the saved article only. The lock covers model call and atomic save. */
+/** Claim in a short transaction, generate outside it, then compare-and-save atomically. */
 export async function generateManualInDepthIntroduction(
   db: ArticleDatabase,
   id: string,
@@ -420,12 +425,8 @@ export async function generateManualInDepthIntroduction(
       ],
     );
     if (candidate.rowCount !== 1) throw new Error('Candidate disappeared.');
-    const review = await client.query(
-      `update in_depth_candidates set editorial_summary = $2, editorial_why_worth_reading = $3,
-         editorial_extra_info = $4, updated_at = now() where id = $1::uuid`,
-      [id, generated.summary, generated.whyWorthReading, generated.extra_info],
-    );
-    if (review.rowCount !== 1) throw new Error('Review candidate disappeared.');
+    if (!(await saveInDepthEditorial(client, id, generated, saved)))
+      throw new Error('Review candidate disappeared.');
     await finishManualPrompt(client, 'candidate', row.candidate_id, 'completed');
     await client.query('commit');
     claimFinished = true;
@@ -446,6 +447,8 @@ export async function generateManualInDepthIntroduction(
         );
       }
     }
+    if (error instanceof EditorialConflictError)
+      throw new IntroductionError(error.message, 409, generated, error.currentEditorial);
     if (error instanceof PromptAttemptBusyError) throw new IntroductionError(error.message, 409);
     if (error instanceof IntroductionError) throw error;
     console.error('Manual In-depth persistence failed.', error);

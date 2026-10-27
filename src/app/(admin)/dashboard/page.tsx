@@ -7,6 +7,7 @@ import { getDatabasePool } from '@/db/index.js';
 import { getDiscoveryRunForDate, type DiscoveryDashboard } from '@/lib/discovery-dashboard.js';
 import {
   discoveryRunCacheMetrics,
+  discoveryStageTokenMetrics,
   getDiscoveryActiveRunForDate,
 } from '@/lib/discovery-dashboard.js';
 import { DiscoveryActions } from './discovery-actions.js';
@@ -345,6 +346,7 @@ function DiscoveryRunCard({
         </article>
         {(['d2', 'd3', 'd4', 'd5'] as const).map((stage) => {
           const state = stage === 'd5' ? run.d5?.state : regular?.stages[stage];
+          const tokens = discoveryStageTokenMetrics(state?.usage);
           return (
             <article
               key={stage}
@@ -354,6 +356,16 @@ function DiscoveryRunCard({
                 <h3>{stage.toUpperCase()}</h3>
                 <StatusBadge status={state?.status ?? null} />
               </div>
+              {stage === 'd2' && regular && state?.status === 'failed' ? (
+                <DiscoveryActions
+                  key={`d2:${regular.id}:${active?.id ?? ''}`}
+                  date={date}
+                  mode="d2"
+                  runId={regular.id}
+                  available={regular.d2RetryAvailable === true}
+                  active={active}
+                />
+              ) : null}
               {stage === 'd5' ? (
                 <DiscoveryActions
                   key={`open:${date}:${active?.id ?? ''}`}
@@ -394,6 +406,22 @@ function DiscoveryRunCard({
                 <Metric
                   label="Output tokens"
                   value={formatMetric(state?.usage?.outputTokens)}
+                />
+                <Metric
+                  label="Total tokens"
+                  value={formatMetric(tokens.totalTokens)}
+                />
+                <Metric
+                  label="Cached input tokens"
+                  value={formatMetric(tokens.cachedInputTokens)}
+                />
+                <Metric
+                  label="Cache hit rate"
+                  value={
+                    tokens.cacheHitRate === null
+                      ? 'N/A'
+                      : `${(tokens.cacheHitRate * 100).toFixed(1)}%`
+                  }
                 />
                 <Metric
                   label="End reason"

@@ -15,21 +15,7 @@
 
 重要：**一个事实只能存在于一个 Source of Truth。**
 
-开始编码前，先判断当前任务影响哪个领域，只读取对应文档和相关章节，不要默认加载全部 `/docs`。
-
-| 任务影响 | Source of Truth |
-|---|---|
-| 产品目标、用户行为、Brief 内容标准 | `docs/01-product-spec.md` |
-| 系统整体流程、Production / Review / Evaluation 全貌 | `docs/02-workflow-overview.md` |
-| AI Stage 的职责、判断目标、语义规则 | `docs/03-ai-workflow-spec.md` |
-| 系统架构、技术选型、模块边界、稳定架构决策 | `docs/04-technical-spec.md` |
-| Discovery 技术边界、Agent Runtime、原文复用与执行追踪 | `docs/04a-discovery-technical-spec.md` |
-| Database Schema、表关系、字段约束、Index | `docs/05-data-model.md` |
-| Production Pipeline 的执行、scope、eligibility、retry、persistence、lineage | `docs/06-processing-workflow.md` |
-| Discovery 输入窗口、执行分支、候选验证、人工触发与恢复 | `docs/06a-discovery-workflow.md` |
-| Prompt、Structured Output、LLM Input / Output Contract | `docs/07-prompt-spec.md` |
-| Source 配置 | `docs/08-source-list.md` |
-| Commands、CLI 参数、环境变量、Tests、Diagnostics、Backfill / Repair | `docs/09-operations.md` |
+开始任务时先阅读简短的 [docs/00-index.md](docs/00-index.md)，由该唯一完整索引选择当前主题的权威文档和必要章节。不要在本文件另维护一份完整文档目录，也不要默认读取全部 Spec。
 
 读取规则：
 1. 先读取当前任务最直接相关的文档和章节。
@@ -45,20 +31,9 @@
 4. 不要因为修改了代码，就自动更新所有“相关文档”。
 5. 只有文档拥有的事实确实发生变化时，才修改该文档。
 6. 如果发现同一事实已经散落在多个文档，保留职责所属文档中的定义，其余位置改为引用或删除。
-
-示例：
-- 修改 Daily scope
-  → 读 `06-processing-workflow.md` 对应章节。
-- 修改 Stage 3 ranking
-  → 先读 `03-ai-workflow-spec.md` Stage 3；
-  如果涉及执行、dedup、review snapshot、persistence，再读 `06-processing-workflow.md` Stage 3；
-  如果涉及 Prompt / Structured Output，再读 `07-prompt-spec.md` Stage 3。
-- 修改 Discovery Agent / Fetch / Trace
-  → 读 `04a-discovery-technical-spec.md` 对应技术章节；
-  涉及输入窗口、人工 Open、分支或 Resume 时读 `06a-discovery-workflow.md`，涉及 Prompt / Schema 时读 `07-prompt-spec.md`。
-- 修改 CLI / env / test / diagnostic
-  → 读 `09-operations.md`；
-  不要把 Workflow 规则复制到 Operations。
+7. README 可以重复导航和高层介绍，但不独立维护详细业务规则。
+8. Operations 的 Regression Tests 按 Workflow / 功能边界分组；新增测试沿用 Daily Processing 的 `bash` 命令列表风格，不按迭代时间堆积。
+9. 仅在文档移动、拆分或合并时对照迁移前后的内容保留情况；普通功能迭代不强制进行此项对照。
 
 ## 2. Engineering Principles
 
@@ -81,7 +56,7 @@
 
 ## 3. Architecture Boundaries
 
-遵守 `04-technical-spec.md` 中 **Project Structure & Engineering Rules** 定义的模块与依赖边界。不要为了当前局部任务改变无关的 Database Schema、Routing values、LLM Output Contract、Daily Scope、Persistence semantics 或 Public API contract；确需改变时，先明确影响范围并读取对应 Source of Truth。
+遵守 `docs/04-technical-spec/architecture.md` 中 **Project Structure & Engineering Rules** 定义的模块与依赖边界。不要为了当前局部任务改变无关的 Database Schema、Routing values、LLM Output Contract、Daily Scope、Persistence semantics 或 Public API contract；确需改变时，先明确影响范围并读取对应 Source of Truth。
 
 ## 4. Implementation Rules
 
@@ -92,7 +67,7 @@
 - Secrets 与环境相关配置不得硬编码。
 - Error 应尽量在最接近发生位置处理、记录和传播。
 - 不要静默忽略 Error。
-- Production data、runtime artifact 与 Stage lineage 的边界遵循 `04-technical-spec.md` 和 `06-processing-workflow.md`，不要自行建立新的业务 Source of Truth 或隐式 lineage。
+- Production data、runtime artifact 与 Stage lineage 的边界遵循 `docs/04-technical-spec/architecture.md` 和 `docs/06-workflow-spec/daily.md`，不要自行建立新的业务 Source of Truth 或隐式 lineage。
 - 修改 Prompt、runtime prompt implementation 或 Structured Output contract 时，检查三者是否仍一致。
 - 代码格式遵循项目 `.prettierrc`，修改代码时仅格式化本次涉及的文件。
 - JSX/TSX 保持清晰的层级缩进；复杂函数和表达式应便于人工 Review，避免压缩成单行。

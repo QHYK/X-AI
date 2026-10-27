@@ -1,3 +1,5 @@
+import { EventEmitter } from 'node:events';
+import type { ArticleDatabase } from '../src/lib/article-fetch-cache.js';
 import assert from 'node:assert/strict';
 import { RunContext } from '@openai/agents';
 import { getOrFetchArticle, normalizedFetchUrl } from '../src/lib/article-fetch-cache.js';
@@ -246,4 +248,111 @@ try {
 }
 console.log(
   'Discovery cache: full Markdown, metadata, pre-Candidate persistence, Daily reuse, concurrent dedup, failure recovery and incomplete-content guards passed.',
+);
+
+const timedOut = new ArticleStore();
+const keepAlive = setTimeout(() => {}, 1000);
+try {
+  const result = await getOrFetchArticle(timedOut.db, articleUrl, {
+    fetchDocument: () =>
+      fetchDiscoveryArticle(articleUrl, {
+        apiKey: 'mock',
+        timeoutMs: 5,
+        maxRetries: 0,
+        fetchImpl: async (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init!.signal!.addEventListener('abort', () => reject(init!.signal!.reason), {
+              once: true,
+            });
+          }),
+      }),
+  });
+  assert.equal(result.status, 'error');
+  assert.equal(timedOut.cache.size, 0);
+  assert.equal(timedOut.released, 1);
+  await getOrFetchArticle(timedOut.db, articleUrl, { fetchDocument: async () => article() });
+  assert.equal(
+    timedOut.cache.size,
+    1,
+    'Timeout releases the URL lock for a later successful Fetch.',
+  );
+} finally {
+  clearTimeout(keepAlive);
+}
+const thrown = new ArticleStore();
+await assert.rejects(
+  getOrFetchArticle(thrown.db, articleUrl, {
+    fetchDocument: async () => {
+      throw new Error('Mock network failure');
+    },
+  }),
+  /network failure/,
+);
+assert.equal(thrown.released, 1);
+await getOrFetchArticle(thrown.db, articleUrl, { fetchDocument: async () => article() });
+assert.equal(thrown.cache.size, 1);
+assert.equal(
+  badStore.released,
+  1,
+  'Cache write failure rolls back and releases its transaction Client.',
+);
+console.log('Fetch abort timeout, thrown Fetch failure and subsequent lock reuse passed.');
+
+const disconnected = new ArticleStore();
+const connection = new EventEmitter();
+let discarded: Error | undefined;
+const disconnectedDb = {
+  query: disconnected.db.query,
+  connect: async () => {
+    const real = await disconnected.db.connect();
+    return Object.assign(connection, {
+      query: real.query,
+      release: (error?: Error) => {
+        discarded = error;
+        real.release();
+      },
+    });
+  },
+} as unknown as ArticleDatabase;
+const paid = await getOrFetchArticle(disconnectedDb, articleUrl, {
+  fetchDocument: async () => {
+    connection.emit('error', new Error('Mock idle-in-transaction disconnect'));
+    return article();
+  },
+});
+assert.equal(paid.markdown, articleText);
+assert.ok(paid.cacheWarning);
+assert.ok(discarded);
+assert.equal(disconnected.cache.size, 0);
+assert.equal(disconnected.released, 1);
+assert.equal(connection.listenerCount('error'), 0);
+const rollbackFailure = new ArticleStore();
+let rejectedConnection = false;
+const rollbackDb = {
+  query: rollbackFailure.db.query,
+  connect: async () => {
+    const real = await rollbackFailure.db.connect();
+    return {
+      query: async (sql: string, values?: unknown[]) => {
+        if (sql === 'rollback') throw new Error('Mock rollback failure');
+        return real.query(sql, values);
+      },
+      release: (error?: Error) => {
+        rejectedConnection = Boolean(error);
+        real.release();
+      },
+    };
+  },
+} as unknown as ArticleDatabase;
+await assert.rejects(
+  getOrFetchArticle(rollbackDb, articleUrl, {
+    fetchDocument: async () => {
+      throw new Error('Mock fetch error');
+    },
+  }),
+  /fetch error/,
+);
+assert.equal(rejectedConnection, true);
+console.log(
+  'Fetch connection loss preserves the paid response; broken/rollback-failed connections are discarded.',
 );

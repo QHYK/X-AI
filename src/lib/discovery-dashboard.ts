@@ -1,6 +1,12 @@
+import { canRetryDiscoveryD2 } from './discovery-d2-retry.js';
 import { parseBriefDate } from './brief-date.js';
 import type { Pool } from 'pg';
-import type { DiscoveryBranchExecutionState, DiscoveryStage } from '../db/schema.js';
+import type { DiscoveryRunRecord } from '../discovery/run-service.js';
+import type {
+  DiscoveryBranchExecutionState,
+  DiscoveryStage,
+  DiscoveryExecutionState,
+} from '../db/schema.js';
 import {
   emptyDiscoveryStageUsage,
   mergeDiscoveryStageUsage,
@@ -42,6 +48,7 @@ export type DiscoveryDashboardRun = {
   durationMs: number | null;
   runCount: number;
   candidateCount: number;
+  d2RetryAvailable?: boolean;
   reviewCount: number;
   stages: Partial<Record<DiscoveryStage, Partial<DiscoveryBranchExecutionState>>>;
 };
@@ -111,6 +118,11 @@ async function getLatestRegularRun(
     error_summary: string | null;
     started_at: Date | string | null;
     finished_at: Date | string | null;
+    window_start_date: string | null;
+    window_end_date: string | null;
+    input_content_ids: DiscoveryRunRecord['inputContentIds'];
+    selection_output: Record<string, unknown> | null;
+    config_snapshot: Record<string, unknown> | null;
     execution_state: DiscoveryDashboardRun['stages'] | null;
     run_count: number | string;
     candidate_count: number | string;
@@ -121,7 +133,8 @@ async function getLatestRegularRun(
        where window_end_date = $1::date and run_type = 'regular'
      )
      select r.id, r.run_type, r.status, r.end_reason, r.error_summary, r.started_at, r.finished_at,
-            r.execution_state, r.run_count,
+            r.execution_state, r.run_count, r.window_start_date::text, r.window_end_date::text,
+            r.input_content_ids, r.selection_output, r.config_snapshot,
             (select count(*) from discovery_candidates dc where dc.run_id = r.id) as candidate_count,
             (select count(*) from in_depth_candidates ic
                join discovery_candidates dc on dc.id = ic.discovery_candidate_id
@@ -146,7 +159,32 @@ async function getLatestRegularRun(
       end === null || startedAt === null ? null : Math.max(0, end - Date.parse(startedAt)),
     runCount: Number(row.run_count),
     candidateCount: Number(row.candidate_count),
+    d2RetryAvailable: canRetryDiscoveryD2(
+      {
+        runType: row.run_type as 'regular',
+        status: row.status as DiscoveryRunRecord['status'],
+        windowStartDate: row.window_start_date,
+        windowEndDate: row.window_end_date,
+        inputContentIds: row.input_content_ids,
+        selectionOutput: row.selection_output,
+        configSnapshot: row.config_snapshot,
+        executionState: (row.execution_state as DiscoveryExecutionState) ?? {},
+      },
+      Number(row.candidate_count) > 0,
+    ),
     reviewCount: Number(row.review_count),
     stages: row.execution_state ?? {},
+  };
+}
+
+export function discoveryStageTokenMetrics(value: unknown) {
+  const usage = normalizeDiscoveryStageUsage(value);
+  return {
+    totalTokens:
+      usage.inputTokens === null || usage.outputTokens === null
+        ? null
+        : usage.inputTokens + usage.outputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    cacheHitRate: discoveryCacheHitRate(usage),
   };
 }
