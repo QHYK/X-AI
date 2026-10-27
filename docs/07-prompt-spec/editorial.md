@@ -146,4 +146,4 @@ Key：`in_depth.editorial.introduction`（初始化原标签 `v2`）。实现：
 
 三字段均受 `EditorialIntroductionSchema` 的字符串安全上限约束；应用层再校验非空、含中文并去除首尾空白。正文无法获取、不完整或证据不足时明确失败，不能返回貌似完整的介绍；输出经校验后才保存。
 
-持久化与历史回退规则见 [Data Model §11.4](../05-data-model.md#114-in_depth_candidates)，生成 / 保存 / 审核互不影响的边界见 [Admin & API Technical Spec](../04-technical-spec/admin-api.md#in-depth-editorial-introduction)。
+持久化与历史回退规则见 [Data Model](../05-data-model/discovery.md#in_depth_candidates)，生成 / 保存 / 审核互不影响的边界见 [Admin & API Technical Spec](../04-technical-spec/admin-api.md#in-depth-editorial-introduction)。

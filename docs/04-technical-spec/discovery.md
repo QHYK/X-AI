@@ -1,6 +1,6 @@
 # In-depth Discovery 技术规范
 
-本文档只定义 X-AI-field Discovery 的**技术实现边界与关键决策**。通用架构见 `architecture.md`；AI 语义见 `../03-ai-workflow-spec.md`；执行分支、人工触发与失败语义见 `../06-workflow-spec/discovery.md`；字段定义见 `../05-data-model.md`；Prompt 与输出契约见 `../07-prompt-spec/discovery.md`；运行命令见 `../09-operations.md`。
+本文档只定义 X-AI-field Discovery 的**技术实现边界与关键决策**。通用架构见 `architecture.md`；AI 语义见 `../03-ai-workflow-spec.md`；执行分支、人工触发与失败语义见 `../06-workflow-spec/discovery.md`；字段定义见 [Data Model](../05-data-model/discovery.md)；Prompt 与输出契约见 `../07-prompt-spec/discovery.md`；运行命令见 `../09-operations.md`。
 
 D2–D5、候选持久化、原文 Cache、数据库 Trace、人工审核与 Worker 已实现；Planned 能力单独标注。代码实现不代表特定服务器已部署。
 
@@ -39,7 +39,7 @@ src/discovery (workflow orchestration / candidate evaluation)
 
 Run 保存窗口、成员 ID 与 D2 `selection_output`，Resume 复用其关联，不重新选择窗口或 Lead。成员 ID 固定的是集合，读取时仍可能使用当前数据库字段，不是完整历史模型输入快照。**Resume 是继续已有业务状态，不等于完全相同输入的 Replay**；不承诺从 Trace 还原原始输入。
 
-D2–D5 按 Request Key 在首次实际执行前绑定 Published Version，存于 `config_snapshot.promptVersions`；`databasePromptBinder()` 用短事务行锁保证并发首次绑定一致，提交失败不发出模型请求。Resume 复用已有绑定，尚未执行的阶段才选择 Active；Agent Loop 内固定该次 Prompt。实现见 `src/lib/prompts/runtime.ts` 和阶段入口，通用版本契约见 [Prompt Registry](../07-prompt-spec/registry.md)。推荐历史用于 Code 去重，不默认作为模型上下文；显式 Memory 仍为可选输入。字段见 [Data Model](../05-data-model.md) §11–§12。
+D2–D5 按 Request Key 在首次实际执行前绑定 Published Version，存于 `config_snapshot.promptVersions`；`databasePromptBinder()` 用短事务行锁保证并发首次绑定一致，提交失败不发出模型请求。Resume 复用已有绑定，尚未执行的阶段才选择 Active；Agent Loop 内固定该次 Prompt。实现见 `src/lib/prompts/runtime.ts` 和阶段入口，通用版本契约见 [Prompt Registry](../07-prompt-spec/registry.md)。推荐历史用于 Code 去重，不默认作为模型上下文；显式 Memory 仍为可选输入。字段见 [Discovery Data Model](../05-data-model/discovery.md) / [Prompt Registry Data Model](../05-data-model/prompt-registry.md)。
 
 ## 4. AI 调用与 Agent Runtime
 
@@ -68,11 +68,11 @@ Agent 通过配置的 Responses endpoint 使用 OpenAI Agents SDK，D2 / D4 使�
 - **Agents SDK 托管 Web Search**：优先使用 SDK 提供的 `webSearchTool()`（由 OpenAI 服务端执行搜索），由 Agent 决定搜索什么、何时继续；**不自建 `search_web(query)` 封装**。搜索证据由 SDK `response` Span 的 output items 提取，不能只数工具 Span。
 - **自定义 `fetch_content(url)`**：通过 Agents SDK Function Tool 接入现有抓取 / Firecrawl 能力，返回真实取得的正文、可用转写文本、来源及读取状态；明确区分完整、部分与不可获取。搜索摘要不能替代全文验证。
 
-Content Fetch 的同一次 Firecrawl Scrape 请求同时取 Markdown、主内容 HTML 和响应元数据，不为图片追加抓取。Code 按 `og:image`、`twitter:image`、正文图片的顺序选一个 Cover：社会化元数据提供文章关联依据，正文图片要求位置与声明尺寸证据（宽至少 600，已知高至少 300）；过滤明显 Logo、头像、图标、广告及推荐区，已知尺寸不足或比例极端时弃用。相对图片地址以原文 URL 解析，仅接受无凭据的 HTTP(S)。没有合适图片或解析失败只令 Cover 为空，不影响已获取正文。Direct 路径仅复用已有 `raw_articles.metadata` 和 `image_url`，不为图片重抓。图片不经过 LLM，也不上传或代理；持久化形状见 `../05-data-model.md` §11.3。
+Content Fetch 的同一次 Firecrawl Scrape 请求同时取 Markdown、主内容 HTML 和响应元数据，不为图片追加抓取。Code 按 `og:image`、`twitter:image`、正文图片的顺序选一个 Cover：社会化元数据提供文章关联依据，正文图片要求位置与声明尺寸证据（宽至少 600，已知高至少 300）；过滤明显 Logo、头像、图标、广告及推荐区，已知尺寸不足或比例极端时弃用。相对图片地址以原文 URL 解析，仅接受无凭据的 HTTP(S)。没有合适图片或解析失败只令 Cover 为空，不影响已获取正文。Direct 路径仅复用已有 `raw_articles.metadata` 和 `image_url`，不为图片重抓。图片不经过 LLM，也不上传或代理；持久化形状见 [discovery_candidates](../05-data-model/discovery.md#discovery_candidates)。
 
 #### 原文持久化与复用
 
-D3 / D5 的工具调用早于最终 Candidate 选择，可能读取更多作品、重复 URL，甚至在读完后 Agent 失败。因此采用独立 `discovery_fetch_cache`，不在 Candidate JSONB 重复存正文，也不依赖 Run / Candidate 完成后再保存。`src/lib/article-fetch-cache.ts` 按现有 URL 规范化规则查询；正文与元数据字段由 `../05-data-model.md` §11.5 定义。
+D3 / D5 的工具调用早于最终 Candidate 选择，可能读取更多作品、重复 URL，甚至在读完后 Agent 失败。因此采用独立 `discovery_fetch_cache`，不在 Candidate JSONB 重复存正文，也不依赖 Run / Candidate 完成后再保存。`src/lib/article-fetch-cache.ts` 按现有 URL 规范化规则查询；正文与元数据字段由 [discovery_fetch_cache](../05-data-model/discovery.md#discovery_fetch_cache) 定义。
 
 `fetch_content` 优先复用完整 Cache 或 Daily 已存全文，未命中时才抓取固定 URL。同次 Firecrawl Markdown（保留完整响应，不用摘要提取结果替换）正常在工具返回前提交 Cache；保存失败的例外见下文。Agent 接收内容仍沿用既有 Daily 提取器：优先选择 Abstract / Takeaways / Summary 等有效片段，否则使用文章正文；再限制为最多 20,000 字符，并标明内容类型及真实截断状态。摘要片段不标为完整正文；提取与交付限制均不替换或截断 Cache 中的原文。Candidate 的 `evidence.fetch` 与 Trace 继续只保留诊断摘要，正文通过规范化 URL 关联 Cache，不通过 Trace 恢复。
 
@@ -103,7 +103,7 @@ Fetch 期间占用一条 Pool Client。连接或事务被服务端中断时会�
 - Direct、Topic、Open 产出的候选使用统一的内部数据契约，至少包含 URL、作品信息、发现路径、关联线索、证据、读取完整度与局限。
 - Code 负责 URL 规范化、候选去重、历史重复检查、可访问性及可核查的时长 / 内容类型检查。
 - LLM 负责编辑价值判断；D3/D5 候选与本次实际成功 Fetch 记录关联。当前应用校验不等同于强制全文完整交付，阅读与证据契约见 [Discovery Prompt](../07-prompt-spec/discovery.md)；不能以 Agent 自述作为已阅读全文的证明。
-- Tags 复用各路径已有最终阅读评价，不额外请求或建立补标签服务；阶段职责见 `../06-workflow-spec/discovery.md` §4.1。双语输出契约见 `../07-prompt-spec/discovery.md` 的 Discovery Candidate Tags，存储映射见 `../05-data-model.md` §11.3。
+- Tags 复用各路径已有最终阅读评价，不额外请求或建立补标签服务；阶段职责见 `../06-workflow-spec/discovery.md` §4.1。双语输出契约见 `../07-prompt-spec/discovery.md` 的 Discovery Candidate Tags，存储映射见 [discovery_candidates](../05-data-model/discovery.md#discovery_candidates)。
 - 候选数量、自动 / 人工 Open 的触发及保留历史规则统一见 `../06-workflow-spec/discovery.md` §1、§6。
 - 作品可以在不同路径重复发现，但应在统一 Pool 中去重并保留发现来源；最终审核列表不重复展示同一作品。
 
@@ -116,13 +116,13 @@ Fetch 期间占用一条 Pool Client。连接或事务被服务端中断时会�
 3. 复用数据库已有 `sources.url / name` 按清理后的 hostname 精确匹配，不新增域名映射或来源注册系统。
 4. Original URL 的 http(s) hostname，去除 `www.` / `wwwN.` / `m.` 前缀；以上均不可用时为 `Unknown`。
 
-空值、Unknown、泛化模板名、URL 等无效来源名跳过；已存的 URL hostname 仍允许升级为来源配置中的名称。Source 提取为可选元数据，失败不阻断正文获取。历史 Candidate 只在读取时回退，不回写数据库。持久化字段映射见 `../05-data-model.md` §11.3。
+空值、Unknown、泛化模板名、URL 等无效来源名跳过；已存的 URL hostname 仍允许升级为来源配置中的名称。Source 提取为可选元数据，失败不阻断正文获取。历史 Candidate 只在读取时回退，不回写数据库。持久化字段映射见 [discovery_candidates](../05-data-model/discovery.md#discovery_candidates)。
 
 ## 6. 数据持久化与执行追踪
 
 当前使用 PostgreSQL 保存业务对象与执行 Trace，不为 Discovery 新建 `runtime/` 文件日志。**优先复用 Agents SDK 原生 Tracing 与 Processor 扩展接口**，而不是手写一套 Agent Loop 事件采集器。生产适配器 `src/discovery/agent-tracing.ts` 已实现 PostgreSQL 写入、敏感数据过滤及结束刷新；部署环境的写入、异常与退出场景仍需持续验证。
 
-业务对象与 Trace 表的字段见 `../05-data-model.md` §11。`execution_state` 与配置快照分离，阶段更新使用局部 JSONB，不能覆盖其他分支。状态与恢复规则由 `../06-workflow-spec/discovery.md` §8 定义；普通 LLM / Code 检查保留必要业务诊断，不伪装成 SDK 工具轨迹。
+业务对象与 Trace 表的字段见 [Data Model](../05-data-model/discovery.md)。`execution_state` 与配置快照分离，阶段更新使用局部 JSONB，不能覆盖其他分支。状态与恢复规则由 `../06-workflow-spec/discovery.md` §8 定义；普通 LLM / Code 检查保留必要业务诊断，不伪装成 SDK 工具轨迹。
 
 ### 6.1 Trace 与 Usage 的失败边界
 
@@ -138,18 +138,18 @@ Fetch 期间占用一条 Pool Client。连接或事务被服务端中断时会�
 
 ### 6.2 可追溯与重跑
 
-业务状态不能由 Agent 自述或 Trace 推断；保留可关联的输入成员、工具证据和结果。已持久化 completed 阶段在 Resume 中复用；模型已付费返回但业务结果尚未保存即崩溃，仍可能需要重新执行，不能承诺 exactly-once。Resume / New Run 的选择及 Prompt 绑定见 `../06-workflow-spec/discovery.md` §8.3，字段见 `../05-data-model.md` §11–§12。
+业务状态不能由 Agent 自述或 Trace 推断；保留可关联的输入成员、工具证据和结果。已持久化 completed 阶段在 Resume 中复用；模型已付费返回但业务结果尚未保存即崩溃，仍可能需要重新执行，不能承诺 exactly-once。Resume / New Run 的选择及 Prompt 绑定见 `../06-workflow-spec/discovery.md` §8.3，字段见 [Discovery Data Model](../05-data-model/discovery.md) / [Prompt Registry Data Model](../05-data-model/prompt-registry.md)。
 
 ### 6.3 人工单条线索执行（Planned）
 
-当前 CLI / Admin API / UI 没有此入口。保留的设计是：接收 `sourceRunId + leadId`，从已保存 D2 输出读取线索，Direct 复用 D4、Topic 复用 D3，不重跑 D2；创建关联父 Run 的新执行并保留原候选。字段与约束见 `../05-data-model.md` §11.1。不能因数据库预留字段而宣称功能已实现。
+当前 CLI / Admin API / UI 没有此入口。保留的设计是：接收 `sourceRunId + leadId`，从已保存 D2 输出读取线索，Direct 复用 D4、Topic 复用 D3，不重跑 D2；创建关联父 Run 的新执行并保留原候选。字段与约束见 [discovery_runs](../05-data-model/discovery.md#discovery_runs)。不能因数据库预留字段而宣称功能已实现。
 
 ### 6.4 人工 URL 候选（Phase B1）
 
-产品行为由 `../01-product-spec.md` §4.2 定义。`src/lib/manual-in-depth.ts` 复用候选存储、URL 规范化与 §4.3 的正文读取器，不调用 Discovery 编排或创建虚假 Run / Lead；manual 空关联约束见 `../05-data-model.md` §11。
+产品行为由 `../01-product-spec.md` §4.2 定义。`src/lib/manual-in-depth.ts` 复用候选存储、URL 规范化与 §4.3 的正文读取器，不调用 Discovery 编排或创建虚假 Run / Lead；manual 空关联约束见 [Data Model](../05-data-model/discovery.md)。
 
 - 创建时按规范化 URL 锁内复查，也兼容历史无规范化键的候选；Fetch Cache 独立提交，因此候选创建失败后可复用已付费正文。
-- Generate 只读已保存完整正文；复用共享 Client 和编辑 Fragment，输出契约见 `../07-prompt-spec/editorial.md`。短事务领取执行标记后释放事务再调用模型，避免跨 LLM 请求持锁；Prompt 版本语义见 `../07-prompt-spec/registry.md` 开头，存储见 `../05-data-model.md` §12.1。
+- Generate 只读已保存完整正文；复用共享 Client 和编辑 Fragment，输出契约见 `../07-prompt-spec/editorial.md`。短事务领取执行标记后释放事务再调用模型，避免跨 LLM 请求持锁；Prompt 版本语义见 `../07-prompt-spec/registry.md` 开头，存储见 [版本绑定载体](../05-data-model/prompt-registry.md#版本绑定载体)。
 - 生成结果在短事务中原子保存，并检查 Editorial 内容基线；并发保护与冲突响应统一见 [Editorial](admin-api.md#in-depth-editorial-introduction)。生成成功但保存失败返回文本供人工保存。既有 Discovery 历史去重包含 manual 候选，空 Run ID 不能破坏跨 Run 判断。
 
 ## 7. 运行入口、人工触发与失败处理

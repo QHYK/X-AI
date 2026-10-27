@@ -4,7 +4,7 @@
 
 本文定义 **Digest Put Back**、**Discovery 人工 URL 候选**、**Human Review** 和 **Model Evaluation** 的触发、执行结果及失败恢复；它们由管理员主动发起。
 
-Daily 执行规则见 [Daily Workflow](daily.md)，自动 Discovery 与人工 Open / Resume 见 [Discovery Workflow](discovery.md)。API、事务与并发边界由 [Admin & API Technical Spec](../04-technical-spec/admin-api.md) 定义；字段约束见 [Data Model](../05-data-model.md)，命令、部署及故障处理见 [Operations](../09-operations.md)。
+Daily 执行规则见 [Daily Workflow](daily.md)，自动 Discovery 与人工 Open / Resume 见 [Discovery Workflow](discovery.md)。API、事务与并发边界由 [Admin & API Technical Spec](../04-technical-spec/admin-api.md) 定义；字段约束见 [Data Model](../05-data-model/README.md)，命令、部署及故障处理见 [Operations](../09-operations.md)。
 
 ## 2. Digest Put Back
 

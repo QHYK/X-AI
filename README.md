@@ -124,7 +124,7 @@ Recovery 等操作入口统一见
 | [`02-workflow-overview.md`](docs/02-workflow-overview.md)     | 系统高层工作流与主要模块关系 |
 | [`03-ai-workflow-spec.md`](docs/03-ai-workflow-spec.md)       | Stage 1--4 AI Capability Semantic Contract |
 | [`04-technical-spec`](docs/04-technical-spec)           | 技术架构、模块边界与稳定技术决策 |
-| [`05-data-model.md`](docs/05-data-model.md)                   | Production / Review / Evaluation / Discovery 数据模型 |
+| [`05-data-model/README.md`](docs/05-data-model/README.md)                   | Production / Review / Evaluation / Discovery 数据模型 |
 | [`06-workflow-spec`](docs/06-workflow-spec) | Production Daily｜Discovery 流程 |
 | [`07-prompt-spec`](docs/07-prompt-spec)                 | Application ↔ LLM Prompt / Structured Output Contract |
 | [`08-source-list.md`](docs/08-source-list.md)                 | Source 配置 |

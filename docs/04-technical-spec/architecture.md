@@ -43,7 +43,7 @@ evaluation_inputs → evaluation_runs → evaluation_outputs
 - `feedback`：人工 Review 产生的反馈数据
 - `evaluation_*`：Model Evaluation 使用的冻结输入、模型运行与输出，与正式 Production 结果隔离
 
-具体表结构、字段、约束、关系与索引以 `../05-data-model.md` 为准。
+具体表结构、字段、约束、关系与索引以 [Data Model](../05-data-model/README.md) 为准。
 
 ## 2. Tech Stack
 
@@ -74,7 +74,7 @@ Discovery Runs / Candidates / Trace Data
 
 数据库负责持久化业务内容、Review 和 Discovery 执行状态。Daily 的 `runtime/` 保存运行级 artifacts 及明确用于 Resume 的元数据，不替代 Production 内容表。Trace 是诊断记录，不是业务状态或正文缓存；失败隔离见 [Discovery](discovery.md#6-数据持久化与执行追踪)。
 
-详细表结构、字段、关系、约束和索引定义见 `../05-data-model.md`。
+详细表结构、字段、关系、约束和索引定义见 [Data Model](../05-data-model/README.md)。
 
 ---
 
@@ -99,7 +99,7 @@ flowchart LR
 
 生产 Prompt 文本唯一来源是数据库中精确绑定的 Published Version。`src/lib/prompts/runtime.ts` 在执行上下文中加载并缓存，失败不使用静态 fallback；Evaluation 复用同一生产调用链。`src/prompts/` 仅保存动态输入 builder、类型和历史标签，运行模块不得依赖初始化 Seed 或历史 Fixture。
 
-模板、角色和精确 Fragment 契约见 `../07-prompt-spec/registry.md`；存储与版本载体见 `../05-data-model.md` §12；Daily / Discovery 的恢复特例见对应 Workflow。LLM Client、Provider、Schema 和工具仍由代码管理。
+模板、角色和精确 Fragment 契约见 `../07-prompt-spec/registry.md`；存储与版本载体见 [Data Model](../05-data-model/prompt-registry.md)；Daily / Discovery 的恢复特例见对应 Workflow。LLM Client、Provider、Schema 和工具仍由代码管理。
 
 ### 5.1 Structured Output 边界
 

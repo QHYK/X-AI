@@ -13,7 +13,10 @@
 | [04 Daily Brief](04-technical-spec/daily.md) | Daily Processing 技术边界及 Stage 间关系 |
 | [04 Discovery](04-technical-spec/discovery.md) | Discovery Agent、Fetch Cache、Trace、原文复用及并发边界 |
 | [04 Admin & API](04-technical-spec/admin-api.md) | Dashboard、后台 UI、认证、人工操作与公开 API 契约 |
-| [05 Data Model](05-data-model.md) | Schema、字段、表关系、索引和数据库约束 |
+| [05 Data Model](05-data-model/README.md) | Schema、字段、表关系、索引和数据库约束 |
+| [05 Daily / Review / Evaluation](05-data-model/daily.md) | Daily 内容、来源关联、发布、Review 与评测表 |
+| [05 Discovery](05-data-model/discovery.md) | Discovery Run、候选、审核、Trace 与 Fetch Cache 表 |
+| [05 Prompt Registry](05-data-model/prompt-registry.md) | Registry / Versions、数据库保护与版本关联载体 |
 | [06 Daily Workflow](06-workflow-spec/daily.md) | Daily scope、eligibility、Stage 执行、持久化、lineage 与恢复 |
 | [06 Discovery Workflow](06-workflow-spec/discovery.md) | Discovery 窗口、分支、状态、人工触发及 Retry / Resume |
 | [06 Manual Operations](06-workflow-spec/manual-operations.md) | Put Back、人工 URL 候选、Human Review 与 Evaluation 操作流程 |

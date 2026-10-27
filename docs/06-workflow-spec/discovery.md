@@ -10,7 +10,7 @@
 - AI 阶段职责与判断语义：`../03-ai-workflow-spec.md`
 - 共用技术架构：`../04-technical-spec/architecture.md`（以仓库实际文件名为准）
 - Discovery 技术实现：`../04-technical-spec/discovery.md`
-- 数据表、字段、约束：`../05-data-model.md`
+- 数据表、字段、约束：[Data Model](../05-data-model/discovery.md)
 - **现有 Daily Production Workflow（保持独立）**：`daily.md`
 - Prompt / Structured Output：`../07-prompt-spec/discovery.md`
 - 命令、部署与排障：`../09-operations.md`
@@ -209,7 +209,7 @@ Agent 可发现多个可比较候选；**Open Discovery 最多提交 3 篇 / 个
 
 ## 7. 持久化与人工审核
 
-首版使用三个业务对象及一张 SDK Trace 表；精确字段、关联和写入事务由 `../05-data-model.md` 定义。
+首版使用三个业务对象及一张 SDK Trace 表；精确字段、关联和写入事务由 [Data Model](../05-data-model/discovery.md) 定义。
 
 | 对象 | 业务职责 |
 |---|---|
@@ -256,10 +256,10 @@ Discovery 分支失败后不自动重跑。是否复用原 Run，以 D2 的持�
 - `discovery_runs.selection_output` 尚未成功持久化时，D2 不视为完成。不得恢复该 Run；应创建新的 Regular Run ID，并从 D2 重新执行。
 - `selection_output` 已成功持久化时，D2 即视为完成，不能仅凭整体 Run status 判断。后续 D3 或 D4 失败时，Resume 复用原 Run ID、固定输入成员和 D2 结果，只执行尚未完成的任务。
 - Resume 不覆盖或重复执行已经完成并持久化的评价结果；各分支根据已有持久化结果跳过完成项，只继续 missing / failed 项。
-- D2 的完成以持久化 `selection_output` 为准；D3 / D4 的完成判断读取 `discovery_runs.execution_state` 中各自阶段状态。已执行阶段还在其中保存实际 Provider、模型、耗时与 Usage 诊断；字段完整性语义由 `../05-data-model.md` 定义。D3 正常返回 0 篇仍写入 `completed + no_candidates`；缺失状态或进程异常遗留的 `running` 不视为完成。阶段状态独立更新，任何一条分支失败都不得覆盖另一条分支的完成记录或候选。
+- D2 的完成以持久化 `selection_output` 为准；D3 / D4 的完成判断读取 `discovery_runs.execution_state` 中各自阶段状态。已执行阶段还在其中保存实际 Provider、模型、耗时与 Usage 诊断；字段完整性语义由 [Data Model](../05-data-model/discovery.md) 定义。D3 正常返回 0 篇仍写入 `completed + no_candidates`；缺失状态或进程异常遗留的 `running` 不视为完成。阶段状态独立更新，任何一条分支失败都不得覆盖另一条分支的完成记录或候选。
 - Resume 用于继续未完成的同一次执行。若操作目的为主动重新生成内容，而不是完成失败任务，则创建 New Run，不覆盖原 Run 的 Selection、Candidate、评价或 Trace。
 
-**Prompt 绑定**：通用规则见 `../07-prompt-spec/registry.md` 的执行版本边界，载体见 `../05-data-model.md` §12.1。D2–D5 在同一 Run 按步骤首次绑定；D4 多篇、D3/D5 Agent Loop 固定该步骤版本。Resume 复用旧绑定，已完成步骤不补写或重跑；新 Regular / Open Run 不继承父 Run 的绑定。
+**Prompt 绑定**：通用规则见 `../07-prompt-spec/registry.md` 的执行版本边界，载体见 [版本绑定载体](../05-data-model/prompt-registry.md#版本绑定载体)。D2–D5 在同一 Run 按步骤首次绑定；D4 多篇、D3/D5 Agent Loop 固定该步骤版本。Resume 复用旧绑定，已完成步骤不补写或重跑；新 Regular / Open Run 不继承父 Run 的绑定。
 
 当前 D3 Resume 以完整 Agent Run 为恢复边界：已完成则跳过；未完成、失败或遗留 `running` 时重新执行整个 D3，不实现 Agent 内部 Checkpoint。D4 继续复用 Candidate 级 Resume。
 

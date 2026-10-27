@@ -118,7 +118,7 @@ Analytics 的 Ignored Articles 提供 Put Back，调用 `POST /api/admin/dashboa
 - 调整 Display Order；
 - 保存 Ranking Feedback。
 
-In-depth Review 区分客观元数据、Agent 诊断与可编辑 Editorial；Discovery Path、处理阶段、Candidate ID 与 Run ID 不混用。Tags / Cover 缺失保持历史兼容，不影响审核。字段见 [Data Model](../05-data-model.md) §11.3，Source 规则见 [Discovery §5.1](discovery.md#51-candidate-source-归一化)；具体布局以页面实现为准。
+In-depth Review 区分客观元数据、Agent 诊断与可编辑 Editorial；Discovery Path、处理阶段、Candidate ID 与 Run ID 不混用。Tags / Cover 缺失保持历史兼容，不影响审核。字段见 [Data Model](../05-data-model/discovery.md#discovery_candidates)，Source 规则见 [Discovery §5.1](discovery.md#51-candidate-source-归一化)；具体布局以页面实现为准。
 
 #### Digest Put Back
 
@@ -127,7 +127,7 @@ In-depth Review 区分客观元数据、Agent 诊断与可编辑 Editorial；Dis
 - 对同一 Raw 使用事务级 advisory lock；同一期规范化 URL 使用共享的去重锁，兼容跨 Raw / Feed 的相同作品。处理中请求返回冲突；LLM 调用前独立提交版本及执行标记，调用期间不持有数据库事务。标记恢复与版本复用见 [Operations](../09-operations.md) 和 [Prompt Registry](../07-prompt-spec/registry.md)。
 - `raw_articles.metadata.put_back_preparation` 独立提交；后续另一个事务原子写入 Digest、恢复标记和 Raw selected 状态，写入前重查状态、日期归属与重复作品。最终事务失败不回滚已提交的准备结果；准备结果自身保存失败时向调用方返回生成字段。
 - Put Back 与 `src/processing/stage3-persistence.ts` 共用短事务排名锁；追加名次取同日期、同分类 Digest 的最大有效名次加一。恢复时 `ai_rank = NULL`，追加位置写入 `display_rank`；后续 Stage3 按既有人工排序保护规则更新排名或清理过期排名，并清空 `put_back_at`，不删除 Raw 中的准备结果。
-- 复用既有 `put_back_at` 字段，不增加独立 rerank 字段。字段约束见 [Data Model §3](../05-data-model.md)，既有 `0020_digest_put_back.sql` 部署前提见 [Operations §2.4](../09-operations.md#24-人工候选与-put-back-部署前提)。
+- 复用既有 `put_back_at` 字段，不增加独立 rerank 字段。字段约束见 [Data Model](../05-data-model/daily.md#processed_contents)，既有 `0020_digest_put_back.sql` 部署前提见 [Operations §2.4](../09-operations.md#24-人工候选与-put-back-部署前提)。
 
 #### In-depth Editorial Introduction
 
@@ -142,7 +142,7 @@ In-depth Review 区分客观元数据、Agent 诊断与可编辑 Editorial；Dis
 - 基线失配返回 **409** 和 `currentEditorial`；Generate 冲突还保留已生成 `introduction` 且 `saved=false`，不覆盖他人保存。Manual Generate 的候选生成字段与 Editorial 在同一短事务保存，CAS 失败整体回滚。模型调用期间不持有此事务或行锁。
 - Regenerate 覆盖未保存修改前确认；迟到响应不得覆盖新输入或其他 Candidate。前端保留冲突 / 保存失败的已生成文本供检查后手动保存，不自动采用新基线强制覆盖；无冲突维持自动保存。一般 Introduction 的生成失败为 502，生成成功但保存失败为 503；具体错误以 `IntroductionError` 与 Route 为准。
 
-持久化与 Editorial 回退规则见 `../05-data-model.md` §11.4，模型输入输出见 `../07-prompt-spec/editorial.md`。
+持久化与 Editorial 回退规则见 [in_depth_candidates](../05-data-model/discovery.md#in_depth_candidates)，模型输入输出见 `../07-prompt-spec/editorial.md`。
 
 #### In-depth 公开 API
 

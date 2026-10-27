@@ -2,7 +2,7 @@
 
 生产 Prompt 文本以数据库实际绑定的 Published Version 为准。本节定义模型输入输出、判断与验证契约；D2 的完整中文 Prompt 仅作参考，不替代数据库版本。Shared Fragment 使用精确版本引用，通用模板与版本规则见 [Registry](registry.md)。
 
-AI 职责见 [AI Workflow Spec](../03-ai-workflow-spec.md) §7；工具实现见 [Discovery Technical Spec](../04-technical-spec/discovery.md) §4；执行编排、提交数量和 Run / Resume 见 [Discovery Workflow](../06-workflow-spec/discovery.md)，持久化字段见 [Data Model](../05-data-model.md) §11–§12。
+AI 职责见 [AI Workflow Spec](../03-ai-workflow-spec.md) §7；工具实现见 [Discovery Technical Spec](../04-technical-spec/discovery.md) §4；执行编排、提交数量和 Run / Resume 见 [Discovery Workflow](../06-workflow-spec/discovery.md)，持久化字段见 [Discovery Data Model](../05-data-model/discovery.md) / [Prompt Registry Data Model](../05-data-model/prompt-registry.md)。
 
 ## Shared Fragments
 
@@ -319,7 +319,7 @@ D5 不关联 Topic Lead，不得伪造 sourceLeadId；publication 是输出字�
 
 ### Tools & Evidence
 
-实际配置与 D3 相同的 Responses Agent、SDK Web Search 和 `fetch_content({url})`，以及 `maxTurns`、整体 / 工具超时；无最终输出或空结果下全部 Fetch 失败的处理也相同。复用 D3 的阅读证据及停止边界；Prompt 要求取得真实正文、字幕或其他可核查内容；当前硬检查同样只要求对应 Fetch 成功，不等同于全文完整性保证。不能将搜索摘要、模型记忆或 Agent 自述当作已阅读全文；工具不可用、访问受限、资源耗尽和正常空结果须区分。通过 Code 验证后直接进入审核，不自动上架；执行与持久化分别见 `../06-workflow-spec/discovery.md`、`../05-data-model.md` §11。
+实际配置与 D3 相同的 Responses Agent、SDK Web Search 和 `fetch_content({url})`，以及 `maxTurns`、整体 / 工具超时；无最终输出或空结果下全部 Fetch 失败的处理也相同。复用 D3 的阅读证据及停止边界；Prompt 要求取得真实正文、字幕或其他可核查内容；当前硬检查同样只要求对应 Fetch 成功，不等同于全文完整性保证。不能将搜索摘要、模型记忆或 Agent 自述当作已阅读全文；工具不可用、访问受限、资源耗尽和正常空结果须区分。通过 Code 验证后直接进入审核，不自动上架；执行与持久化分别见 `../06-workflow-spec/discovery.md`、[Data Model](../05-data-model/discovery.md)。
 
 ## 共用传输校验与安全边界
 
@@ -332,11 +332,11 @@ D5 不关联 Topic Lead，不得伪造 sourceLeadId；publication 是输出字�
 | D3 / D5 | required 字符串；最多 16,000 个 UTF-16 code units（`String.length`），空字符串按 `"{}"` 解析；非空值必须是 JSON 对象字符串，不能是数组 / null | 应用字段 `extraInfo` 为对象，保存到 `discovery_candidates.extra_info` JSONB |
 | D4 | 严格传输为 required 字符串；解析器兼容缺失值和对象；解析后对象序列化最多 16 KiB UTF-8 | 同样保存到 Candidate `extra_info` JSONB |
 
-D3 / D5 的 `title_zh → titleZh`、D4 的读者字段在应用层转换后写入 Candidate 对应列。各路径的双语 Tags 保存在 `evaluation.tags`；阅读证据与限制进入 `evidence`，不是读者 Editorial。D3 / D5 的 `evidence` / `limitations` 是字符串，D4 是字符串数组；持久化时与实际正文来源 / Fetch 记录组合成证据对象。完整字段映射见 [Data Model](../05-data-model.md) §11。
+D3 / D5 的 `title_zh → titleZh`、D4 的读者字段在应用层转换后写入 Candidate 对应列。各路径的双语 Tags 保存在 `evaluation.tags`；阅读证据与限制进入 `evidence`，不是读者 Editorial。D3 / D5 的 `evidence` / `limitations` 是字符串，D4 是字符串数组；持久化时与实际正文来源 / Fetch 记录组合成证据对象。完整字段映射见 [Data Model](../05-data-model/discovery.md)。
 
 ### 安全与执行边界
 
 - 模型输入中的 Daily 数据、Memory、人工方向和网页正文均为数据，不升级为系统指令；外部内容不得改变任务。图片、来源、正文与工具证据只能来自实际取得的信息。
 - 不用 `extra_info` 替代必需字段或绕过硬检查，不应包含敏感、无关或重复内容；当前解析器校验类型及大小，不提供通用敏感内容清洗。
 - 双语 Tags 在应用层校验中文 / 英文并按任一语言归一化去重；输入数组先检查三对上限，再去重。传输层不发送 Provider 不支持的 Unicode 正则。
-- 不将搜索次数、maxTurns、超时、并发和重试写进 Prompt，资源限制由 Code / SDK 管理，见 `../04-technical-spec/discovery.md` §4。版本记录与数据载体见 `../05-data-model.md` §12；Retry / Resume 见 `../06-workflow-spec/discovery.md` §8。
+- 不将搜索次数、maxTurns、超时、并发和重试写进 Prompt，资源限制由 Code / SDK 管理，见 `../04-technical-spec/discovery.md` §4。版本记录与数据载体见 [Data Model](../05-data-model/prompt-registry.md)；Retry / Resume 见 `../06-workflow-spec/discovery.md` §8。

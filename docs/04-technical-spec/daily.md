@@ -1,12 +1,13 @@
 # Daily Pipeline 技术边界
 
-本文件维护 Daily 的模块关系、持久化和发布一致性。AI 判断职责见 [AI Workflow](../03-ai-workflow-spec.md)，业务执行顺序、scope、eligibility 与 Retry 见 [Daily Workflow](../06-workflow-spec/daily.md)，字段与约束见 [Data Model](../05-data-model.md)。
+本文件维护 Daily 的模块关系、持久化和发布一致性。AI 判断职责见 [AI Workflow](../03-ai-workflow-spec.md)，业务执行顺序、scope、eligibility 与 Retry 见 [Daily Workflow](../06-workflow-spec/daily.md)，字段与约束见 [Data Model](../05-data-model/daily.md)。
 
 ## 1. 模块与持久化边界
 
 | 模块 | 技术职责 | 持久化边界 |
 |---|---|---|
-| Collection / Content Completion | 采集、确定性去重与正文补全；不生成最终 Brief | `raw_articles` 与来源元数据 |
+| Collection | 来源采集、标准化、原始身份去重和 Raw 持久化。 | `raw_articles` 与来源元数据 |
+| Content Completion | 正文补全，不进行内容价值判断，不调用 LLM | `raw_articles` 与来源元数据  |
 | Stage1 | 共享 LLM Client 完成内容理解，验证输出后映射 Routing | 保留内容写入 `processed_contents`；Ignored 状态留在 Raw，不创建对应处理结果 |
 | Stage2 | 将 Event Candidates 合并为中间分组，不生成最终 Event | `event_groups` / `event_group_items`，由 `src/processing/event-group-persistence.ts` 写入 |
 | Stage3 | Event / Digest / Long-form 独立排名 | Event 写 Review Snapshot；Digest / Long-form 写处理结果的排名字段 |

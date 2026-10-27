@@ -2,7 +2,7 @@
 
 本文档是 X-AI-field 所有**操作入口**的唯一 Source of Truth：命令、CLI 参数、环境变量、测试、诊断、回填与人工恢复程序均以这里为准。
 
-它不定义 Daily scope、阶段资格、排序、持久化/幂等性、AI 判断、Prompt 或数据模型。需要理解这些语义时，分别链接至 [Workflow Overview](02-workflow-overview.md)、[Technical Spec](04-technical-spec/architecture.md)、[Prompt Spec](07-prompt-spec/daily.md) 与 [Data Model](05-data-model.md)。
+它不定义 Daily scope、阶段资格、排序、持久化/幂等性、AI 判断、Prompt 或数据模型。需要理解这些语义时，分别链接至 [Workflow Overview](02-workflow-overview.md)、[Technical Spec](04-technical-spec/architecture.md)、[Prompt Spec](07-prompt-spec/daily.md) 与 [Data Model](05-data-model/README.md)。
 
 Pipeline CLI 在读取环境派生参数或执行处理模块前，统一通过 `loadPipelineEnvironment` 加载配置。配置优先级：Shell > .env.local > .env > 默认值；不要提交凭据。Daily 与 Dashboard Retry 启动的子进程继承父进程已解析的环境，子 CLI 重复 bootstrap 时会保留这些继承值。Next.js 的 API/Dashboard 保持 Next.js 自身的环境变量加载机制。
 
@@ -98,7 +98,7 @@ Manual / Put Back 进程硬退出可能遗留 `promptAttempt.status=running`：�
 
 ### 2.4 人工候选与 Put Back 部署前提
 
-Put Back 部署需通过 `npm run db:migrate` 应用 `0020_digest_put_back.sql` 并重启服务；不需回填或运行 Daily。模型使用 Stage1 Provider / Model，无新增环境变量。业务与字段定义见 `06-workflow-spec/manual-operations.md` §2、`05-data-model.md` §3。
+Put Back 部署需通过 `npm run db:migrate` 应用 `0020_digest_put_back.sql` 并重启服务；不需回填或运行 Daily。模型使用 Stage1 Provider / Model，无新增环境变量。业务与字段定义见 `06-workflow-spec/manual-operations.md` §2、[processed_contents](05-data-model/daily.md#processed_contents)。
 
 人工 URL 候选需要先应用 `0019_manual_in_depth.sql`（使用既有 `npm run db:migrate`），再部署并按既有方式重启 Web 和正在运行的 Discovery Worker；无需回填旧候选，人工提交本身不依赖 Worker。人工 Generate 使用 `DISCOVERY_LLM_PROVIDER`（回退 `LLM_PROVIDER`）及该 Provider 的模型配置，单次调用、不自动重试。人工候选行为与正文策略见 `01` §4.2、`04-technical-spec/discovery.md` §6.4；Step 1 抓取需要已有 `FIRECRAWL_API_KEY`。
 
@@ -142,7 +142,7 @@ npm run discovery -- --open-parent-run-id=UUID --open-context="可选人工补�
 
 第一个命令创建新的常规 Discovery Run；第二个命令恢复已有 Run；第三个命令创建关联原 Regular Run 的独立人工 Open Run。该入口会调用真实 Provider、D3/D5 Web Search 与 Firecrawl，必须显式 `--confirm-paid`。常规 Run 在 D3、D4 都完成且没有合格候选时自动执行 D5；人工 Open 只执行 D5，不重跑 D2–D4。终端报告输出 Run / Parent Run ID、阶段状态、Usage、缓存命中率和候选/审核数量。
 
-In-depth 人工审核入口为 `/review/in-depth`，审核 API 为 `/api/admin/review/in-depth`，公开数据仅通过 `/api/in-depth` 提供。当前 Next.js `basePath=/ai`，实际浏览器路径分别为 `/ai/review/in-depth`、`/ai/api/admin/review/in-depth`、`/ai/api/in-depth`。审核页与 API 使用统一管理员 Session，公开 API 保持匿名访问。相关状态语义见 [Discovery Workflow](06-workflow-spec/discovery.md) 和 [Data Model](05-data-model.md)。回归入口见 [§6](#6-regression-tests)。
+In-depth 人工审核入口为 `/review/in-depth`，审核 API 为 `/api/admin/review/in-depth`，公开数据仅通过 `/api/in-depth` 提供。当前 Next.js `basePath=/ai`，实际浏览器路径分别为 `/ai/review/in-depth`、`/ai/api/admin/review/in-depth`、`/ai/api/in-depth`。审核页与 API 使用统一管理员 Session，公开 API 保持匿名访问。相关状态语义见 [Discovery Workflow](06-workflow-spec/discovery.md) 和 [Data Model](05-data-model/discovery.md#in_depth_candidates)。回归入口见 [§6](#6-regression-tests)。
 
 #### Discovery Worker
 
@@ -173,7 +173,7 @@ Worker unit 必须先安装；Deploy 统一管理 Web 与 Worker 的停启及回
 
 `npm run discovery:scheduled` 供 Cron 每天调用；它按 [Discovery Workflow §2.1](06-workflow-spec/discovery.md#21-触发与依赖) 的上海自然日规则检查是否执行，不依赖服务器本地时区。非执行日只记录 skipped、退出码为 0，不连接数据库；执行日只提交 Regular 任务，窗口为前一天和今天，`trigger_source = schedule`，由上述 Worker 异步执行完整流程（D5 仍遵循原自动触发条件）。不要求 `--confirm-paid`；启用 Cron 即授权自动任务的付费调用，提交脚本自身不调用模型或 Firecrawl。
 
-同日 Cron 重复调用返回已存在的定时 Run，包括已完成、失败或 blocked 的记录，不自动重复付费；幂等标识由 [Data Model §11.1](05-data-model.md#111-discovery_runs) 定义。Dashboard 手动 Retry 使用独立请求标识，终态 Cron Run 不阻止手动新建 Run。沿用现有业务窗口互斥：首次提交时如果同窗口已有 pending / running 则报错，退出码为 1；数据库或提交异常同样非零退出。修复上游后可手动 Retry，或在当天重新调用未成功提交的 Cron 入口；已记录 blocked 的定时 Run 不会被该命令重置。
+同日 Cron 重复调用返回已存在的定时 Run，包括已完成、失败或 blocked 的记录，不自动重复付费；幂等标识由 [Data Model](05-data-model/discovery.md#discovery_runs) 定义。Dashboard 手动 Retry 使用独立请求标识，终态 Cron Run 不阻止手动新建 Run。沿用现有业务窗口互斥：首次提交时如果同窗口已有 pending / running 则报错，退出码为 1；数据库或提交异常同样非零退出。修复上游后可手动 Retry，或在当天重新调用未成功提交的 Cron 入口；已记录 blocked 的定时 Run 不会被该命令重置。
 
 **先部署新代码并安装、启动 Worker，再启用 Cron。** 若尚未安装，按上一节操作；确认：
 

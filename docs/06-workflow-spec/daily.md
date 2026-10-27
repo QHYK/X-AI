@@ -6,7 +6,7 @@
 
 - AI 各 Stage 的职责与语义：见 `../03-ai-workflow-spec.md`
 - 系统架构与稳定技术决策：见 `../04-technical-spec/architecture.md`
-- 数据表、字段、约束与索引：见 `../05-data-model.md`
+- 数据表、字段、约束与索引：见 [Data Model](../05-data-model/daily.md)
 - Structured Output / Prompt Contract：见 `../07-prompt-spec/daily.md`
 - 完整系统总览：见 `../02-workflow-overview.md`
 
@@ -865,9 +865,9 @@ Stage 4
 
 Request Type 第一次真正发出请求前选择 Active 并持久化精确 Version ID；同一 Stage 内后续批次、分类、自动重试和 Provider fallback 固定该版本。Stage3 的 Event / Digest / Long-form 各自懒绑定；匹配现有 Resume 输入快照时继承原绑定，复用已完成结果不改写旧 Run。尚未执行的类型不提前绑定。Stage1/2 的重新启动本来就是新 Stage 执行，并不新增 Resume 模式。
 
-Stage4 先按 Review snapshot 获取唯一 Run，再锁该数据库行首次绑定 Decision / Enrichment；数据库提交后才发请求。CLI Retry 与后台 Event Review 均复用相同 Run；全新 Run 不复制其他 Run 的版本。文件镜像失败明确报错，不以镜像取代数据库权威。字段位置见 Data Model §12.1。
+Stage4 先按 Review snapshot 获取唯一 Run，再锁该数据库行首次绑定 Decision / Enrichment；数据库提交后才发请求。CLI Retry 与后台 Event Review 均复用相同 Run；全新 Run 不复制其他 Run 的版本。文件镜像失败明确报错，不以镜像取代数据库权威。字段位置见 [版本绑定载体](../05-data-model/prompt-registry.md#版本绑定载体)。
 
-相关 Daily / Stage 的 `run.json` 使用同目录临时文件 + rename 原子写入，同进程按路径串行合并，保留已保存的版本映射。版本编号用于阅读，精确 UUID 用于恢复；字段与旧格式兼容规则见 Data Model §12.1。Daily 父进程等待 Stage 子进程结束后才继续写；各独立执行有自己的 runtime 目录，因此不增加跨进程文件锁。
+相关 Daily / Stage 的 `run.json` 使用同目录临时文件 + rename 原子写入，同进程按路径串行合并，保留已保存的版本映射。版本编号用于阅读，精确 UUID 用于恢复；字段与旧格式兼容规则见 [版本绑定载体](../05-data-model/prompt-registry.md#版本绑定载体)。Daily 父进程等待 Stage 子进程结束后才继续写；各独立执行有自己的 runtime 目录，因此不增加跨进程文件锁。
 
 独立 Editorial / Put Back / Evaluation 的版本边界统一见 `../07-prompt-spec/registry.md` 的执行版本边界；它们不是 Daily Stage。
 

@@ -12,7 +12,7 @@
 - Daily Production execution / scope / retry / persistence / lineage → `06-workflow-spec/daily.md`
 - Discovery 业务执行流程 → `06-workflow-spec/discovery.md`
 - Prompt / Structured Output Contract → `00-index.md#prompt-contracts`
-- Data Model → `05-data-model.md`
+- Data Model → [Data Model](05-data-model/README.md)
 
 ---
 

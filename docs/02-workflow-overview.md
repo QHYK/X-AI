@@ -7,7 +7,7 @@
 - AI 判断语义 → `03-ai-workflow-spec.md`
 - Daily Production Pipeline 执行、scope、retry、persistence、lineage → `06-workflow-spec/daily.md`
 - Discovery 执行流程、分支与验证规则 → `06-workflow-spec/discovery.md`
-- 数据结构与关联 → `05-data-model.md`
+- 数据结构与关联 → [Data Model](05-data-model/README.md)
 - Prompt / Structured Output → `00-index.md#prompt-contracts`
 - Commands / Tests / Diagnostics → `09-operations.md`
 
@@ -221,4 +221,4 @@ flowchart LR
     DB --> API --> UI
 ```
 
-具体表结构和字段定义见 `05-data-model.md`。
+具体表结构和字段定义见 [Data Model](05-data-model/README.md)。
