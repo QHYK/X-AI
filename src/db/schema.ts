@@ -85,6 +85,23 @@ export const sources = pgTable('sources', {
   ...timestamps,
 });
 
+/** Administrator-maintained preferences; runtime consumers explicitly select applicable types. */
+export const memories = pgTable(
+  'memories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    content: text('content').notNull(),
+    type: text('type').notNull().default('general'),
+    priority: integer('priority').notNull().default(0),
+    enabled: boolean('enabled').notNull().default(true),
+    ...timestamps,
+  },
+  (table) => [
+    check('memories_type_check', sql`${table.type} in ('general', 'topic', 'source', 'content')`),
+    check('memories_content_check', sql`length(btrim(${table.content})) > 0`),
+  ],
+);
+
 export const rawArticles = pgTable(
   'raw_articles',
   {

@@ -6,9 +6,10 @@ PostgreSQL 保存生产内容、审核、评测和 Discovery 状态；Daily 的�
 
 | 数据域 | 表 | 适合读取的任务 |
 |---|---|---|
-| [Daily / Review / Evaluation](daily.md) | `sources`、`raw_articles`、`processed_contents`、`content_read_more`、`events`、`event_review_items`、`event_groups`、`event_group_items`、`stage4_runs`、`pipeline_runs`、`feedback`、`evaluation_inputs`、`evaluation_runs`、`evaluation_outputs` | Daily 数据归属、来源关系、排序、发布、审核及隔离评测 |
+| [Daily / Review / Evaluation](daily.md) | `sources`、`raw_articles`、`processed_contents`、`content_read_more`、`events`、`event_review_items`、`event_groups`、`event_group_items`、`stage4_runs`、`pipeline_runs`、`feedback`、`evaluation_inputs`、`evaluation_runs`、`evaluation_outputs` | Daily 数据归属、来源关系、排序、发布、审核、隔离评测 |
 | [Discovery](discovery.md) | `discovery_runs`、`discovery_trace_spans`、`discovery_candidates`、`in_depth_candidates`、`discovery_fetch_cache` | Run / Lead 关联、候选、审核、正文复用和诊断数据 |
 | [Prompt Registry](prompt-registry.md) | `prompt_registry`、`prompt_versions`，以及业务对象中的版本载体 | 版本身份、Active 指针、Published 保护及精确引用 |
+| [Memory](memory.md) | `memories` | 跨 Daily / Discovery 的共享编辑偏好数据 |
 
 ## 关键跨域关联
 

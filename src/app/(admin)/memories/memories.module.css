@@ -1,0 +1,106 @@
+.page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 32px;
+  color: #17201c;
+}
+.header {
+  margin-bottom: 26px;
+}
+.header p {
+  color: #607068;
+  font-size: 0.78rem;
+}
+.header h1 {
+  margin: 6px 0 12px;
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+}
+.toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.toolbar label {
+  display: grid;
+  gap: 8px;
+}
+.page button,
+.page select,
+.page textarea,
+.page input[type='number'] {
+  border: 1px solid #bdcbc3;
+  border-radius: 8px;
+  padding: 9px 12px;
+  background: white;
+  color: inherit;
+  font: inherit;
+}
+.page button {
+  cursor: pointer;
+}
+.page button:hover:not(:disabled) {
+  background: #edf4ef;
+}
+.page button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.table {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #dce2df;
+  border-radius: 16px;
+  background: white;
+  overflow-x: auto;
+}
+.row {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 130px 110px 80px 165px;
+  gap: 16px;
+  align-items: start;
+  padding: 16px;
+  min-width: 805px;
+}
+.row + .row {
+  border-top: 1px solid #edf0ee;
+}
+.row > div {
+  min-width: 0;
+}
+.row textarea,
+.row select,
+.row input[type='number'] {
+  box-sizing: border-box;
+  width: 100%;
+}
+.row textarea {
+  resize: vertical;
+}
+.content {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rowError {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #9b2933;
+}
+.empty {
+  padding: 20px;
+  color: #607068;
+}
+@media (max-width: 700px) {
+  .page {
+    padding: 20px 12px;
+  }
+}

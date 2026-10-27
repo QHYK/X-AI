@@ -19,7 +19,7 @@ Run、Trace、候选、审核队列与正文 Cache 均已有 Schema / Migration�
 | `window_end_date` | date | nullable；常规 Run 目标 Daily 日期范围终点 |
 | `input_content_ids` | jsonb | nullable；实际送入 Topic Selection 的 Daily 内容 ID 列表（键为 event / digest / longForm，各元素为 `{dailyDate, id}`），不复制正文 |
 | `selection_output` | jsonb | nullable；Topic Selection 的结构化输出（Direct + Topic 总数最多 8）；Code 为每条 Lead 分配稳定 `leadId`，保留 D2 顺序和类型 |
-| `config_snapshot` | jsonb | nullable；模型、Prompt 版本、输入规则版本、资源限制、当次适用的 Memory，以及人工 Open 的补充说明 / 审核上下文等必要配置 |
+| `config_snapshot` | jsonb | nullable；模型、Prompt 版本、输入规则版本、资源限制，以及人工 Open 的补充说明 / 审核上下文等必要配置；Memory 运行时读取，暂不保存 Memory Snapshot |
 | `execution_state` | jsonb | NOT NULL，默认 `{}`；保存 D2–D5 的阶段级动态执行状态与诊断，不属于不可变配置快照 |
 | `started_at` | timestamptz | nullable |
 | `finished_at` | timestamptz | nullable |

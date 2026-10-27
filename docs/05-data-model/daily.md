@@ -1,4 +1,4 @@
-# Daily / Review / Evaluation 数据模型
+# Daily / Review / Evaluation / Admin 数据模型
 
 本文件每张表独立定义字段、索引和数据库约束。总体关联与核验边界见 [Data Model](README.md)。未另注时 UUID 主键默认 `gen_random_uuid()`，`created_at` / `updated_at` 默认 `now()`；`updated_at` 没有自动更新时间 Trigger，由写入代码维护。应用取值、JSON 内容校验与数据库 CHECK 明确区分。
 

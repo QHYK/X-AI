@@ -23,6 +23,7 @@ export const config = {
     '/dashboard/:path*',
     '/review/:path*',
     '/prompts/:path*',
+    '/memories/:path*',
     '/api/admin/:path*',
   ],
 };

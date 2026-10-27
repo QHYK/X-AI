@@ -2,7 +2,10 @@
 import type { DiscoveryWindowInput } from '../discovery/daily-read-adapter.js';
 export const DISCOVERY_EDITORIAL_PROMPT_VERSION = 'v1';
 export const DISCOVERY_D2_PROMPT_VERSION = 'v2';
-export function buildDiscoveryD2UserPrompt(input: DiscoveryWindowInput): string {
+export function buildDiscoveryD2UserPrompt(
+  input: DiscoveryWindowInput,
+  memoryContext?: string,
+): string {
   const contents = input.days.flatMap((day) =>
     [...day.events, ...day.digests, ...day.longForm].map((item) => ({
       contentId: item.id,
@@ -14,5 +17,5 @@ export function buildDiscoveryD2UserPrompt(input: DiscoveryWindowInput): string 
       directEligible: item.directEligible,
     })),
   );
-  return JSON.stringify({ contents });
+  return JSON.stringify({ contents, ...(memoryContext ? { memory: memoryContext } : {}) });
 }

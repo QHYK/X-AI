@@ -93,6 +93,7 @@ try {
 
   for (const page of [
     '/prompts',
+    '/memories',
     '/dashboard',
     '/dashboard/analytics',
     '/dashboard/metrics',
@@ -136,6 +137,7 @@ try {
     ['review/in-depth/manual', ['GET', 'POST']],
     ['dashboard/analytics/ignored-articles/put-back', ['POST']],
     ['prompts', ['GET']],
+    ['memories', ['GET', 'POST', 'PATCH']],
     ['prompts/[key]', ['GET', 'POST', 'PATCH']],
     ['evaluation', ['GET']],
     ['evaluation/run', ['POST']],

@@ -1,3 +1,4 @@
+import { getActiveMemories, formatMemories } from '../lib/memories.js';
 import { withPromptBindings, databasePromptBinder } from '../lib/prompts/runtime.js';
 import { productionPrompt } from '../lib/prompts/runtime.js';
 // D2
@@ -130,6 +131,34 @@ export const discoveryD2OutputJsonSchema = {
   },
 } as const;
 
+/** Shared request preparation only: no model call, Run mutation, or Prompt binding writes. */
+export async function prepareDiscoveryD2Request(
+  db: Pick<Pool, 'query'>,
+  input: DiscoveryWindowInput,
+  model: string,
+) {
+  const memories = await getActiveMemories(db, { types: ['general', 'topic'] });
+  const businessInput = buildDiscoveryD2UserPrompt(input, formatMemories(memories));
+  const prompt = await productionPrompt('discovery.d2.topic_selection', businessInput);
+  const request: DiscoveryD2Request = {
+    model,
+    ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
+    input: prompt.input,
+    max_output_tokens: 4_000,
+    store: false,
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'discovery_topic_selection',
+        description: 'Direct and Topic leads selected from two Daily Briefs.',
+        schema: discoveryD2OutputJsonSchema,
+        strict: true,
+      },
+    },
+  };
+  return { request, promptVersion: prompt.versionId, businessInput, memories };
+}
+
 export async function runDiscoveryD2(
   pool: Pool,
   runId: string,
@@ -184,30 +213,9 @@ async function runDiscoveryD2Bound(
   let responseUsage: LlmResponse['usage'] | null = null;
 
   try {
-    const prompt = await productionPrompt(
-      'discovery.d2.topic_selection',
-      buildDiscoveryD2UserPrompt(input),
-    );
+    const prepared = await prepareDiscoveryD2Request(pool, input, model);
     const requestStartedAt = Date.now();
-    const response = await request(
-      {
-        model,
-        ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
-        input: prompt.input,
-        max_output_tokens: 4_000,
-        store: false,
-        text: {
-          format: {
-            type: 'json_schema',
-            name: 'discovery_topic_selection',
-            description: 'Direct and Topic leads selected from two Daily Briefs.',
-            schema: discoveryD2OutputJsonSchema,
-            strict: true,
-          },
-        },
-      },
-      toDiscoveryRequestOptions(timeoutMs),
-    );
+    const response = await request(prepared.request, toDiscoveryRequestOptions(timeoutMs));
     responseUsage = response.usage ?? null;
 
     const validatedSelection = parseAndValidateDiscoveryD2Output(response.output_text, input);
@@ -220,7 +228,7 @@ async function runDiscoveryD2Bound(
         provider,
         model,
         timeoutMs,
-        promptVersion: prompt.versionId,
+        promptVersion: prepared.promptVersion,
         editorialPromptVersion: DISCOVERY_EDITORIAL_PROMPT_VERSION,
       },
       buildDiscoveryStageState({
@@ -239,7 +247,7 @@ async function runDiscoveryD2Bound(
       selection,
       provider,
       model,
-      promptVersion: prompt.versionId,
+      promptVersion: prepared.promptVersion,
       responseId: response.id,
       apiMode: response.api_mode,
       requestElapsedMs: Date.now() - requestStartedAt,

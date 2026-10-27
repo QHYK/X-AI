@@ -20,7 +20,13 @@ export const adminNavigation: readonly AdminNavigationGroup[] = [
       { label: 'Metrics', href: '/dashboard/metrics' },
     ],
   },
-  { label: 'Administration', items: [{ label: 'Prompt Management', href: '/prompts' }] },
+  {
+    label: 'Administration',
+    items: [
+      { label: 'Prompt Management', href: '/prompts' },
+      { label: 'Memory', href: '/memories' },
+    ],
+  },
   {
     label: 'Review',
     items: [

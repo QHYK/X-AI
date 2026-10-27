@@ -46,7 +46,7 @@ Key：`discovery.d2.topic_selection`；Shared Fragment：`shared.discovery.edito
 
 `summary_zh` 优先取 `summaryZh`，缺失时回退 `summary`；`tags` 优先取非空 `tagsZh`，否则取 `tags`；`source_name` 将来源名称以 `, ` 连接。
 
-固定两期 Daily 的 Event（全部）、Digest、Long-form 精简记录。当前 Builder 仅序列化 `contents`，不传 `memory` 字段；适用的显式 Memory 不应被误认为此 JSON 的一部分。每条记录包含 `contentId`（Event 对应 `events.id`，Digest / Long-form 对应 `processed_contents.id`）、`contentType`（`event | processed_content`）、原始 `title`、`summary_zh`、`tags`、`source_name` 和 `directEligible`，不传原文或原始 URL。
+固定两期 Daily 的 Event（全部）、Digest、Long-form 精简记录。上例是无 Memory 时的实际 JSON。有匹配记录时，Builder 另加 `memory: string`，内容为带有偏好边界说明的纯文本及序列化记录；读取与恢复规则见 [Memory Runtime](../04-technical-spec/discovery.md#memory-runtime)。每条记录包含 `contentId`（Event 对应 `events.id`，Digest / Long-form 对应 `processed_contents.id`）、`contentType`（`event | processed_content`）、原始 `title`、`summary_zh`、`tags`、`source_name` 和 `directEligible`，不传原文或原始 URL。
 
 `directEligible` 由 Code 基于关联 Raw Article 的正文计算：`full_content_text` 非空，或 `content_text` 达到 3000 个 Unicode 字符；合并 Event 不能直接作为单篇作品。Code 保留内容 ID 到来源 / Raw Article 的映射；实际成员选择见 `../06-workflow-spec/discovery.md` §2。
 

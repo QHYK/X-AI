@@ -284,12 +284,11 @@ function resolveResponsesFinishReason(
   return status ?? null;
 }
 
-async function createChatCompletionResponse(
-  client: OpenAI,
+/** Exact Chat Completions SDK parameters, shared with read-only input diagnostics. */
+export function buildChatCompletionRequest(
   provider: LlmProvider,
   request: ResponseRequest,
-  requestOptions: { timeout?: number },
-): Promise<LlmResponse> {
+): OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming {
   const format = request.text?.format;
   const instructions = buildChatInstructions(provider, request.instructions, format?.schema);
   const responseFormat = format
@@ -305,6 +304,25 @@ async function createChatCompletionResponse(
         }
       : { type: 'json_object' as const }
     : undefined;
+  return {
+    model: request.model,
+    messages: [
+      ...(instructions ? [{ role: 'system' as const, content: instructions }] : []),
+      { role: 'user', content: extractInputText(request.input) },
+    ],
+    max_tokens: request.max_output_tokens,
+    response_format: responseFormat,
+  };
+}
+
+async function createChatCompletionResponse(
+  client: OpenAI,
+  provider: LlmProvider,
+  request: ResponseRequest,
+  requestOptions: { timeout?: number },
+): Promise<LlmResponse> {
+  const parameters = buildChatCompletionRequest(provider, request);
+  const responseFormat = parameters.response_format;
   const diagnostic = buildRequestDiagnostic(
     provider,
     client.baseURL,
@@ -315,18 +333,7 @@ async function createChatCompletionResponse(
   logRequestDiagnostic(diagnostic);
   let response: OpenAI.Chat.Completions.ChatCompletion;
   try {
-    response = await client.chat.completions.create(
-      {
-        model: request.model,
-        messages: [
-          ...(instructions ? [{ role: 'system' as const, content: instructions }] : []),
-          { role: 'user', content: extractInputText(request.input) },
-        ],
-        max_tokens: request.max_output_tokens,
-        response_format: responseFormat,
-      },
-      requestOptions,
-    );
+    response = await client.chat.completions.create(parameters, requestOptions);
   } catch (error) {
     throw toDiagnosticError(error, diagnostic);
   }

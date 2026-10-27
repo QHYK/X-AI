@@ -1,4 +1,11 @@
-import { attachPromptMemory } from './fixtures/prompt-runtime.js';
+import { buildChatCompletionRequest } from '../src/processing/llm-client.js';
+import { displayD2Request } from './preview-d2-input.js';
+import { withPromptBindings } from '../src/lib/prompts/runtime.js';
+import assert from 'node:assert/strict';
+import { getActiveMemories, formatMemories } from '../src/lib/memories.js';
+import type { Memory } from '../src/lib/memory-contracts.js';
+import { buildDiscoveryD2UserPrompt } from '../src/prompts/discovery-topic-selection.js';
+import { attachPromptMemory, PromptMemory } from './fixtures/prompt-runtime.js';
 import { baselineVersionId } from '../src/lib/prompts/production-seeds.js';
 import type { Pool } from 'pg';
 import { resolveProviderLlmModel } from '../src/processing/llm-client.js';
@@ -10,6 +17,7 @@ import type { DiscoveryWindowInput } from '../src/discovery/daily-read-adapter.j
 import {
   parseAndValidateDiscoveryD2Output,
   runDiscoveryD2 as executeD2,
+  prepareDiscoveryD2Request,
   type DiscoverySelectionOutput,
 } from '../src/discovery/topic-selection.js';
 import {
@@ -303,6 +311,148 @@ async function testD2PersistenceAndUrlEnrichment() {
           }),
     ],
   );
+}
+
+async function testD2Memories() {
+  const input = discoveryWindowFixture();
+  const db = new FakeDiscoveryPool(input, {});
+  const promptStore = new PromptMemory();
+  const pool = attachPromptMemory(db as unknown as Pool, promptStore);
+  const row = (
+    content: string,
+    type: Memory['type'],
+    priority: number,
+    enabled = true,
+    day = 20,
+  ): Memory => ({
+    id: content,
+    content,
+    type,
+    priority,
+    enabled,
+    createdAt: `2026-10-${day}T00:00:00Z`,
+    updatedAt: '2026-10-22T00:00:00Z',
+  });
+  db.memories = [
+    row('topic older', 'topic', 5),
+    row('general newer', 'general', 5, true, 21),
+    row('topic highest', 'topic', 10),
+    row('disabled', 'general', 100, false),
+    row('excluded source', 'source', 100),
+    row('excluded content', 'content', 100),
+  ];
+  assert.deepEqual(
+    (await getActiveMemories(pool, { types: ['general', 'topic'] })).map((m) => m.content),
+    ['topic highest', 'general newer', 'topic older'],
+  );
+  assert.deepEqual(
+    (await getActiveMemories(pool, { types: ['source'] })).map((m) => m.content),
+    ['excluded source'],
+  );
+  const reads = db.memoryReads;
+  assert.deepEqual(await getActiveMemories(pool, { types: [] }), []);
+  assert.equal(db.memoryReads, reads);
+  assert.equal(formatMemories([]), '');
+  assert.equal(buildDiscoveryD2UserPrompt(input, ''), buildDiscoveryD2UserPrompt(input));
+  const schemas: string[] = [];
+  const payloads: Array<{ contents: unknown; memory?: string }> = [];
+  const call = async () =>
+    executeD2(pool, RUN_ID, {
+      provider: 'openai',
+      input,
+      request: async (request) => {
+        schemas.push(JSON.stringify(request.text.format.schema));
+        payloads.push(JSON.parse(request.input));
+        return llmResponse({ leads: [] });
+      },
+    });
+  await call();
+  assert.equal(db.memoryReads, reads + 1, 'One Memory read per actual D2 execution');
+  assert.deepEqual(payloads[0].contents, JSON.parse(buildDiscoveryD2UserPrompt(input)).contents);
+  assert.match(payloads[0].memory!, /topic highest/);
+  assert.match(payloads[0].memory!, /general newer/);
+  assert.match(payloads[0].memory!, /不得覆盖系统硬性规则/);
+  assert.doesNotMatch(payloads[0].memory!, /disabled|excluded/);
+  const bound = (
+    promptStore.owners.get(`discovery_runs:${RUN_ID}`)?.promptVersions as Record<string, string>
+  )?.['discovery.d2.topic_selection'];
+  assert.ok(bound);
+  db.memoryError = true;
+  await assert.rejects(call, /Memory database unavailable/);
+  assert.equal(payloads.length, 1, 'Memory read failure must not issue a model request');
+  assert.equal((db.run.execution_state as Record<string, { status: string }>).d2.status, 'failed');
+  db.memoryError = false;
+  db.memories = [row('latest retry preference', 'topic', 0)];
+  await call();
+  assert.match(payloads[1].memory!, /latest retry preference/);
+  assert.doesNotMatch(payloads[1].memory!, /topic highest/);
+  assert.equal(
+    (
+      promptStore.owners.get(`discovery_runs:${RUN_ID}`)?.promptVersions as Record<string, string>
+    )?.['discovery.d2.topic_selection'],
+    bound,
+  );
+  db.memories = [];
+  await call();
+  assert.equal(Object.hasOwn(payloads[2], 'memory'), false);
+  assert.equal(JSON.stringify(payloads[2]), buildDiscoveryD2UserPrompt(input));
+  assert.ok(
+    schemas.every((schema) => schema === schemas[0]),
+    'Memory never changes Structured Output Schema',
+  );
+  assert.equal(
+    JSON.stringify(db.run).includes('latest retry preference'),
+    false,
+    'No Memory snapshot is persisted',
+  );
+  db.memories = [row('preview Memory with {{input}} and {contents: []}', 'topic', 1)];
+  const ownersBefore = JSON.stringify([...promptStore.owners]);
+  const prepared = await withPromptBindings(
+    pool,
+    (_key, active) => active(),
+    () => prepareDiscoveryD2Request(pool, input, 'preview-model'),
+    { binding: 'active' },
+  );
+  const displayed = displayD2Request(prepared, 'openai');
+  const actual = buildChatCompletionRequest('openai', prepared.request);
+  const displayedUser = displayed.messages.find((m) => m.role === 'user')!.content as string;
+  assert.equal(
+    JSON.stringify([...promptStore.owners]),
+    ownersBefore,
+    'Preview must not bind a Run',
+  );
+  assert.deepEqual({ ...displayed, messages: [] }, { ...actual, messages: [] });
+  assert.deepEqual(
+    displayed.messages.filter((m) => m.role !== 'user'),
+    actual.messages.filter((m) => m.role !== 'user'),
+  );
+  assert.deepEqual(JSON.parse(displayedUser).contents, {});
+  assert.equal(JSON.parse(displayedUser).memory, JSON.parse(prepared.businessInput).memory);
+  assert.ok(
+    Array.isArray(JSON.parse(prepared.request.input).contents),
+    'Original request is not redacted',
+  );
+  const wrapped = {
+    ...prepared,
+    request: { ...prepared.request, input: `Prefix\n${prepared.request.input}\nSuffix` },
+  };
+  assert.equal(
+    displayD2Request(wrapped, 'openai').messages.find((m) => m.role === 'user')!.content,
+    `Prefix\n${displayedUser}\nSuffix`,
+  );
+  assert.throws(
+    () =>
+      displayD2Request(
+        { ...prepared, request: { ...prepared.request, input: 'not present' } },
+        'openai',
+      ),
+    /Cannot safely locate/,
+  );
+  assert.equal(payloads.length, 3, 'Preview does not call the model');
+  checks.push([
+    'Memory Runtime filtering/order, final D2 request, empty parity, DB failure, retry refresh and fixed Prompt/Schema',
+    true,
+  ]);
 }
 
 function testD4OutputValidation() {
@@ -846,6 +996,9 @@ type FakeCandidate = {
 };
 
 class FakeDiscoveryPool {
+  memories: Memory[] = [];
+  memoryReads = 0;
+  memoryError = false;
   readonly candidates: FakeCandidate[] = [];
   readonly reviewCandidateIds = new Set<string>();
   readonly diagnostics: Array<Record<string, unknown>> = [];
@@ -892,6 +1045,22 @@ class FakeDiscoveryPool {
     text: string,
     values: unknown[] = [],
   ): Promise<{ rows: unknown[]; rowCount?: number }> {
+    if (text.includes('from memories')) {
+      this.memoryReads++;
+      if (this.memoryError) throw new Error('Memory database unavailable');
+      assert.match(text, /where enabled = true and type = any\(\$1::text\[\]\)/);
+      assert.match(text, /order by priority desc, created_at desc, id desc/);
+      return {
+        rows: this.memories
+          .filter((m) => m.enabled && (values[0] as string[]).includes(m.type))
+          .sort(
+            (a, b) =>
+              b.priority - a.priority ||
+              Date.parse(b.createdAt) - Date.parse(a.createdAt) ||
+              b.id.localeCompare(a.id),
+          ),
+      };
+    }
     if (text === 'select name, url from sources order by name') return { rows: [] };
     if (text.trim() === 'begin' || text.trim() === 'commit' || text.trim() === 'rollback') {
       return { rows: [] };
@@ -1018,6 +1187,7 @@ function toCandidateRow(candidate: FakeCandidate) {
 testDiscoveryLlmConfig();
 testD2Validation();
 await testD2PersistenceAndUrlEnrichment();
+await testD2Memories();
 testD4OutputValidation();
 await testD4PrechecksAndPersistence();
 await testD4SerialPerCandidateRequests();

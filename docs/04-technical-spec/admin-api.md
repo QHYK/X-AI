@@ -18,13 +18,13 @@ X-AI-field 同时包含 Internal Dashboard，用于运行观察、Daily Job Repo
 
 ## 2. 路由与 URL
 
-后台页面通过 `src/app/(admin)/layout.tsx` 共享布局；Route Group 只改变源码组织，不改变 `/dashboard/*`、`/review/*`、`/prompts` URL。`src/app/admin-navigation.ts` 是 Sidebar 配置唯一来源，不负责认证或注册路由。
+后台页面通过 `src/app/(admin)/layout.tsx` 共享布局；Route Group 只改变源码组织，不改变 `/dashboard/*`、`/review/*`、`/prompts`、`/memories` URL。`src/app/admin-navigation.ts` 是 Sidebar 配置唯一来源，不负责认证或注册路由。
 
 浏览器 URL 遵循**相对路径优先**：既有 `./`、`../` 构造保持相对形式，迁移 API 时只改必要路径；复用 URL 时须按每个调用页面核对层级。Next.js `Link`、服务端重定向和 Proxy Matcher 按各自路径规则处理。`basePath=/ai` 由 Next.js 路由配置处理，不在浏览器相对 URL 或 Matcher 中重复加入 `/ai`。
 
 ## 3. 鉴权与请求安全
 
-`/dashboard/*`、`/review/*` 与 `/prompts` 是后台页面，保留现有 URL；`/api/admin/*` 是后台 API。二者均要求单管理员 Session。未登录页面跳转 `/login`，未登录 API 返回 JSON 401。`/`、`/api/in-depth`、`/api/brief` 和 `/api/content/read-more` 保持匿名访问。登录与退出端点位于 `/api/auth/*`。
+`/dashboard/*`、`/review/*`、`/prompts` 与 `/memories` 是后台页面，保留现有 URL；`/api/admin/*` 是后台 API。二者均要求单管理员 Session。未登录页面跳转 `/login`，未登录 API 返回 JSON 401。`/`、`/api/in-depth`、`/api/brief` 和 `/api/content/read-more` 保持匿名访问。登录与退出端点位于 `/api/auth/*`。
 
 管理员密码以服务端环境变量中的 scrypt hash 配置。登录后生成随机、不透明的 Session Cookie；服务端文件存储其 hash 对应的会话记录和过期时间，独立于业务数据库及 `runtime/` Pipeline Artifacts。退出删除记录；密码 hash 变化会使旧会话失效。不使用用户表或 RBAC。Proxy 保护页面和管理 API，每个管理 Route Handler 还独立校验 Session；修改数据或触发任务的请求校验同源 Origin。Cookie 的 Secure 属性由部署配置决定。
 
@@ -158,3 +158,15 @@ Dashboard 的具体 UI Layout 与交互细节以实现为准，不在 Technical 
 
 ---
 
+
+### 7.5 Memory 管理
+
+`/memories` 位于共享后台 Layout，Sidebar Administration 中提供入口。数据模型和 Type 含义见 [memories](../05-data-model/memory.md#memories)。本节定义手动存储与管理；D2 的读取规则见 [Memory Runtime](discovery.md#memory-runtime)，不提供自动学习。
+
+`/api/admin/memories` 的 GET / POST / PATCH 均独立校验 Admin Session，写请求校验同源 Origin：
+
+- GET 默认返回全部记录，包含 disabled；可用 `?type=general|topic|source|content` 筛选。排序为 `priority DESC, created_at DESC`，完全相同时间以 `id DESC` 稳定排序，不提供分页或搜索。
+- POST 创建记录；PATCH 支持 `{id, content, type, priority, enabled}` 原子保存整行，并保留 `{id, enabled}` 接口兼容。非法参数 400、目标不存在 404、数据库失败 503，创建成功 201，其余成功 200；响应 no-store。
+- 新增行默认值由共享 Schema 定义；新增 / 编辑可以取消，失败保留输入。非编辑状态的 Enabled Checkbox 禁用；Edit 后与其他字段一起修改，Submit 一起保存，Cancel 放弃全部修改，提交失败保留全部输入。请求期间禁用重复提交；保存成功重新读取当前筛选列表，以数据库排序为准。保存已成功但列表刷新失败时明确提示刷新，不误报为未保存。
+
+无删除、批量操作或版本管理。实现入口为 `src/lib/memory-contracts.ts`、`src/lib/memories.ts` 与 `src/app/(admin)/memories/`；部署前提见 [Operations](../09-operations.md#25-memory-管理部署)。

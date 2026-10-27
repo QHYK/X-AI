@@ -4,7 +4,7 @@ import path from 'node:path';
 import { adminNavigation, getActiveAdminHref } from '../src/app/admin-navigation.js';
 
 const items = adminNavigation.flatMap((group) => group.items);
-assert.equal(items.length, 8);
+assert.equal(items.length, 9);
 assert.equal(new Set(items.map((item) => item.href)).size, items.length);
 
 for (const item of items) {
