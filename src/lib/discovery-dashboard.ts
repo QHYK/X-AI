@@ -50,6 +50,7 @@ export type DiscoveryDashboardRun = {
   candidateCount: number;
   d2RetryAvailable?: boolean;
   reviewCount: number;
+  topicQuestions: string[];
   stages: Partial<Record<DiscoveryStage, Partial<DiscoveryBranchExecutionState>>>;
 };
 
@@ -173,8 +174,23 @@ async function getLatestRegularRun(
       Number(row.candidate_count) > 0,
     ),
     reviewCount: Number(row.review_count),
+    topicQuestions: readD3TopicQuestions(row.selection_output, row.execution_state?.d3),
     stages: row.execution_state ?? {},
   };
+}
+
+function readD3TopicQuestions(
+  selection: Record<string, unknown> | null,
+  d3: Partial<DiscoveryBranchExecutionState> | undefined,
+): string[] {
+  if (!d3?.status || !Array.isArray(selection?.leads)) return [];
+  return selection.leads.flatMap((lead: unknown) => {
+    if (!lead || typeof lead !== 'object') return [];
+    const { kind, question } = lead as Record<string, unknown>;
+    return kind === 'topic' && typeof question === 'string' && question.trim()
+      ? [question.trim()]
+      : [];
+  });
 }
 
 export function discoveryStageTokenMetrics(value: unknown) {

@@ -612,6 +612,26 @@
 
 .discoverySummary dd { max-width: 75%; overflow-wrap: anywhere; text-align: right; }
 
+.topicQuestions {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #edf0ee;
+}
+
+.topicQuestions h4 {
+  margin: 0;
+  color: #627068;
+  font-size: 0.78rem;
+}
+
+.topicQuestions p {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
 .successBadge,
 .failedBadge,
 .naBadge {

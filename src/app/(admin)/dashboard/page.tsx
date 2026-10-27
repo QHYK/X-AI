@@ -429,6 +429,19 @@ function DiscoveryRunCard({
                 />
               </dl>
               {state?.errorSummary ? <p className={styles.empty}>{state.errorSummary}</p> : null}
+              {stage === 'd3' ? (
+                <section
+                  className={styles.topicQuestions}
+                  aria-label="Topic Questions"
+                >
+                  <h4>Topic Questions</h4>
+                  {regular?.topicQuestions.length ? (
+                    regular.topicQuestions.map((question, index) => <p key={index}>{question}</p>)
+                  ) : (
+                    <p>N/A</p>
+                  )}
+                </section>
+              ) : null}
             </article>
           );
         })}

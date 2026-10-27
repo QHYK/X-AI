@@ -8,6 +8,7 @@ import {
 
 const base = {
   run_type: 'regular',
+  selection_output: null as Record<string, unknown> | null,
   status: 'completed',
   end_reason: 'candidates_found',
   window_end_date: '2026-10-19',
@@ -279,4 +280,99 @@ const retryDb = {
 assert.equal(
   (await getDiscoveryRunForDate(retryDb, '2026-10-19'))?.regularRun?.d2RetryAvailable,
   true,
+);
+
+// Questions come from the very same Regular row as D3; never from the independent D5 Run.
+const topicLead = (question: unknown) => ({ kind: 'topic', leadId: 'internal', question });
+for (const { name, selection, executed, expected } of [
+  {
+    name: 'single',
+    selection: { leads: [topicLead('Question one?')] },
+    executed: true,
+    expected: ['Question one?'],
+  },
+  {
+    name: 'multiple in selection order',
+    selection: {
+      leads: [
+        topicLead('Second?'),
+        { kind: 'direct', question: 'Ignore direct' },
+        topicLead('First?'),
+      ],
+    },
+    executed: true,
+    expected: ['Second?', 'First?'],
+  },
+  { name: 'no questions', selection: { leads: [] }, executed: true, expected: [] },
+  { name: 'historical missing selection', selection: null, executed: true, expected: [] },
+  { name: 'historical missing leads', selection: {}, executed: true, expected: [] },
+  {
+    name: 'D3 not executed',
+    selection: { leads: [topicLead('Not yet executed')] },
+    executed: false,
+    expected: [],
+  },
+  {
+    name: 'malformed questions',
+    selection: { leads: [null, topicLead(null), topicLead(' '), topicLead('Valid?')] },
+    executed: true,
+    expected: ['Valid?'],
+  },
+]) {
+  let queries = 0;
+  const questionsDb = {
+    async query(sql: string) {
+      queries++;
+      if (sql.includes("execution_state->'d5' as d5")) return { rows: [] };
+      assert.match(sql, /r.selection_output/);
+      return {
+        rows: [
+          {
+            ...base,
+            id: name,
+            started_at: '2026-10-20T04:00:00Z',
+            run_count: 1,
+            selection_output: selection,
+            execution_state: executed ? base.execution_state : { d2: base.execution_state.d2 },
+          },
+        ],
+      };
+    },
+  } as unknown as Pick<Pool, 'query'>;
+  assert.deepEqual(
+    (await getDiscoveryRunForDate(questionsDb, '2026-10-19'))?.regularRun?.topicQuestions,
+    expected,
+    name,
+  );
+  assert.equal(queries, 2, 'Reuse the current Dashboard queries, no extra D2 request');
+}
+rows = [
+  { ...regular, selection_output: { leads: [topicLead('Regular D3 question')] } },
+  { ...retry, selection_output: { leads: [topicLead('Open Run must not leak')] } },
+  {
+    ...regular,
+    id: 'other-date',
+    window_end_date: '2026-10-20',
+    selection_output: { leads: [topicLead('Other date')] },
+  },
+];
+dashboard = await getDiscoveryRunForDate(db, '2026-10-19');
+assert.equal(dashboard?.regularRun?.id, regular.id);
+assert.equal(dashboard?.d5?.runId, retry.id);
+assert.deepEqual(dashboard?.regularRun?.topicQuestions, ['Regular D3 question']);
+rows.push({
+  ...regular,
+  id: 'newer-regular',
+  started_at: '2026-10-21T04:00:00Z',
+  selection_output: { leads: [topicLead('New Regular question')] },
+});
+assert.deepEqual((await getDiscoveryRunForDate(db, '2026-10-19'))?.regularRun?.topicQuestions, [
+  'New Regular question',
+]);
+assert.match(page, /stage === 'd3' \?\s*\(\s*<section\s+className=\{styles.topicQuestions\}/);
+assert.match(page, /regular\.topicQuestions\.map/);
+assert.match(page, /<h4>Topic Questions<\/h4>/);
+assert.match(page, /<p>N\/A<\/p>/);
+console.log(
+  'D3 Questions: single/multiple, empty/historical, unexecuted D3 and same-Run isolation passed.',
 );
