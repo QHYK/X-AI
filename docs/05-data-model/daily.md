@@ -336,7 +336,7 @@ Migration `0010` 将组合唯一索引命名为 `egi_group_content_unique`，Dri
 
 Review Snapshot 唯一；Migration `0010` 中索引名为 `stage4_runs_review_unique`，Drizzle 为 `stage4_runs_review_run_unique`。Event 复用、当前入选集合检查和原子发布见 [Daily Technical Spec](../04-technical-spec/daily.md#3-stage4-run-与-event-复用)，不能仅凭 draft 数量推断可以发布。Prompt 载体见 [版本绑定载体](prompt-registry.md#版本绑定载体)。
 
-**迁移待核验**：字段与对象 CHECK 已声明于 Schema；仓库 `0022_stage4_prompt_versions.sql` 首行目前是 `qALTER TABLE`，不是有效 SQL。Migration Journal 登记不证明目标数据库已成功执行；本次不修复文件、不判断远程列是否存在。
+该列及对象 CHECK 由 `0022_stage4_prompt_versions.sql` 引入；已有数据库的部署状态核验见 [Operations §2.3](../09-operations.md#23-prompt-基线导入与生产接入)。
 
 ### 索引与数据库约束
 

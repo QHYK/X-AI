@@ -71,8 +71,7 @@ Discovery 独立消费已完成的 Daily 数据，不接入 Daily Job；技术�
 -   **Content Retrieval:** RSS + Firecrawl
 -   **Scheduling:** External Cron / Scheduled Job
 
-MVP 保持单一 Next.js Application，不引入 Microservices、Message
-Queue、Workflow Engine 或复杂 Agent Framework。
+应用保持 Next.js + PostgreSQL 架构；Discovery Worker 独立消费数据库中的持久化任务，不引入外部消息队列或 Workflow Engine。
 
 ## Quick Start
 
@@ -117,6 +116,8 @@ Recovery 等操作入口统一见
 
 项目采用 **One Fact, One Source of Truth**
 具体规则只在其所属文档维护，其他文档只引用。
+
+完整文件索引与按任务阅读入口见 [`docs/00-index.md`](docs/00-index.md)；下表仅提供高层导航。
 
 | Document | Responsibility |
 |---|---|
