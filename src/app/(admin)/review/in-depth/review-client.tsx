@@ -6,7 +6,10 @@ import { ManualCandidateForm, SavedArticleContent } from './manual-candidate-for
 import { resolveDiscoveryPublication, discoveryEvidenceMetadata } from '@/lib/discovery-source.js';
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation.js';
-import { readDiscoveryContentMetadata } from '@/lib/discovery-content-metadata.js';
+import {
+  readDiscoveryContentMetadata,
+  readDiscoveryContentEvidence,
+} from '@/lib/discovery-content-metadata.js';
 import { type InDepthReviewItem, type InDepthReviewStatus } from '@/lib/in-depth-reads.js';
 import styles from '../review.module.css';
 
@@ -395,7 +398,7 @@ function readDetails(item: InDepthReviewItem) {
   const evidence = item.evidence ?? {};
   const evaluation = item.evaluation ?? {};
   const fetch = isRecord(evidence.fetch) ? evidence.fetch : null;
-  const evidenceLines = [...strings(evidence.agentEvidence), ...strings(evidence.details)];
+  const evidenceLines = readDiscoveryContentEvidence(item.evidence);
   const limitations = [...strings(evidence.limitations), ...strings(evaluation.limitations)];
   const fetchStatus = fetch
     ? `${string(fetch.status) ?? 'Unknown'} · complete: ${booleanLabel(fetch.contentComplete)} · truncated: ${booleanLabel(fetch.truncated)} · returned length: ${numberLabel(fetch.returnedContentLength)}`

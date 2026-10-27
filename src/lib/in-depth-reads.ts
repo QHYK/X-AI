@@ -8,6 +8,7 @@ import { discoveryEvidenceMetadata, resolveDiscoveryPublication } from './discov
 import { loadDiscoverySources } from './discovery-source-list.js';
 import {
   readDiscoveryContentMetadata,
+  readDiscoveryContentEvidence,
   type DiscoveryCover,
   type DiscoveryTag,
 } from './discovery-content-metadata.js';
@@ -98,7 +99,7 @@ export type PublishedInDepthRead = Pick<
   | 'whyWorthReading'
   | 'editorialOverrides'
   | 'reviewedAt'
-> & { tags?: DiscoveryTag[]; cover?: DiscoveryCover | null };
+> & { tags?: DiscoveryTag[]; cover?: DiscoveryCover | null; contentEvidence?: string[] };
 
 type Queryable = Pick<Pool, 'query'>;
 
@@ -194,7 +195,11 @@ export async function listPublishedInDepthReads(
     const fields = { ...row };
     delete fields.evidence;
     delete fields.evaluation;
-    return { ...fields, ...metadata };
+    return {
+      ...fields,
+      ...metadata,
+      contentEvidence: readDiscoveryContentEvidence(row.evidence ?? null),
+    };
   });
 }
 
@@ -349,6 +354,7 @@ export function toPublicInDepthRead(item: PublishedInDepthRead) {
     publishedAt: item.publishedAt ?? null,
     tags: item.tags ?? [],
     cover: item.cover ?? null,
+    contentEvidence: item.contentEvidence ?? [],
     agent: {
       summary: item.summary,
       whyWorthReading: item.whyWorthReading,

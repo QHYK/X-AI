@@ -375,6 +375,13 @@ function DiscoveryRunCard({
                 />
               ) : null}
               <dl className={styles.metricList}>
+                <Metric
+                  label="Prompt version"
+                  value={
+                    (stage === 'd5' ? run.d5?.promptVersion : regular?.promptVersions?.[stage]) ??
+                    '—'
+                  }
+                />
                 {stage === 'd5' && run.d5 ? (
                   <>
                     <Metric
@@ -744,23 +751,23 @@ function StageCard({
           <>
             <Metric
               label="Prompt · Event"
-              value={metrics.promptVersions?.event ?? 'N/A'}
+              value={metrics.promptVersions?.event ?? '—'}
             />
             <Metric
               label="Prompt · Digest"
-              value={metrics.promptVersions?.digest ?? 'N/A'}
+              value={metrics.promptVersions?.digest ?? '—'}
             />
             <Metric
               label="Prompt · Long-form"
-              value={metrics.promptVersions?.longForm ?? 'N/A'}
+              value={metrics.promptVersions?.longForm ?? '—'}
             />
           </>
-        ) : (
+        ) : metrics.stage !== 'stage4' || metrics.promptVersionRecorded ? (
           <Metric
             label="Prompt version"
-            value={metrics.promptVersion ?? 'N/A'}
+            value={metrics.promptVersion ?? '—'}
           />
-        )}
+        ) : null}
         <Metric
           label="Model"
           value={metrics.model ?? 'N/A'}

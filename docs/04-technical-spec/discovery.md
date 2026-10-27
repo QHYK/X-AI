@@ -55,6 +55,8 @@ D2–D5 按 Request Key 在首次实际执行前绑定 Published Version，存�
 
 D2 / D4 复用共享 LLM Client 和 Structured Output，校验后才能进入业务逻辑。输入输出见 `../07-prompt-spec/discovery.md`，执行与数量边界见 `../06-workflow-spec/discovery.md`。
 
+Direct 的 `estimated_duration_minutes` 在 D4 前置检查 / Candidate 创建时确定：优先保留已有有效值，再复用 Daily 中带明确分钟或秒单位的时长元数据；文章缺失时按完整正文的 CJK 字符与其他语言词数估算，算法见 `resolveDirectDuration()`（`src/discovery/direct-verification.ts`）。完整正文包括 `full_content_text`，以及满足下述原文复用证明的完整短 `content_text`；摘要、未知片段和媒体转录不能用于估算整篇阅读 / 播放时长。视频 / 播客只使用可信时长元数据，证据不足仍为 null。结果及依据写入 Candidate / evidence；恢复尚未完成的 Candidate 时可补空值，不覆盖有效值，已完成结果不自动回填。已知超过 30 分钟仍由原前置检查拒绝。D3/D5 的时长仍来自 Agent 输出，持久化硬检查不变；展示与 API 直接读取同一字段。
+
 ### 4.2 Discovery Agent
 
 使用 **OpenAI Agents SDK（TypeScript）** 实现一个可复用的 Discovery Agent：

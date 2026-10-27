@@ -148,6 +148,8 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+  max-width: 100%;
+  margin-right: -18px;
 }
 
 .inDepthListItem[aria-pressed='true'] {

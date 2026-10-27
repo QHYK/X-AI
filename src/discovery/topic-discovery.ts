@@ -570,7 +570,11 @@ export async function validateAndPersistDiscoveryAgentCandidates(
       }
     }
     const selectedCount = rows.filter((row) => row.decision.status === 'selected').length;
-    await updateDiscoveryBranchExecutionState(client, runId, stage, executionState);
+    // A found URL is not necessarily a qualified candidate (duplicates and failed evidence remain audited).
+    await updateDiscoveryBranchExecutionState(client, runId, stage, {
+      ...executionState,
+      endReason: selectedCount > 0 ? 'candidates_found' : 'no_candidates',
+    });
     await client.query('commit');
     return {
       discoveredCount: rows.length,

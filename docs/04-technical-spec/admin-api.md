@@ -45,6 +45,8 @@ Session 依赖服务端文件目录，不因进程内存清空而消失；多实
 
 公开查询只读取允许发布的 Production 字段，不返回 Review notes、内部 evidence/evaluation、调试信息或原始正文。In-depth 依靠 Approved 状态过滤；Event 依靠其发布状态和正式来源关系，具体持久化见 [Daily](daily.md)。
 
+Dashboard 的 Prompt 版本展示按各阶段已保存的精确 UUID 批量关联 Registry Published Request 的 `version`，显示 `vN`；不读取当前 Active、不展示 Fragment，缺失或无法匹配时显示 `—`。Stage3 分 Event / Digest / Long-form；D5 使用当前 Card 所属 Run（包括独立 Open Run）的绑定，不能沿用 Regular Run 的版本。
+
 Dashboard 是只读观察入口和显式管理操作入口，不是业务 Source of Truth；状态、Usage 或 Job Report 缺失时保持未知，不能从当前内容反推出历史执行成功。Evaluation 与正式结果隔离；Editorial、审核状态和 Notes 各自保存，不借一个 action 隐式修改其他控制对象。
 
 ## 6. API 与展示边界
@@ -149,6 +151,8 @@ In-depth Review 区分客观元数据、Agent 诊断与可编辑 Editorial；Dis
 匿名 `GET /api/in-depth` 只返回 Approved Candidate；X-AI-field 不提供公开 `/in-depth` 页面。响应 `{items, nextCursor, hasMore}` 默认每页 10 篇，按 Candidate `created_at DESC, id DESC` 排序；opaque cursor 保留稳定分页精度，非法游标返回 400，末页 nextCursor=null、hasMore=false。实现见 `src/lib/in-depth-reads.ts`。
 
 items 显式列出客观元数据（含 publishedAt、双语 tags、cover）、`agent: {summary, whyWorthReading}` 及 `editorial: {summary, whyWorthReading, extra_info}`。独立 editorial 不用 Agent 补空，原顶层展示字段保持既有覆盖语义；不返回 Review notes、内部 evidence/evaluation 或模型调试数据。已 Approved 内容保存 Editorial 后立即可读，不引入 Draft/Published 双版本。Xfield 按此契约分别展示 Agent 与 Editorial，并按 API 顺序追加分页结果。
+
+`contentEvidence: string[]` 仅从 Candidate evidence 的 `agentEvidence` / `details` 提取非空叙述文本，复用 Review 的 Content evidence 读取器；忽略对象、序列化 JSON 和堆栈，不公开完整 evidence、fetch、limitations 或其他技术诊断。Xfield 将它追加于「讲了什么」现有正文之后；不改写 Agent / Editorial 字段或既有回退。无可展示内容时返回空数组。
 
 ### 7.4 Model Evaluation
 

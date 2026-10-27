@@ -5,6 +5,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { JSDOM } from 'jsdom';
 import type { InDepthReviewItem } from '../src/lib/in-depth-reads.js';
+import { readDiscoveryContentEvidence } from '../src/lib/discovery-content-metadata.js';
 
 // Node has no CSS-module loader. Keep class names readable while rendering the real component.
 register(
@@ -115,6 +116,35 @@ assert.equal(
   fullTitle,
 );
 legacyTitle.window.close();
+const evidenceItem = {
+  ...item,
+  evidence: {
+    agentEvidence: '作品逐步论证了核心观点。',
+    details: ['提供了具体的对比案例。', '', { private: 'Do not render' }],
+    fetch: { error: 'Do not render', content: 'Do not render' },
+  },
+};
+const evidenceView = render(evidenceItem);
+try {
+  const heading = Array.from(evidenceView.window.document.querySelectorAll('.inDepthCopy h3')).find(
+    (node) => node.textContent === 'Content evidence',
+  )!;
+  const lines: string[] = [];
+  for (
+    let node = heading.nextElementSibling;
+    node && node.tagName !== 'H3';
+    node = node.nextElementSibling
+  ) {
+    lines.push(node.textContent ?? '');
+  }
+  assert.deepEqual(
+    lines,
+    readDiscoveryContentEvidence(evidenceItem.evidence),
+    'Review Content evidence uses the same reader-facing extraction as the public API.',
+  );
+} finally {
+  evidenceView.window.close();
+}
 const legacy = render({ ...item, evaluation: null, evidence: null });
 try {
   assert.match(

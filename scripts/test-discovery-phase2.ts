@@ -11,6 +11,7 @@ import type { Pool } from 'pg';
 import { resolveProviderLlmModel } from '../src/processing/llm-client.js';
 import {
   parseAndValidateDiscoveryD4Output,
+  resolveDirectDuration,
   runDiscoveryD4 as executeD4,
 } from '../src/discovery/direct-verification.js';
 import type { DiscoveryWindowInput } from '../src/discovery/daily-read-adapter.js';
@@ -371,7 +372,10 @@ async function testD2Memories() {
   assert.deepEqual(payloads[0].contents, JSON.parse(buildDiscoveryD2UserPrompt(input)).contents);
   assert.match(payloads[0].memory!, /topic highest/);
   assert.match(payloads[0].memory!, /general newer/);
-  assert.match(payloads[0].memory!, /不得覆盖系统硬性规则/);
+  assert.equal(
+    payloads[0].memory,
+    formatMemories(await getActiveMemories(pool, { types: ['general', 'topic'] })),
+  );
   assert.doesNotMatch(payloads[0].memory!, /disabled|excluded/);
   const bound = (
     promptStore.owners.get(`discovery_runs:${RUN_ID}`)?.promptVersions as Record<string, string>
@@ -798,6 +802,158 @@ async function testD4FailureRecovery() {
   ]);
 }
 
+async function testDirectDurations() {
+  const base = sourceRow(IDS.digestEligible, 'word '.repeat(2000), null);
+  assert.equal(resolveDirectDuration(base).minutes, 10);
+  assert.equal(
+    resolveDirectDuration({
+      ...base,
+      source_type: 'News Platform',
+      metadata: { content_completion: { status: 'success', content_type: 'article_body' } },
+    }).minutes,
+    10,
+  );
+  assert.equal(
+    resolveDirectDuration({ ...base, source_type: 'unknown', metadata: {} }).minutes,
+    null,
+  );
+  assert.equal(resolveDirectDuration({ ...base, full_content_text: '中'.repeat(800) }).minutes, 2);
+  assert.equal(
+    resolveDirectDuration({ ...base, full_content_text: '中'.repeat(400) + ' word'.repeat(200) })
+      .minutes,
+    2,
+  );
+  assert.equal(resolveDirectDuration({ ...base, metadata: { durationMinutes: 7.2 } }).minutes, 8);
+  assert.equal(
+    resolveDirectDuration({ ...base, source_type: 'video', metadata: { durationSeconds: 420 } })
+      .minutes,
+    7,
+  );
+  assert.equal(
+    resolveDirectDuration({ ...base, source_type: 'podcast', metadata: { readingTimeMinutes: 2 } })
+      .minutes,
+    null,
+  );
+  assert.equal(resolveDirectDuration({ ...base, source_type: 'video' }).minutes, null);
+  assert.equal(
+    resolveDirectDuration({ ...base, full_content_text: null, content_text: 'fragment' }).minutes,
+    null,
+  );
+  assert.equal(
+    resolveDirectDuration({
+      ...base,
+      full_content_text: null,
+      content_text: 'word '.repeat(400),
+      metadata: {
+        content_completion: {
+          status: 'success',
+          content_type: 'article_body',
+          full_content_length: 0,
+        },
+      },
+    }).minutes,
+    2,
+  );
+  assert.equal(
+    resolveDirectDuration(
+      { ...base, full_content_text: null, metadata: { durationMinutes: 0 } },
+      12,
+    ).minutes,
+    12,
+  );
+  for (const scenario of [
+    { name: 'full body', full: 'word '.repeat(2000), metadata: {}, expected: 10 },
+    {
+      name: 'Daily metadata',
+      full: 'word '.repeat(2000),
+      metadata: { readingTimeMinutes: 7 },
+      expected: 7,
+    },
+    { name: 'missing body', full: null, metadata: {}, expected: null },
+    { name: 'unknown partial', full: null, partial: 'excerpt', metadata: {}, expected: null },
+    { name: '30 minutes allowed', full: 'word '.repeat(6000), metadata: {}, expected: 30 },
+    { name: 'over 30 body', full: 'word '.repeat(6200), metadata: {}, expected: 31 },
+    {
+      name: 'over 30 metadata',
+      full: 'short body',
+      metadata: { durationMinutes: 31 },
+      expected: 31,
+    },
+    {
+      name: 'media metadata',
+      full: 'transcript',
+      metadata: { contentType: 'video', durationSeconds: 900 },
+      expected: 15,
+    },
+    {
+      name: 'media unknown',
+      full: 'word '.repeat(9000),
+      metadata: { contentType: 'podcast' },
+      expected: null,
+    },
+  ]) {
+    const input = discoveryWindowFixture();
+    const db = new FakeDiscoveryPool(
+      input,
+      {},
+      { leads: [directLead('lead-01', IDS.digestEligible, 'https://example.test/duration')] },
+    );
+    db.sources.set(IDS.digestEligible, {
+      ...sourceRow(IDS.digestEligible, scenario.full, scenario.partial ?? null),
+      metadata: scenario.metadata,
+    });
+    let calls = 0;
+    await runDiscoveryD4(db as unknown as Pool, RUN_ID, {
+      provider: 'openai',
+      request: async (req) => {
+        calls++;
+        const candidate = JSON.parse(req.input).candidates[0];
+        assert.equal(candidate.estimatedDurationMinutes, scenario.expected);
+        return llmResponse({ evaluations: [evaluation(candidate.candidateId, 'qualified')] });
+      },
+    });
+    assert.equal(db.candidates[0].estimatedDurationMinutes, scenario.expected, scenario.name);
+    const rejected = scenario.expected !== null && scenario.expected > 30;
+    assert.equal(calls, (!scenario.full && !scenario.partial) || rejected ? 0 : 1, scenario.name);
+    if (rejected) assert.equal(db.candidates[0].status, 'rejected');
+  }
+  for (const saved of [null, 8, 31]) {
+    const input = discoveryWindowFixture();
+    const db = new FakeDiscoveryPool(
+      input,
+      {},
+      { leads: [directLead('lead-01', IDS.digestEligible, 'https://example.test/retry-duration')] },
+    );
+    db.sources.set(IDS.digestEligible, base);
+    db.candidates.push({
+      id: 'existing-candidate',
+      sourceLeadId: 'lead-01',
+      sourceContentId: IDS.digestEligible,
+      normalizedUrl: 'https://example.test/retry-duration',
+      status: 'discovered',
+      evaluation: null,
+      evidence: {},
+      estimatedDurationMinutes: saved,
+    });
+    let calls = 0;
+    await runDiscoveryD4(db as unknown as Pool, RUN_ID, {
+      provider: 'openai',
+      request: async () => {
+        calls++;
+        return llmResponse({ evaluations: [evaluation('existing-candidate', 'qualified')] });
+      },
+    });
+    assert.equal(db.candidates.length, 1);
+    assert.equal(db.candidates[0].estimatedDurationMinutes, saved ?? 10);
+    assert.equal(calls, saved === 31 ? 0 : 1);
+    assert.equal(db.candidates[0].status, saved === 31 ? 'rejected' : 'selected');
+  }
+  checks.push([
+    'Direct duration: complete/partial bodies, trusted metadata, media, retry preservation and 30-minute hard checks',
+    true,
+  ]);
+}
+
 function discoveryWindowFixture(): DiscoveryWindowInput {
   const item = (id: string, kind: 'event' | 'digest' | 'long_form', directEligible: boolean) => ({
     id,
@@ -993,6 +1149,7 @@ type FakeCandidate = {
   summary?: unknown;
   whyWorthReading?: unknown;
   publication?: unknown;
+  estimatedDurationMinutes?: number | null;
 };
 
 class FakeDiscoveryPool {
@@ -1127,10 +1284,24 @@ class FakeDiscoveryPool {
         sourceLeadId: String(values[3]),
         normalizedUrl: values[5] === null ? null : String(values[5]),
         publication: values[8],
+        estimatedDurationMinutes: values[11] as number | null,
         evaluation: values[13] ? (JSON.parse(String(values[13])) as Record<string, unknown>) : null,
         evidence: JSON.parse(String(values[12])) as Record<string, unknown>,
         status: String(values[14]),
       });
+      return { rows: [], rowCount: 1 };
+    }
+    if (text.includes('set estimated_duration_minutes')) {
+      assert.match(text, /when estimated_duration_minutes > 0/);
+      const candidate = this.candidates.find((row) => row.id === values[0]);
+      if (!candidate || candidate.status !== 'discovered') return { rows: [], rowCount: 0 };
+      if (!candidate.estimatedDurationMinutes || candidate.estimatedDurationMinutes < 0)
+        candidate.estimatedDurationMinutes = values[1] as number | null;
+      Object.assign(candidate.evidence, JSON.parse(String(values[2])));
+      if (values[3]) {
+        candidate.status = String(values[3]);
+        candidate.evaluation = JSON.parse(String(values[4]));
+      }
       return { rows: [], rowCount: 1 };
     }
     if (text.includes('set evaluation =')) {
@@ -1181,6 +1352,7 @@ function toCandidateRow(candidate: FakeCandidate) {
     source_lead_id: candidate.sourceLeadId,
     status: candidate.status,
     evaluation: candidate.evaluation,
+    estimated_duration_minutes: candidate.estimatedDurationMinutes ?? null,
   };
 }
 
@@ -1193,6 +1365,7 @@ await testD4PrechecksAndPersistence();
 await testD4SerialPerCandidateRequests();
 await testD4FailureRecovery();
 await testD4MissingReaderFields();
+await testDirectDurations();
 
 const failures = checks.filter(([, passed]) => !passed);
 console.log(JSON.stringify({ success: failures.length === 0, checks }, null, 2));

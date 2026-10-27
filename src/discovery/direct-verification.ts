@@ -133,6 +133,7 @@ type CandidateRow = {
   source_lead_id: string;
   status: string;
   evaluation: Record<string, unknown> | null;
+  estimated_duration_minutes: number | null;
 };
 
 type PreparedCandidate = {
@@ -140,6 +141,7 @@ type PreparedCandidate = {
   lead: DiscoveryDirectLead;
   source: DirectSourceRow;
   prompt: DiscoveryD4PromptCandidate;
+  durationVerification: DirectDuration['verification'];
 };
 
 export const discoveryD4OutputJsonSchema = {
@@ -341,7 +343,8 @@ async function executeDiscoveryD4(
     if (prior && prior.status !== 'discovered') continue;
 
     const selectedContent = selectSourceContent(source);
-    const estimatedDurationMinutes = readDurationMinutes(source.metadata);
+    const duration = resolveDirectDuration(source, prior?.estimated_duration_minutes);
+    const estimatedDurationMinutes = duration.minutes;
     const precheck = invalidUrl
       ? { decision: 'rejected' as const, reason: 'invalid_url' }
       : duplicateReason
@@ -360,15 +363,37 @@ async function executeDiscoveryD4(
         source,
         normalizedUrl,
         estimatedDurationMinutes,
+        durationVerification: duration.verification,
         precheck,
         selectedContent,
       }));
 
+    if (prior) {
+      // Retry may have an old null duration. Never replace a valid saved value with null.
+      await pool.query(
+        `update discovery_candidates
+           set estimated_duration_minutes = case when estimated_duration_minutes > 0
+                 then estimated_duration_minutes else $2 end,
+               evidence = coalesce(evidence, '{}'::jsonb) || $3::jsonb,
+               status = coalesce($4::text, status),
+               evaluation = case when $4::text is null then evaluation else $5::jsonb end,
+               updated_at = now()
+         where id = $1::uuid and status = 'discovered'`,
+        [
+          prior.id,
+          estimatedDurationMinutes,
+          JSON.stringify({ durationVerification: duration.verification }),
+          precheck?.decision ?? null,
+          precheck ? JSON.stringify(precheck) : null,
+        ],
+      );
+    }
     if (precheck || !selectedContent) continue;
     prepared.push({
       id: candidateId,
       lead,
       source,
+      durationVerification: duration.verification,
       prompt: {
         candidateId,
         title: source.title,
@@ -679,7 +704,7 @@ async function loadExistingCandidates(
 ): Promise<CandidateRow[]> {
   if (leadIds.length === 0) return [];
   const result = await pool.query<CandidateRow>(
-    `select id, source_lead_id, status, evaluation
+    `select id, source_lead_id, status, evaluation, estimated_duration_minutes
       from discovery_candidates
       where run_id = $1::uuid
         and discovery_path = 'direct'
@@ -714,6 +739,7 @@ async function insertDirectCandidate(
     source: DirectSourceRow;
     normalizedUrl: string | null;
     estimatedDurationMinutes: number | null;
+    durationVerification: DirectDuration['verification'];
     precheck: { decision: 'rejected' | 'unverifiable'; reason: string } | null;
     selectedContent: ReturnType<typeof selectSourceContent>;
   },
@@ -732,15 +758,13 @@ async function insertDirectCandidate(
         contentSource: input.selectedContent.source,
         contentMayBeIncomplete: input.selectedContent.source === 'content_text',
         contentLength: Array.from(input.selectedContent.text).length,
-        durationVerification:
-          input.estimatedDurationMinutes === null ? 'unavailable' : 'source_metadata',
+        durationVerification: input.durationVerification,
       }
     : {
         contentSource: null,
         contentMayBeIncomplete: true,
         contentLength: 0,
-        durationVerification:
-          input.estimatedDurationMinutes === null ? 'unavailable' : 'source_metadata',
+        durationVerification: input.durationVerification,
       };
   await pool.query(
     `insert into discovery_candidates (
@@ -874,8 +898,7 @@ async function persistD4Evaluations(
         contentSource: candidate.prompt.contentSource,
         contentMayBeIncomplete: candidate.prompt.contentMayBeIncomplete,
         contentLength: Array.from(candidate.prompt.content).length,
-        durationVerification:
-          candidate.prompt.estimatedDurationMinutes === null ? 'unavailable' : 'source_metadata',
+        durationVerification: candidate.durationVerification,
         sourceMetadata: { publication: publicationFromMetadata(candidate.source.metadata) },
         details: evaluation.evidence,
         limitations: evaluation.limitations,
@@ -924,7 +947,7 @@ async function promoteQualifiedDirectCandidates(
 ): Promise<number> {
   if (leadOrder.length === 0) return 0;
   const result = await pool.query<CandidateRow>(
-    `select id, source_lead_id, status, evaluation
+    `select id, source_lead_id, status, evaluation, estimated_duration_minutes
       from discovery_candidates
       where run_id = $1::uuid and discovery_path = 'direct'
         and evaluation->>'decision' = 'qualified'`,
@@ -1023,23 +1046,67 @@ function selectSourceContent(source: DirectSourceRow): {
   return partial ? { source: 'content_text', text: partial } : null;
 }
 
-function readDurationMinutes(metadata: Record<string, unknown> | null): number | null {
-  if (!metadata) return null;
-  for (const key of ['durationMinutes', 'duration_minutes', 'readingTimeMinutes']) {
+type DirectDuration = {
+  minutes: number | null;
+  verification:
+    'existing_candidate' | 'source_metadata' | 'content_length_estimate' | 'unavailable';
+};
+
+/** Direct has no Agent-provided duration: reuse evidence, then estimate only proven article text. */
+export function resolveDirectDuration(
+  source: DirectSourceRow,
+  existingMinutes?: number | null,
+): DirectDuration {
+  if (
+    typeof existingMinutes === 'number' &&
+    Number.isInteger(existingMinutes) &&
+    existingMinutes > 0
+  )
+    return { minutes: existingMinutes, verification: 'existing_candidate' };
+  const contentType = readContentType(source);
+  const metadata = source.metadata ?? {};
+  const minuteKeys = [
+    'durationMinutes',
+    'duration_minutes',
+    ...(contentType === 'video' || contentType === 'podcast' ? [] : ['readingTimeMinutes']),
+  ];
+  for (const key of [...minuteKeys, 'durationSeconds', 'duration_seconds']) {
     const value = metadata[key];
-    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
-      return Math.ceil(value);
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      const minutes = Math.ceil(
+        key.endsWith('Seconds') || key.endsWith('_seconds') ? value / 60 : value,
+      );
+      if (minutes <= 2147483647) return { minutes, verification: 'source_metadata' };
     }
   }
-  return null;
+  if (contentType !== 'article') return { minutes: null, verification: 'unavailable' };
+  const completion = metadata.content_completion as Record<string, unknown> | undefined;
+  const completeShortBody =
+    completion?.status === 'success' &&
+    completion.content_type === 'article_body' &&
+    completion.full_content_length === 0;
+  const text =
+    source.full_content_text?.trim() || (completeShortBody ? source.content_text?.trim() : null);
+  if (!text) return { minutes: null, verification: 'unavailable' };
+  // Deterministic estimate: 200 words/minute, 400 CJK characters/minute; add mixed-language costs.
+  // Ignore URL destinations rather than counting long link strings as prose.
+  const prose = text.replace(/https?:\/\/\S+/g, ' ');
+  const cjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu;
+  const characters = prose.match(cjk)?.length ?? 0;
+  const words =
+    prose.replace(cjk, ' ').match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)?.length ?? 0;
+  const minutes = Math.ceil(characters / 400 + words / 200);
+  return minutes > 0
+    ? { minutes, verification: 'content_length_estimate' }
+    : { minutes: null, verification: 'unavailable' };
 }
 
 function readContentType(source: DirectSourceRow): 'article' | 'video' | 'podcast' | null {
   const candidate =
     source.metadata?.contentType ?? source.metadata?.content_type ?? source.source_type;
-  return candidate === 'article' || candidate === 'video' || candidate === 'podcast'
-    ? candidate
-    : null;
+  if (candidate === 'article' || candidate === 'video' || candidate === 'podcast') return candidate;
+  const completion = source.metadata?.content_completion as Record<string, unknown> | undefined;
+  return completion?.content_type === 'article_body' ? 'article' : null;
 }
 
 function isHttpUrl(value: string): boolean {

@@ -1,3 +1,4 @@
+import { loadDashboardPromptVersions } from './dashboard-prompt-versions.js';
 import { canRetryDiscoveryD2 } from './discovery-d2-retry.js';
 import { parseBriefDate } from './brief-date.js';
 import type { Pool } from 'pg';
@@ -51,6 +52,7 @@ export type DiscoveryDashboardRun = {
   d2RetryAvailable?: boolean;
   reviewCount: number;
   topicQuestions: string[];
+  promptVersions?: Partial<Record<DiscoveryStage, string | null>>;
   stages: Partial<Record<DiscoveryStage, Partial<DiscoveryBranchExecutionState>>>;
 };
 
@@ -60,6 +62,7 @@ export type DiscoveryDashboard = {
     runId: string;
     runType: string;
     executedAt: string | null;
+    promptVersion?: string | null;
     state: Partial<DiscoveryBranchExecutionState>;
   } | null;
 };
@@ -76,10 +79,11 @@ export async function getDiscoveryRunForDate(
     db.query<{
       id: string;
       run_type: string;
+      config_snapshot: Record<string, unknown> | null;
       d5: Partial<DiscoveryBranchExecutionState>;
       executed_at: Date | string | null;
     }>(
-      `select id, run_type, execution_state->'d5' as d5,
+      `select id, run_type, config_snapshot, execution_state->'d5' as d5,
               coalesce((execution_state->'d5'->>'completedAt')::timestamptz,
                        updated_at, started_at) as executed_at
          from discovery_runs
@@ -91,6 +95,17 @@ export async function getDiscoveryRunForDate(
   ]);
   const row = result.rows[0];
   if (!regularRun && !row) return null;
+  const d5Id = discoveryPromptId(row?.config_snapshot, 'd5');
+  const label = await loadDashboardPromptVersions(db, [
+    ...Object.values(regularRun?.promptVersions ?? {}),
+    d5Id,
+  ]);
+  if (regularRun)
+    for (const stage of ['d2', 'd3', 'd4', 'd5'] as const)
+      regularRun.promptVersions![stage] = label(
+        regularRun.promptVersions?.[stage],
+        DISCOVERY_PROMPT_KEYS[stage],
+      );
   return {
     regularRun,
     d5: row
@@ -99,6 +114,7 @@ export async function getDiscoveryRunForDate(
           runType: row.run_type,
           executedAt: row.executed_at ? new Date(row.executed_at).toISOString() : null,
           state: row.d5,
+          promptVersion: label(d5Id, DISCOVERY_PROMPT_KEYS.d5),
         }
       : null,
   };
@@ -174,9 +190,31 @@ async function getLatestRegularRun(
       Number(row.candidate_count) > 0,
     ),
     reviewCount: Number(row.review_count),
+    promptVersions: Object.fromEntries(
+      (['d2', 'd3', 'd4', 'd5'] as const).map((stage) => [
+        stage,
+        discoveryPromptId(row.config_snapshot, stage),
+      ]),
+    ),
     topicQuestions: readD3TopicQuestions(row.selection_output, row.execution_state?.d3),
     stages: row.execution_state ?? {},
   };
+}
+
+const DISCOVERY_PROMPT_KEYS = {
+  d2: 'discovery.d2.topic_selection',
+  d3: 'discovery.d3.topic_discovery',
+  d4: 'discovery.d4.direct_verification',
+  d5: 'discovery.d5.open_discovery',
+} as const;
+function discoveryPromptId(
+  snapshot: Record<string, unknown> | null | undefined,
+  stage: DiscoveryStage,
+): string | null {
+  const bindings = snapshot?.promptVersions;
+  if (!bindings || typeof bindings !== 'object' || Array.isArray(bindings)) return null;
+  const id = (bindings as Record<string, unknown>)[DISCOVERY_PROMPT_KEYS[stage]];
+  return typeof id === 'string' ? id : null;
 }
 
 function readD3TopicQuestions(

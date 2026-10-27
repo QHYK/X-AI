@@ -75,6 +75,33 @@ export const DiscoveryCoverSchema = z
   .strict();
 export type DiscoveryCover = z.infer<typeof DiscoveryCoverSchema>;
 
+/** Only narrative evidence keys are reader-facing; never flatten diagnostic JSON. */
+export function readDiscoveryContentEvidence(evidence: Record<string, unknown> | null): string[] {
+  const strings = (value: unknown): string[] =>
+    (Array.isArray(value) ? value : [value])
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  const lines = [...strings(evidence?.agentEvidence), ...strings(evidence?.details)];
+  return [
+    ...new Set(
+      lines.filter((line) => {
+        // Malformed historical data must not turn serialized objects or stack traces into copy.
+        if (/^```(?:json|jsonc)\b/i.test(line) || /\n\s+at\s+.+(?:\(|:\d)/.test(line)) return false;
+        if (/^[\[{]/.test(line)) {
+          try {
+            const parsed: unknown = JSON.parse(line);
+            if (typeof parsed === 'object' && parsed !== null) return false;
+          } catch {
+            // Ordinary prose may start with a bracket (for example, a citation).
+          }
+        }
+        return true;
+      }),
+    ),
+  ];
+}
+
 /** Historical records lack these JSON keys; malformed metadata is not renderable content. */
 export function readDiscoveryContentMetadata(item: {
   evaluation: Record<string, unknown> | null;

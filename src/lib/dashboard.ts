@@ -1,3 +1,4 @@
+import { loadDashboardPromptVersions } from './dashboard-prompt-versions.js';
 /**
  * Dashboard 的服务端数据聚合层。
  *
@@ -83,6 +84,7 @@ export type DashboardStageMetrics = {
   startedAt: string | null;
   model: string | null;
   promptVersion: string | null;
+  promptVersionRecorded?: boolean;
   promptVersions: {
     event: string | null;
     digest: string | null;
@@ -479,6 +481,33 @@ export async function getDashboardData(
     stage4BusinessByDate.get(detailScope.dailyDate),
   );
 
+  const displayedStages = [
+    ...new Set(
+      [
+        ...days.flatMap((day) => Object.values(day.runtime.stages)),
+        ...Object.values(detailStages),
+      ].filter((value): value is DashboardStageMetrics => value !== null),
+    ),
+  ];
+  const promptLabel = await loadDashboardPromptVersions(
+    pool,
+    displayedStages.flatMap((metrics) => [
+      metrics.promptVersion,
+      ...Object.values(metrics.promptVersions ?? {}),
+    ]),
+  );
+  for (const metrics of displayedStages) {
+    metrics.promptVersionRecorded = metrics.promptVersion !== null;
+    metrics.promptVersion = promptLabel(metrics.promptVersion, DAILY_PROMPT_KEYS[metrics.stage]);
+    if (metrics.promptVersions) {
+      metrics.promptVersions = {
+        event: promptLabel(metrics.promptVersions.event, 'daily.stage3.event_ranking'),
+        digest: promptLabel(metrics.promptVersions.digest, 'daily.stage3.digest_ranking'),
+        longForm: promptLabel(metrics.promptVersions.longForm, 'daily.stage3.long_form_ranking'),
+      };
+    }
+  }
+
   return {
     timezone: 'Asia/Shanghai',
     latestDailyDate: latestScope.dailyDate,
@@ -730,6 +759,20 @@ function isMissingTable(error: unknown, table: string): boolean {
   );
 }
 
+const DAILY_PROMPT_KEYS = {
+  stage1: 'daily.stage1.content_understanding',
+  stage2: 'daily.stage2.event_merge',
+  stage3: '',
+  stage4: 'daily.stage4.event_enrichment',
+} as const;
+function dashboardBindingId(source: JsonObject, key: string, fallback: unknown): string | null {
+  const bindings =
+    asObject(source.promptVersionIds) ??
+    asObject(source.promptVersions) ??
+    asObject(source.prompt_versions);
+  return stringValue(bindings?.[key]) ?? stringValue(fallback);
+}
+
 function stageMetricsFromPipelineRun(
   stage: DashboardStage,
   row: PipelineRunRow,
@@ -746,13 +789,25 @@ function stageMetricsFromPipelineRun(
     errorSummary: row.error_summary,
     startedAt,
     model: row.model,
-    promptVersion: stringValue(metrics.prompt_version),
+    promptVersion: dashboardBindingId(
+      metrics,
+      DAILY_PROMPT_KEYS[stage],
+      metrics.prompt_version_id ?? metrics.prompt_version,
+    ),
     promptVersions:
       stage === 'stage3'
         ? {
-            event: stringValue(promptVersions?.event),
-            digest: stringValue(promptVersions?.digest),
-            longForm: stringValue(promptVersions?.long_form),
+            event: dashboardBindingId(metrics, 'daily.stage3.event_ranking', promptVersions?.event),
+            digest: dashboardBindingId(
+              metrics,
+              'daily.stage3.digest_ranking',
+              promptVersions?.digest,
+            ),
+            longForm: dashboardBindingId(
+              metrics,
+              'daily.stage3.long_form_ranking',
+              promptVersions?.long_form,
+            ),
           }
         : null,
     durationMs: numberFrom(metrics, 'duration_ms') ?? durationBetween(startedAt, finishedAt),
@@ -1048,7 +1103,13 @@ async function loadDailyStage1Metrics(
 
         return {
           date,
-          metrics: stage1MetricsFromDailyStep(stage1Step, startedAt),
+          metrics: stage1MetricsFromDailyStep(
+            {
+              ...stage1Step,
+              promptVersionIds: artifact.promptVersionIds ?? artifact.promptVersions,
+            },
+            startedAt,
+          ),
         };
       } catch (error) {
         if (!isMissingFile(error)) {
@@ -1079,7 +1140,11 @@ function stage1MetricsFromDailyStep(step: JsonObject, startedAt: string): Dashbo
     errorSummary: stringValue(step.error),
     startedAt,
     model: stringValue(step.model),
-    promptVersion: stringValue(step.prompt_version),
+    promptVersion: dashboardBindingId(
+      step,
+      DAILY_PROMPT_KEYS.stage1,
+      step.prompt_version_id ?? step.prompt_version,
+    ),
     promptVersions: null,
     durationMs: numberFrom(step, 'duration_ms'),
     llmDurationMs: null,
@@ -1180,13 +1245,29 @@ async function parseStageMetrics(
     errorSummary: stringValue(artifact.error),
     startedAt,
     model: stringValue(artifact.model),
-    promptVersion: stringValue(artifact.prompt_version),
+    promptVersion: dashboardBindingId(
+      artifact,
+      DAILY_PROMPT_KEYS[stage],
+      artifact.prompt_version_id ?? artifact.prompt_version,
+    ),
     promptVersions:
       stage === 'stage3'
         ? {
-            event: stringValue(stage3PromptVersions?.event),
-            digest: stringValue(stage3PromptVersions?.digest),
-            longForm: stringValue(stage3PromptVersions?.long_form),
+            event: dashboardBindingId(
+              artifact,
+              'daily.stage3.event_ranking',
+              stage3PromptVersions?.event,
+            ),
+            digest: dashboardBindingId(
+              artifact,
+              'daily.stage3.digest_ranking',
+              stage3PromptVersions?.digest,
+            ),
+            longForm: dashboardBindingId(
+              artifact,
+              'daily.stage3.long_form_ranking',
+              stage3PromptVersions?.long_form,
+            ),
           }
         : null,
     durationMs:
