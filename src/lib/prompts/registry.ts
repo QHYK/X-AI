@@ -92,6 +92,7 @@ export async function resolvePromptFragments(
       : snapshot
         ? await getPromptVersion(db, snapshot[ref.activeKey!])
         : await getActivePrompt(db, ref.activeKey!);
+    if (ref.key && fragment.key !== ref.key) throw new Error('Fragment Key / Version mismatch.');
     if (ref.activeKey && fragment.key !== ref.activeKey)
       throw new Error('Dynamic Fragment key mismatch.');
     if ((ACTIVE_FRAGMENT_KEYS as readonly string[]).includes(fragment.key)) {
@@ -242,7 +243,7 @@ export function withFragmentVersions(
 ): PromptBody {
   if (
     Object.keys(replacements).some(
-      (slot) => !body.fragments.some((f) => f.slot === slot && !f.activeKey),
+      (slot) => !body.fragments.some((f) => (f.key ?? f.slot) === slot && !f.activeKey),
     )
   )
     throw new Error('Unknown fragment slot.');
@@ -250,7 +251,7 @@ export function withFragmentVersions(
     ...body,
     fragments: body.fragments.map((ref) => ({
       ...ref,
-      ...(ref.activeKey ? {} : { versionId: replacements[ref.slot] ?? ref.versionId }),
+      ...(ref.activeKey ? {} : { versionId: replacements[ref.key ?? ref.slot!] ?? ref.versionId }),
     })),
   };
 }
@@ -479,7 +480,12 @@ export async function installSystemPromptLayers(
       for (const key of keys) {
         const registry = await lockRegistry(client, key);
         const previous = await getActivePrompt(client, key);
-        const body = addSystemPromptLayers(key, previous.body);
+        const fragments = await Promise.all(
+          previous.body.fragments
+            .filter((ref) => ref.versionId)
+            .map((ref) => getPromptVersion(client, ref.versionId!)),
+        );
+        const body = addSystemPromptLayers(key, previous.body, fragments);
         if (promptContentHash(body) === previous.contentHash) continue;
         const draft = await insertDraft(client, registry, body, {
           sourceCommit,

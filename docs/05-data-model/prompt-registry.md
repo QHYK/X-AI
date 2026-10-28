@@ -1,6 +1,6 @@
 # Prompt Registry 数据模型
 
-本文件定义 Registry / Version 的存储和约束，以及既有业务对象的绑定载体。不定义模板加载、角色映射、Retry / Resume 或管理 UI 行为；这些规则见 [Prompt Registry Contract](../07-prompt-spec/registry.md)。Schema 见 `src/db/schema.ts`，数据库 Trigger 由 `drizzle/0021_prompt_registry.sql` 创建，`0024_active_system_fragments.sql` 扩展三个限定动态引用，不能仅凭 ORM 声明推断其存在。
+本文件定义 Registry / Version 的存储和约束，以及既有业务对象的绑定载体。不定义模板加载、角色映射、Retry / Resume 或管理 UI 行为；这些规则见 [Prompt Registry Contract](../07-prompt-spec/registry.md)。Schema 见 `src/db/schema.ts`，数据库 Trigger 由 `drizzle/0021_prompt_registry.sql` 创建，`0024_active_system_fragments.sql` 扩展三个限定动态引用，`0025_fragment_key_references.sql` 允许无 Slot 的直接 Key 引用，不能仅凭 ORM 声明推断其存在。
 
 ## `prompt_registry`
 
@@ -81,20 +81,20 @@ CHECK ("content_hash" ~ '^[a-f0-9]{64}$');
 
 ```json
 {
-  "systemInstructions": null,
+  "systemInstructions": "{{fragment.shared.discovery.editorial_criteria}}",
   "userTemplate": "{{input}}",
   "variants": {},
   "fragments": [
-    { "slot": "editorial", "versionId": "00000000-0000-4000-8000-000000000001" }
+    { "key": "shared.discovery.editorial_criteria", "versionId": "00000000-0000-4000-8000-000000000001" }
   ]
 }
 ```
 
-示例 UUID 仅表示形状，不是可导入的真实引用。System / User 均允许字符串、空字符串或 JSON null；`variants` 按名称保存同样的两个角色模板；`fragments` 为有序引用：普通项是 `{slot, versionId}`；三个限定 System Fragment 可使用 `{slot, activeKey}`，两种形式互斥，Key 清单与运行时规则见 [三层 System Prompt](../07-prompt-spec/registry.md#三层-system-prompt)。
+示例 UUID 仅表示形状，不是可导入的真实引用。System / User 均允许字符串、空字符串或 JSON null；`variants` 按名称保存同样的两个角色模板；`fragments` 保存引用配置而非内容排序：普通项是 `{key, versionId}`；三个限定 System Fragment 使用 `{key, activeKey}`，且 key=activeKey。旧 `{slot, versionId}` / `{slot, activeKey}` 仍可读取；同一项 key 与 slot 互斥，Key 清单与运行时规则见 [三层 System Prompt](../07-prompt-spec/registry.md#三层-system-prompt)。
 
-数据库 Trigger 检查四个顶层键及基本类型，拒绝重复 slot、非法 slot，以及不存在 / 非 Published / 非 Fragment 的目标版本。Fragment 必须 `userTemplate=null`、`variants={}`、`fragments=[]`，不支持嵌套。`0024` 要求动态目标为三个指定 Key 之一且存在有效 Active Published Fragment；普通精确引用规则不变。目标 Published 不能删除，JSONB 引用不是独立 FK。
+数据库 Trigger 检查四个顶层键及基本类型，拒绝重复引用名、非法历史 slot，以及不存在 / 非 Published / 非 Fragment 的目标版本。Fragment 必须 `userTemplate=null`、`variants={}`、`fragments=[]`，不支持嵌套。`0024` 要求动态目标为三个指定 Key 之一且存在有效 Active Published Fragment；`0025` 校验直接 Key 对应真实 Fragment；精确版本须属于该 Key，三个特殊 Key 仅使用动态绑定。目标 Published 不能删除，JSONB 引用不是独立 FK。
 
-严格的额外键、variant 内部形状、允许的模板变量和引用占位顺序由应用 Schema 校验；不能写成数据库已经验证全部模板语义。`content_hash` 的 CHECK 仅要求 64 位小写十六进制；它是否等于规范序列化 body（含有序精确引用）的 SHA-256，由应用保存 / 加载时验证，不含动态业务输入。
+严格的额外键、variant 内部形状、允许的模板变量和占位符与引用配置一致性由应用 Schema 校验；不能写成数据库已经验证全部模板语义。`content_hash` 的 CHECK 仅要求 64 位小写十六进制；它是否等于规范序列化 body（含引用配置）的 SHA-256，由应用保存 / 加载时验证，不含动态业务输入。
 
 ## 版本绑定载体
 

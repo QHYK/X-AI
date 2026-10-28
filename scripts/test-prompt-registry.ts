@@ -731,6 +731,12 @@ if (process.env.PROMPT_REGISTRY_TEST_DATABASE_URL) {
         'utf8',
       ),
     );
+    await client.query(
+      await readFile(
+        new URL('../drizzle/0025_fragment_key_references.sql', import.meta.url),
+        'utf8',
+      ),
+    );
     const db = {
       connect: async () => ({
         query: async (sql: string, values?: unknown[]) => {
@@ -773,6 +779,23 @@ if (process.env.PROMPT_REGISTRY_TEST_DATABASE_URL) {
       fragments: [{ slot: 'editorial', versionId: base.id }, d3.body.fragments[1]],
     };
     await assert.rejects(createPromptDraft(db, d3.key, badBody));
+    // Exercise the actual new Trigger, not only application validation.
+    const keyDraft = await createPromptDraft(db, d3.key, {
+      ...d3.body,
+      systemInstructions: '{{fragment.shared.discovery.editorial_criteria}}',
+      fragments: [
+        { key: 'shared.discovery.editorial_criteria', versionId: d3.body.fragments[0].versionId },
+      ],
+    });
+    await rejected(
+      "update prompt_versions set body=jsonb_set(body,'{fragments}',$2::jsonb) where id=$1",
+      [
+        keyDraft.id,
+        JSON.stringify([
+          { key: 'shared.discovery.tags', versionId: d3.body.fragments[0].versionId },
+        ]),
+      ],
+    );
     console.log(
       'Real PostgreSQL immutable versions, same-registry Active FK, Draft rejection, fragments, import and activation passed.',
     );

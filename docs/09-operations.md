@@ -93,7 +93,7 @@ Dry-run 只读当前 Git / 冻结 Seed 数据，输出 18 项 key、拟导入的
 
 Mock / 请求一致性测试不连接生产或调用模型；B3.1 **真实 PostgreSQL 约束验收尚未完成**，未提供独立测试 URL 时测试会明确 skip，不算通过。Stage4 行锁并发首次绑定也仍需独立 PostgreSQL 验收；不得把 Mock 结果等同真实事务验证。
 
-已有环境升级 Prompt Management / 静态清理不需额外 Migration 或重导入。登录 `/ai/prompts` 管理版本；手动保存 / Activate 会写 Web 当前连接的数据库，验收须使用测试环境。`test:prompt-registry` 检查 Service 和生产依赖边界；`test:prompt-runtime` 检查绑定；`test:prompt-requests` 检查实际请求一致性；`test:prompt-management` 检查 UI。认证 / 导航回归为 `test:admin-auth`、`test:admin-navigation`。均不调用模型；真实 Stage1 冒烟 `test:stage1:chat` 需另行授权。
+已有环境升级 Prompt Management / 静态清理不需额外 Migration 或重导入。直接 Fragment Key 引用需先执行新增 `0025_fragment_key_references.sql`（通过既有 `npm run db:migrate`）；它仅替换 Guard Function，不改写 Prompt 数据或 Active。部署后从旧 Request 创建 Draft 时仅转换本地编辑副本，保存、Publish 和 Activate 均须人工操作。登录 `/ai/prompts` 管理版本；手动保存 / Activate 会写 Web 当前连接的数据库，验收须使用测试环境。`test:prompt-registry` 检查 Service 和生产依赖边界；`test:prompt-runtime` 检查绑定；`test:prompt-requests` 检查实际请求一致性；`test:prompt-management` 检查 UI。认证 / 导航回归为 `test:admin-auth`、`test:admin-navigation`。均不调用模型；真实 Stage1 冒烟 `test:stage1:chat` 需另行授权。
 
 Manual / Put Back 进程硬退出可能遗留 `promptAttempt.status=running`：先确认原请求进程已结束、无模型请求仍在进行，并检查是否已有成功结果，再由运维针对该文章 / Candidate 将标记恢复为 failed；不要自动超时接管或批量清除。Put Back 保留原绑定 UUID，Manual 下一次主动点击重新选择 Active。此流程不提供未经确认的自动修复脚本。
 
@@ -434,6 +434,7 @@ npm run test:prompt-runtime
 npm run test:system-prompt-layers
 npm run test:prompt-requests
 npm run test:prompt-management
+npm run test:fragment-key-references
 ```
 
 ## 7. Reusable Diagnostics and Smoke Tests

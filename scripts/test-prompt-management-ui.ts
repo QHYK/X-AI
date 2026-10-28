@@ -28,6 +28,15 @@ Object.assign(globalThis, {
 const { createRoot } = await import('react-dom/client');
 const { PromptManagement } = await import('../src/app/(admin)/prompts/prompt-management-client.js');
 const seeds = await buildProductionPromptSeeds('a'.repeat(40));
+for (const key of ['xfield.identity', 'daily_brief.editorial', 'discover.editorial'] as const) {
+  seeds.push({
+    ...seeds.find((s) => s.kind === 'fragment')!,
+    id: randomUUID(),
+    key,
+    displayName: key,
+    body: { systemInstructions: 'ACTIVE TEXT', userTemplate: null, variants: {}, fragments: [] },
+  });
+}
 const details = new Map<string, PromptManagementDetail>();
 const versions: ManagedPromptVersion[] = seeds.map((s) => ({
   ...s,
@@ -149,10 +158,10 @@ const text = () => document.body.textContent!;
 const field = (label: string) =>
   document.querySelector(`[aria-label="${label}"]`) as HTMLTextAreaElement;
 await mount();
-assert.match(text(), /18 \/ 18 Registry/);
-assert.equal(document.querySelectorAll('aside li').length, 18);
+assert.match(text(), /21 \/ 21 Registry/);
+assert.equal(document.querySelectorAll('aside li').length, 21);
 await change('Prompt 类型', 'fragment');
-assert.equal(document.querySelectorAll('aside li').length, 3);
+assert.equal(document.querySelectorAll('aside li').length, 6);
 await change('Prompt 类型', 'all');
 await change('搜索 Prompt Key', 'daily.stage1');
 assert.equal(document.querySelectorAll('aside li').length, 1);
@@ -163,7 +172,26 @@ assert.equal(
   'Published is read-only',
 );
 await click('从此版本创建 Draft');
+const fragmentOptions = [...document.querySelectorAll('[aria-label="添加 Fragment"] option')].map(
+  (o) => o.textContent,
+);
+for (const f of fragments) assert.ok(fragmentOptions.includes(f.key), `Select includes ${f.key}`);
+assert.equal(document.querySelector('[aria-label="Fragment slot 1"]'), null);
+await change('添加 Fragment', 'daily_brief.editorial');
+assert.ok(field('基础 System Instructions').value.includes('{{fragment.daily_brief.editorial}}'));
+assert.match(text(), /动态 Active/);
+await change('添加 Fragment', 'shared.discovery.tags');
+assert.ok(field('基础 System Instructions').value.includes('{{fragment.shared.discovery.tags}}'));
+const noVersion = requests.length;
+await click('保存 Draft');
+assert.equal(requests.length, noVersion, 'Ordinary reference requires explicit version');
+await change('Fragment version 2', fragments.find((f) => f.key === 'shared.discovery.tags')!.id);
 await change('基础 System Instructions', 'Unsaved local text');
+assert.equal(
+  document.querySelector('[aria-label="Fragment version 2"]'),
+  null,
+  'Deleted placeholders remove bindings',
+);
 conflict = true;
 const before = requests.length;
 await click('保存 Draft');
@@ -212,8 +240,17 @@ assert.match(confirmations.at(-1)!, /从 v6 切换到 v5/);
 assert.equal(daily.registry.activeVersionId, previousActive);
 await selectKey('daily.stage4.event_enrichment');
 await click('从此版本创建 Draft');
+await change('Fragment target', 'with_search');
+await change('添加 Fragment', 'xfield.identity');
+assert.ok(field('with_search System Instructions').value.includes('{{fragment.xfield.identity}}'));
+assert.ok(
+  !field('without_search System Instructions').value.includes('{{fragment.xfield.identity}}'),
+);
+await change('Fragment target', 'without_search');
+await change('添加 Fragment', 'xfield.identity');
 const originalNoSearch = field('without_search System Instructions').value;
 await change('with_search System Instructions', 'Search-only edit');
+assert.match(text(), /动态 Active/, 'Other variant still uses the reference');
 await change('without_search User Prompt Template', '{{bad}}');
 const badVariant = requests.length;
 await click('保存 Draft');
@@ -230,7 +267,7 @@ assert.equal(
 );
 assert.ok(document.querySelector('pre')?.textContent, 'Exact Fragment content visible');
 await selectKey(fragments[0].key);
-assert.match(text(), /不会自动升级 Request/);
+assert.match(text(), /不会自动升级/);
 assert.ok(field('Fragment 内容'));
 // A fresh trailing-slash page must resolve the same basePath once.
 await act(async () => root.render(null));
@@ -240,5 +277,5 @@ assert.ok(requests.at(-1)!.url.startsWith('../api/admin/prompts'));
 await act(async () => root.unmount());
 dom.window.close();
 console.log(
-  'PASS Prompt UI: 18 registries, filtering/history, Draft/save/Publish/Activate/rollback, 409 preserves edits, duplicate guard, variants, pinned fragments, basePath',
+  'PASS Prompt UI: 21 registries, direct keys/dynamic selection, filtering/history, Draft/save/Publish/Activate/rollback, 409 preserves edits, duplicate guard, variants, pinned fragments, basePath',
 );

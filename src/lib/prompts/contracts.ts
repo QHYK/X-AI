@@ -53,7 +53,11 @@ export const PromptBodySchema = z
     fragments: z.array(
       z
         .object({
-          slot: z.string().regex(/^[a-z][a-z0-9_]*$/),
+          slot: z
+            .string()
+            .regex(/^[a-z][a-z0-9_]*$/)
+            .optional(),
+          key: z.enum(FRAGMENT_KEYS).optional(),
           versionId: z.uuid().optional(),
           activeKey: z.enum(ACTIVE_FRAGMENT_KEYS).optional(),
         })
@@ -62,7 +66,16 @@ export const PromptBodySchema = z
   })
   .strict()
   .refine(
-    (body) => body.fragments.every((ref) => !!ref.versionId !== !!ref.activeKey),
+    (body) =>
+      body.fragments.every(
+        (ref) =>
+          !!ref.versionId !== !!ref.activeKey &&
+          !!ref.key !== !!ref.slot &&
+          (!ref.key ||
+            (ref.activeKey
+              ? ref.key === ref.activeKey
+              : !(ACTIVE_FRAGMENT_KEYS as readonly string[]).includes(ref.key))),
+      ),
     'Fragment requires exactly one versionId or activeKey.',
   );
 export type PromptBody = z.infer<typeof PromptBodySchema>;
@@ -106,7 +119,9 @@ export function validatePromptBody(key: RegistryKey, kind: RegistryKind, raw: un
   const variantNames = Object.keys(body.variants).sort();
   if (JSON.stringify(variantNames) !== JSON.stringify([...(contract.variants ?? [])].sort()))
     throw new Error('Unsupported or missing named variants.');
-  const slots = body.fragments.map((f) => f.slot);
+  const slots = body.fragments.map((f) => f.key ?? f.slot!);
+  const direct = body.fragments.some((f) => !!f.key);
+  const used = new Set<string>();
   if (new Set(slots).size !== slots.length) throw new Error('Duplicate fragment slots.');
   const activeKeys = body.fragments.flatMap((ref) => (ref.activeKey ? [ref.activeKey] : []));
   if (new Set(activeKeys).size !== activeKeys.length)
@@ -119,14 +134,22 @@ export function validatePromptBody(key: RegistryKey, kind: RegistryKind, raw: un
     if (user.some((v) => v !== 'input' && !(v === 'category' && contract.category)))
       throw new Error('Unknown User variable.');
     const referenced = system.filter((v) => v.startsWith('fragment.')).map((v) => v.slice(9));
-    // Each populated System variant includes every shared fragment exactly once, in order.
-    if (
+    if (direct) {
+      if (
+        new Set(referenced).size !== referenced.length ||
+        referenced.some((name) => !slots.includes(name))
+      )
+        throw new Error('Unknown or duplicate Fragment Key placeholder.');
+      referenced.forEach((name) => used.add(name));
+    } else if (
       roles.systemInstructions !== null &&
       roles.systemInstructions.trim() &&
       JSON.stringify(referenced) !== JSON.stringify(slots)
     )
       throw new Error('Fragment placeholders must match the ordered references.');
   }
+  if (direct && slots.some((name) => !used.has(name)))
+    throw new Error('Fragment binding has no placeholder in any System template.');
   return body;
 }
 
@@ -165,8 +188,9 @@ export function renderResolvedPrompt(
       fragment.status !== 'published'
     )
       throw new Error(`Invalid published fragment: ${ref.versionId}`);
+    if (ref.key && fragment.key !== ref.key) throw new Error('Fragment Key / Version mismatch.');
     validatePromptBody(fragment.key, fragment.kind, fragment.body);
-    literalFragments.set(`fragment.${ref.slot}`, fragment.body.systemInstructions ?? '');
+    literalFragments.set(`fragment.${ref.key ?? ref.slot}`, fragment.body.systemInstructions ?? '');
   }
   const render = (text: string | null) =>
     (text ?? '').replace(/\{\{\s*([a-z][a-z0-9_.]*)\s*\}\}/g, (_match, name: string) => {

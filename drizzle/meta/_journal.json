@@ -176,6 +176,13 @@
       "when": 1793160000000,
       "tag": "0024_active_system_fragments",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793246400000,
+      "tag": "0025_fragment_key_references",
+      "breakpoints": true
     }
   ]
 }

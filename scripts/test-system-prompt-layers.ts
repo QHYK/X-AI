@@ -46,7 +46,7 @@ for (const key of [
   'discovery.d5.open_discovery',
 ] as const) {
   const old = memory.versions.get(memory.active.get(key)!)!;
-  const body = addSystemPromptLayers(key, old.body);
+  const body = addSystemPromptLayers(key, old.body, [...memory.versions.values()]);
   const next = {
     ...old,
     id: randomUUID(),

@@ -12,6 +12,7 @@ import type {
   PromptManagementDetail,
   ManagedPromptVersion,
 } from '@/lib/prompts/registry.js';
+import { keyReferenceBody, syncKeyReferences } from '@/lib/prompts/fragment-editor.js';
 import styles from './prompts.module.css';
 
 class ApiError extends Error {
@@ -52,6 +53,7 @@ export function PromptManagement() {
   const [detail, setDetail] = useState<PromptManagementDetail | null>(null);
   const [versionId, setVersionId] = useState('');
   const [body, setBody] = useState<PromptBody | null>(null);
+  const [systemTarget, setSystemTarget] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -78,7 +80,14 @@ export function PromptManagement() {
       data.versions[0];
     setDetail(data);
     setVersionId(selected?.id ?? '');
-    setBody(selected ? copy(selected.body) : null);
+    setBody(
+      selected
+        ? selected.status === 'draft'
+          ? keyReferenceBody(copy(selected.body), data.fragments)
+          : copy(selected.body)
+        : null,
+    );
+    setSystemTarget(selected ? (Object.keys(selected.body.variants)[0] ?? '') : '');
   }
   useEffect(() => {
     const controller = new AbortController();
@@ -145,7 +154,12 @@ export function PromptManagement() {
     setError(null);
     setMessage(null);
     setVersionId(next.id);
-    setBody(copy(next.body));
+    setBody(
+      next.status === 'draft' && detail
+        ? keyReferenceBody(copy(next.body), detail.fragments)
+        : copy(next.body),
+    );
+    setSystemTarget(Object.keys(next.body.variants)[0] ?? '');
   }
   async function refresh() {
     if (!key || locked.current || !discard()) return;
@@ -247,6 +261,26 @@ export function PromptManagement() {
       if (mounted.current) setBusy(false);
     }
   }
+  function editBody(next: PromptBody) {
+    setBody(syncKeyReferences(next));
+  }
+  function insertFragment(fragmentKey: RegistryKey) {
+    if (!body || !detail) return;
+    const next = keyReferenceBody(body, detail.fragments);
+    const roles = systemTarget ? next.variants[systemTarget] : next;
+    if (!roles) return;
+    const token = `{{fragment.${fragmentKey}}}`;
+    if ((roles.systemInstructions ?? '').includes(token)) return;
+    const text = roles.systemInstructions ? `${roles.systemInstructions}\n\n${token}` : token;
+    editBody(
+      systemTarget
+        ? {
+            ...next,
+            variants: { ...next.variants, [systemTarget]: { ...roles, systemInstructions: text } },
+          }
+        : { ...next, systemInstructions: text },
+    );
+  }
   function roles(
     name: string,
     value: { systemInstructions: string | null; userTemplate: string | null },
@@ -265,6 +299,7 @@ export function PromptManagement() {
             aria-label={`${name} System Instructions`}
             value={value.systemInstructions ?? ''}
             rows={14}
+            onFocus={() => setSystemTarget(name === '基础' ? '' : name)}
             onChange={(e) => update('systemInstructions', e.target.value)}
           />
         </label>
@@ -394,8 +429,9 @@ export function PromptManagement() {
                 </p>
                 {detail.registry.kind === 'fragment' ? (
                   <p className={styles.notice}>
-                    Fragment 的新版本不会自动升级 Request。Request 必须通过新版本显式选择精确
-                    Fragment 版本。
+                    {(ACTIVE_FRAGMENT_KEYS as readonly string[]).includes(detail.registry.key)
+                      ? '动态 Active Fragment：新 Run 固定开始时的 Active；已有 Run 的 Retry / Resume 使用原快照。'
+                      : '普通 Fragment：Request 绑定精确 Published Version；发布或激活新 Fragment 不会自动升级已有引用。'}
                   </p>
                 ) : null}
               </header>
@@ -464,14 +500,14 @@ export function PromptManagement() {
                     <>
                       <p className={styles.notice}>
                         System / User 可为空；动态输入仍由代码提供。模板仅支持 {'{{input}}'}
-                        、适用请求的 {'{{category}}'} 及 System 中的 {'{{fragment.slot}}'}。
+                        、适用请求的 {'{{category}}'} 及 System 中的 {'{{fragment.<key>}}'}。
                       </p>
                       {!Object.keys(body.variants).length
-                        ? roles('基础', body, (role, text) => setBody({ ...body, [role]: text }))
+                        ? roles('基础', body, (role, text) => editBody({ ...body, [role]: text }))
                         : null}
                       {Object.entries(body.variants).map(([name, value]) =>
                         roles(name, value, (role, text) =>
-                          setBody({
+                          editBody({
                             ...body,
                             variants: { ...body.variants, [name]: { ...value, [role]: text } },
                           }),
@@ -481,143 +517,113 @@ export function PromptManagement() {
                         className={styles.roles}
                         disabled={!editable || disabled}
                       >
-                        <legend>共享 Fragment 精确引用</legend>
+                        <legend>Fragment 引用</legend>
                         <p className={styles.muted}>
-                          引用顺序应与每个 System
-                          模板中的占位符一致。添加或删除引用后，请同步编辑占位符；不会自动改写
-                          Prompt。
+                          占位符在 System 模板中的位置决定内容顺序。三个 System Fragment 使用动态
+                          Active， 新 Run 固定版本；普通 Fragment 必须明确选择 Published
+                          Version，不自动升级。 手动输入 Key 可识别引用；删除时检查所有条件变体。
                         </p>
+                        {Object.keys(body.variants).length ? (
+                          <label>
+                            插入到 System 变体
+                            <select
+                              aria-label="Fragment target"
+                              value={systemTarget}
+                              onChange={(e) => setSystemTarget(e.target.value)}
+                            >
+                              {Object.keys(body.variants).map((name) => (
+                                <option
+                                  key={name}
+                                  value={name}
+                                >
+                                  {name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : null}
+                        <label>
+                          添加 Fragment
+                          <select
+                            aria-label="添加 Fragment"
+                            value=""
+                            onChange={(e) => {
+                              if (e.target.value) insertFragment(e.target.value as RegistryKey);
+                            }}
+                          >
+                            <option value="">选择 Fragment</option>
+                            {items
+                              .filter((item) => item.kind === 'fragment')
+                              .map((item) => (
+                                <option
+                                  key={item.key}
+                                  value={item.key}
+                                >
+                                  {item.key}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
                         {body.fragments.map((ref, index) => {
                           const selected = detail.fragments.find((f) => f.id === ref.versionId);
+                          const fragmentKey = ref.key ?? ref.activeKey ?? selected?.key;
+                          const registry = items.find((item) => item.key === fragmentKey);
                           return (
                             <div
                               className={styles.fragment}
-                              key={index}
+                              key={fragmentKey ?? index}
                             >
-                              <label>
-                                Slot
-                                <input
-                                  aria-label={`Fragment slot ${index + 1}`}
-                                  value={ref.slot}
-                                  onChange={(e) =>
-                                    setBody({
-                                      ...body,
-                                      fragments: body.fragments.map((r, i) =>
-                                        i === index ? { ...r, slot: e.target.value } : r,
-                                      ),
-                                    })
-                                  }
-                                />
-                              </label>
-                              <label>
-                                Published Version
-                                <select
-                                  aria-label={`Fragment version ${index + 1}`}
-                                  value={ref.activeKey ?? ref.versionId}
-                                  disabled={!!ref.activeKey}
-                                  onChange={(e) =>
-                                    setBody({
-                                      ...body,
-                                      fragments: body.fragments.map((r, i) =>
-                                        i === index ? { ...r, versionId: e.target.value } : r,
-                                      ),
-                                    })
-                                  }
-                                >
-                                  {ref.activeKey ? (
-                                    <option value={ref.activeKey}>
-                                      {ref.activeKey} · Active（Run 内固定）
-                                    </option>
-                                  ) : null}
-                                  {!selected && !ref.activeKey ? (
-                                    <option value={ref.versionId}>
-                                      引用不可用：{ref.versionId}
-                                    </option>
-                                  ) : null}
-                                  {detail.fragments
-                                    .filter(
-                                      (fragment) =>
-                                        !(ACTIVE_FRAGMENT_KEYS as readonly string[]).includes(
-                                          fragment.key,
+                              <strong>{fragmentKey ?? '无法解析历史 Fragment'}</strong>
+                              {ref.activeKey ? (
+                                <p>
+                                  动态 Active ·{' '}
+                                  {registry?.activeVersion != null
+                                    ? `v${registry.activeVersion}`
+                                    : '未设置'}
+                                  （已有 Run 使用快照）
+                                </p>
+                              ) : (
+                                <label>
+                                  Published Version
+                                  <select
+                                    aria-label={`Fragment version ${index + 1}`}
+                                    value={ref.versionId ?? ''}
+                                    onChange={(e) =>
+                                      setBody({
+                                        ...body,
+                                        fragments: body.fragments.map((r, i) =>
+                                          i === index
+                                            ? { ...r, versionId: e.target.value || undefined }
+                                            : r,
                                         ),
-                                    )
-                                    .map((fragment) => (
-                                      <option
-                                        key={fragment.id}
-                                        value={fragment.id}
-                                      >
-                                        {fragment.key} · v{fragment.version}
-                                      </option>
-                                    ))}
-                                </select>
-                              </label>
-                              <div className={styles.toolbar}>
-                                <button
-                                  type="button"
-                                  disabled={index === 0 || !editable || disabled}
-                                  onClick={() => {
-                                    const refs = [...body.fragments];
-                                    [refs[index - 1], refs[index]] = [refs[index], refs[index - 1]];
-                                    setBody({ ...body, fragments: refs });
-                                  }}
-                                >
-                                  上移
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={
-                                    index === body.fragments.length - 1 || !editable || disabled
-                                  }
-                                  onClick={() => {
-                                    const refs = [...body.fragments];
-                                    [refs[index + 1], refs[index]] = [refs[index], refs[index + 1]];
-                                    setBody({ ...body, fragments: refs });
-                                  }}
-                                >
-                                  下移
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setBody({
-                                      ...body,
-                                      fragments: body.fragments.filter((_, i) => i !== index),
-                                    })
-                                  }
-                                >
-                                  移除引用
-                                </button>
-                              </div>
+                                      })
+                                    }
+                                  >
+                                    <option value="">请选择精确版本</option>
+                                    {detail.fragments
+                                      .filter((f) => f.key === fragmentKey)
+                                      .map((f) => (
+                                        <option
+                                          key={f.id}
+                                          value={f.id}
+                                        >
+                                          {f.key} · v{f.version}
+                                        </option>
+                                      ))}
+                                  </select>
+                                </label>
+                              )}
                               <pre className={styles.fragmentText}>
                                 {ref.activeKey
-                                  ? `${ref.activeKey}：新 Run 固定当时的 Active；已有 Run 保留快照。`
+                                  ? (detail.fragments.find(
+                                      (f) => f.id === registry?.activeVersionId,
+                                    )?.body.systemInstructions ?? '当前 Active 内容不可用')
                                   : (selected?.body.systemInstructions ??
-                                    '无法读取引用内容，请检查精确版本。')}
+                                    '请选择 Published Version')}
                               </pre>
                             </div>
                           );
                         })}
-                        <button
-                          type="button"
-                          disabled={!detail.fragments.length || !editable || disabled}
-                          onClick={() => {
-                            const fragment = detail.fragments.find(
-                              (fragment) =>
-                                !(ACTIVE_FRAGMENT_KEYS as readonly string[]).includes(fragment.key),
-                            );
-                            if (!fragment) return;
-                            let slot = 'shared';
-                            let suffix = 1;
-                            while (body.fragments.some((r) => r.slot === slot))
-                              slot = `shared_${suffix++}`;
-                            setBody({
-                              ...body,
-                              fragments: [...body.fragments, { slot, versionId: fragment.id }],
-                            });
-                          }}
-                        >
-                          添加 Fragment 引用
-                        </button>
                       </fieldset>
                     </>
                   )}
