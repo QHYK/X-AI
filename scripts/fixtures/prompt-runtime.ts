@@ -2,8 +2,28 @@ import { buildProductionPromptSeeds } from '../../src/lib/prompts/production-see
 import { promptContentHash, initialPromptVersion } from '../../src/lib/prompts/registry.js';
 import type { PromptVersion, RegistryKey } from '../../src/lib/prompts/contracts.js';
 import type { Pool } from 'pg';
+import { ACTIVE_FRAGMENT_KEYS } from '../../src/lib/prompts/contracts.js';
 const seeds = await buildProductionPromptSeeds('a'.repeat(40));
 export class PromptMemory {
+  constructor() {
+    for (const key of ACTIVE_FRAGMENT_KEYS) {
+      const id = `00000000-0000-4000-8000-00000000090${ACTIVE_FRAGMENT_KEYS.indexOf(key)}`;
+      const body = { systemInstructions: '', userTemplate: null, variants: {}, fragments: [] };
+      this.versions.set(id, {
+        id,
+        registryId: id,
+        key,
+        kind: 'fragment',
+        version: 1,
+        status: 'published',
+        body,
+        contentHash: promptContentHash(body),
+        sourceCommit: null,
+        legacyVersion: null,
+      });
+      this.active.set(key, id);
+    }
+  }
   versions = new Map<string, PromptVersion>(
     seeds.map((s) => [
       s.id,
@@ -29,6 +49,8 @@ export class PromptMemory {
   activeReads = 0;
   handle(sql: string, v: unknown[] = []) {
     this.calls.push(sql);
+    if (sql.includes('select r.key, v.id from prompt_registry r'))
+      return { rows: ACTIVE_FRAGMENT_KEYS.map((key) => ({ key, id: this.active.get(key) })) };
     if (sql.includes('active_version_id as "activeVersionId"')) {
       if (this.failRead) throw new Error('Mock Prompt DB unavailable');
       this.activeReads++;
@@ -47,7 +69,7 @@ export class PromptMemory {
       /(?:from|update) (stage4_runs|discovery_runs|discovery_candidates|raw_articles)\b/,
     )?.[1];
     const owner = `${table}:${v[0]}`;
-    if (table && sql.includes(' as value ') && sql.includes('for update')) {
+    if (table && sql.includes(' as value ')) {
       return { rows: [{ value: structuredClone(this.owners.get(owner) ?? {}) }] };
     }
     if (
@@ -102,4 +124,15 @@ export function attachPromptMemory<T>(db: T, prompts = new PromptMemory()): T {
       };
     },
   } as T;
+}
+
+/** Active-pointer snapshot rows for business-only DB fixtures. No network or production data. */
+export function systemFragmentFixtureQuery(sql: string) {
+  if (!sql.includes('select r.key, v.id from prompt_registry r')) return undefined;
+  return {
+    rows: ACTIVE_FRAGMENT_KEYS.map((key, i) => ({
+      key,
+      id: `00000000-0000-4000-8000-00000000090${i}`,
+    })),
+  };
 }

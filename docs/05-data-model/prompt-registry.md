@@ -1,6 +1,6 @@
 # Prompt Registry 数据模型
 
-本文件定义 Registry / Version 的存储和约束，以及既有业务对象的绑定载体。不定义模板加载、角色映射、Retry / Resume 或管理 UI 行为；这些规则见 [Prompt Registry Contract](../07-prompt-spec/registry.md)。Schema 见 `src/db/schema.ts`，数据库 Trigger 由 `drizzle/0021_prompt_registry.sql` 创建，不能仅凭 ORM 声明推断其存在。
+本文件定义 Registry / Version 的存储和约束，以及既有业务对象的绑定载体。不定义模板加载、角色映射、Retry / Resume 或管理 UI 行为；这些规则见 [Prompt Registry Contract](../07-prompt-spec/registry.md)。Schema 见 `src/db/schema.ts`，数据库 Trigger 由 `drizzle/0021_prompt_registry.sql` 创建，`0024_active_system_fragments.sql` 扩展三个限定动态引用，不能仅凭 ORM 声明推断其存在。
 
 ## `prompt_registry`
 
@@ -45,7 +45,7 @@ CHECK ("kind" in ('request', 'fragment'));
 | `registry_id` | uuid | NOT NULL；FK → `prompt_registry.id` |
 | `version` | integer | NOT NULL；Registry 内正整数；显示为 vN，不代替 UUID |
 | `status` | text | NOT NULL |
-| `body` | jsonb | NOT NULL；受控模板及精确 Fragment 引用；结构见下节 |
+| `body` | jsonb | NOT NULL；受控模板及 Fragment 引用；结构见下节 |
 | `content_hash` | text | NOT NULL |
 | `source_commit` | text | nullable |
 | `legacy_version` | text | nullable；原代码版本标签，仅导入 provenance，不是第二个运行时版本号 |
@@ -90,9 +90,9 @@ CHECK ("content_hash" ~ '^[a-f0-9]{64}$');
 }
 ```
 
-示例 UUID 仅表示形状，不是可导入的真实引用。System / User 均允许字符串、空字符串或 JSON null；`variants` 按名称保存同样的两个角色模板；`fragments` 为有序 slot / 精确 Version UUID 列表，不引用 Fragment Active 指针。
+示例 UUID 仅表示形状，不是可导入的真实引用。System / User 均允许字符串、空字符串或 JSON null；`variants` 按名称保存同样的两个角色模板；`fragments` 为有序引用：普通项是 `{slot, versionId}`；三个限定 System Fragment 可使用 `{slot, activeKey}`，两种形式互斥，Key 清单与运行时规则见 [三层 System Prompt](../07-prompt-spec/registry.md#三层-system-prompt)。
 
-数据库 Trigger 检查四个顶层键及基本类型，拒绝重复 slot、非法 slot，以及不存在 / 非 Published / 非 Fragment 的目标版本。Fragment 必须 `userTemplate=null`、`variants={}`、`fragments=[]`，不支持嵌套。目标 Published 不能删除，JSONB 引用不是独立 FK。
+数据库 Trigger 检查四个顶层键及基本类型，拒绝重复 slot、非法 slot，以及不存在 / 非 Published / 非 Fragment 的目标版本。Fragment 必须 `userTemplate=null`、`variants={}`、`fragments=[]`，不支持嵌套。`0024` 要求动态目标为三个指定 Key 之一且存在有效 Active Published Fragment；普通精确引用规则不变。目标 Published 不能删除，JSONB 引用不是独立 FK。
 
 严格的额外键、variant 内部形状、允许的模板变量和引用占位顺序由应用 Schema 校验；不能写成数据库已经验证全部模板语义。`content_hash` 的 CHECK 仅要求 64 位小写十六进制；它是否等于规范序列化 body（含有序精确引用）的 SHA-256，由应用保存 / 加载时验证，不含动态业务输入。
 
@@ -110,3 +110,15 @@ CHECK ("content_hash" ~ '^[a-f0-9]{64}$');
 | Put Back / Read More | [raw_articles.metadata.promptVersions](daily.md#raw_articles) |
 
 Manual / Put Back 同一 JSONB 下还保存 `promptAttempt = {key, status}`，应用状态为 running / completed / failed。这是执行领取标记，不是数据库枚举或独立操作历史；硬退出遗留 running 的恢复入口见 [Operations](../09-operations.md)。每次新 Generate、失败重试、Resume 的具体选版行为统一见 [Runtime Contract](../07-prompt-spec/registry.md)，这里不再复制。
+
+### System Fragment 快照载体
+
+`systemFragmentVersions` 是三个限定 Fragment Key → 精确 UUID 的对象，不保存文本。它不放宽 `version > 0`，不新增表或列：
+
+- Daily / 独立 Stage：`run.json.systemFragmentVersions`；Daily 子阶段继承父文件，原子更新保留快照。
+- Discovery：`config_snapshot.systemFragmentVersions`；独立 Open 不继承父 Run 的快照。
+- Stage4：`stage4_runs.prompt_versions.systemFragmentVersions`，与平铺的 Request UUID 并存。
+- Read More / Put Back：`raw_articles.metadata.systemFragmentVersions`，与操作绑定一起保存。
+- 新 Evaluation：`evaluation_inputs.input_json = {evaluationBusinessInput, systemFragmentVersions}`；input_hash 对完整包装计算，执行时恢复原业务输入。历史未包装 JSON 仍可读取。
+
+历史没有该字段不回填。升级 Request 的 `change_note` 记录 `system-fragments-v1:previous=<UUID>`，是确切的升级来源，不是版本号或推测历史的依据。

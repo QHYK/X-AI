@@ -1,3 +1,4 @@
+import { systemFragmentFixtureQuery } from './fixtures/prompt-runtime.js';
 import {
   createPostgresEvaluationStorage,
   buildFrozenEvaluationInput,
@@ -77,10 +78,11 @@ try {
 
 const sqlLog: string[] = [];
 const postgresStorage = createPostgresEvaluationStorage({
-  query: async (text: string) => {
+  query: async (text: string, values: unknown[] = []) => {
     sqlLog.push(text);
+    if (systemFragmentFixtureQuery(text)) return systemFragmentFixtureQuery(text)!;
     if (text.includes("insert into evaluation_inputs")) {
-      return { rows: [{ id: "db-input", dailyDate: "2026-08-28", stage: "stage1", inputJson: {}, inputHash: "hash" }] };
+      return { rows: [{ id: "db-input", dailyDate: "2026-08-28", stage: "stage1", inputJson: JSON.parse(String(values[2])), inputHash: values[3] }] };
     }
     if (text.includes("insert into evaluation_runs")) {
       return { rows: [{ id: "db-run" }] };
@@ -105,7 +107,7 @@ checks.push({
   name: "Evaluation persistence never writes Production tables",
   passed:
     sqlLog.length > 0 &&
-    sqlLog.every((text) => /evaluation_(inputs|runs|outputs)/.test(text)) &&
+    sqlLog.filter((text) => /^(insert|update|delete)/i.test(text)).every((text) => /evaluation_(inputs|runs|outputs)/.test(text)) &&
     !sqlLog.some((text) => /processed_contents|event_review_items|\bevents\b|feedback|ai_rank|display_rank/i.test(text)),
   detail: sqlLog,
 });

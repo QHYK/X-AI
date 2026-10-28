@@ -1,3 +1,5 @@
+import { captureSystemFragments } from '../lib/prompts/system-fragments.js';
+import { readSystemFragmentFile } from '../lib/prompts/run-file.js';
 /**
  * Stage 4 Event 的事务内重建与关联写入。
  * 仅清理当前重建日期范围内的旧 Event，防止重跑误删除其他历史期次的数据。
@@ -97,13 +99,21 @@ export async function loadOrCreateStage4Run(
       successCount: existing.rows[0].success_count,
       status: existing.rows[0].status,
     };
+  const snapshot = process.env.DAILY_PROMPT_RUN_PATH
+    ? await readSystemFragmentFile(process.env.DAILY_PROMPT_RUN_PATH)
+    : await captureSystemFragments(queryable);
   const created = await queryable.query<{ id: string; success_count: number; status: string }>(
     `
-    insert into stage4_runs (daily_date, review_run_id, status, expected_count)
-    values ($1::date, $2::uuid, 'running', $3)
+    insert into stage4_runs (daily_date, review_run_id, status, expected_count, prompt_versions)
+    values ($1::date, $2::uuid, 'running', $3, $4::jsonb)
     on conflict (review_run_id) do update set review_run_id = excluded.review_run_id
     returning id, success_count, status`,
-    [dailyDate, reviewRunId, expectedCount],
+    [
+      dailyDate,
+      reviewRunId,
+      expectedCount,
+      JSON.stringify(snapshot ? { systemFragmentVersions: snapshot } : {}),
+    ],
   );
   const row = created.rows[0];
   if (!row) throw new Error('Failed to create Stage 4 run.');

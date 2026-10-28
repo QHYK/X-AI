@@ -1,4 +1,4 @@
-import { writeRunFile } from '../src/lib/prompts/run-file.js';
+import { writeRunFile, initializeSystemFragmentFile } from '../src/lib/prompts/run-file.js';
 import { spawn } from "node:child_process";
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from "node:path";
@@ -88,6 +88,7 @@ async function main() {
 
   await mkdir(runDir, { recursive: true });
   await writeRun(runPath, run);
+  if (logPool) await initializeSystemFragmentFile(runPath, logPool, undefined, true);
   console.log(`[daily] Runtime artifact: ${runPath}`);
   console.log(
     `[daily] Daily ${scope.dailyDate}: ${scope.startAt} <= published_at < ${scope.endAt} (${scope.timezone})`,

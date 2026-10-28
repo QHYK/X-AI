@@ -1,3 +1,4 @@
+import { captureSystemFragments, readSystemFragmentSnapshot } from './system-fragments.js';
 import { mkdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -84,6 +85,7 @@ function mergeBindings(old: Record<string, unknown>, incoming: Record<string, un
   }
   const value: Record<string, unknown> = {
     ...incoming,
+    ...(old.systemFragmentVersions ? { systemFragmentVersions: old.systemFragmentVersions } : {}),
     promptVersions: labels,
     promptVersionIds: ids,
   };
@@ -107,7 +109,7 @@ export function filePromptBinder(
   db: Pick<Pool, 'query'>,
   mirror?: string,
 ): BindPrompt {
-  return async (key, active) => {
+  const binder: BindPrompt = async (key, active) => {
     let id = '';
     let label = '';
     await updateRunFile(path, async (old) => {
@@ -132,14 +134,42 @@ export function filePromptBinder(
       );
     return id;
   };
+  binder.systemFragments = async () =>
+    readSystemFragmentSnapshot((await readRun(path)).systemFragmentVersions);
+  return binder;
 }
-export function withFilePrompts<T>(db: Pool, path: string, work: () => Promise<T>) {
+export async function withFilePrompts<T>(db: Pool, path: string, work: () => Promise<T>) {
+  await initializeSystemFragmentFile(path, db, process.env.DAILY_PROMPT_RUN_PATH);
   return withPromptBindings(
     db,
     filePromptBinder(path, db, process.env.DAILY_PROMPT_RUN_PATH),
     work,
   );
 }
+/** Only new files get a fresh snapshot; historical files are never retroactively stamped. */
+export async function initializeSystemFragmentFile(
+  path: string,
+  db: Pick<Pool, 'query'>,
+  parent?: string,
+  newRun = false,
+) {
+  await updateRunFile(path, async (old) => {
+    if (old.systemFragmentVersions !== undefined) {
+      readSystemFragmentSnapshot(old.systemFragmentVersions);
+      return old;
+    }
+    if (!newRun && Object.keys(old).length > 0) return old;
+    const snapshot =
+      parent && parent !== path
+        ? readSystemFragmentSnapshot((await readRun(parent)).systemFragmentVersions)
+        : await captureSystemFragments(db);
+    return { ...old, ...(snapshot ? { systemFragmentVersions: snapshot } : {}) };
+  });
+}
+export async function readSystemFragmentFile(path: string) {
+  return readSystemFragmentSnapshot((await readRun(path)).systemFragmentVersions);
+}
+
 export async function inheritRunPrompt(
   path: string,
   priorPath: string,
@@ -156,13 +186,24 @@ export async function inheritRunPrompt(
       throw new Error('Invalid resumed Prompt binding.');
     label = `v${version.version}`;
   }
-  await updateRunFile(path, (old) =>
-    mergeBindings(old, {
+  await updateRunFile(path, (old) => {
+    if (
+      previous.systemFragmentVersions &&
+      old.systemFragmentVersions &&
+      JSON.stringify(previous.systemFragmentVersions) !== JSON.stringify(old.systemFragmentVersions)
+    )
+      throw new Error(
+        'Cannot reuse ranking from a different System Fragment snapshot. Start a fresh ranking attempt.',
+      );
+    return mergeBindings(old, {
       ...old,
+      ...(previous.systemFragmentVersions
+        ? { systemFragmentVersions: previous.systemFragmentVersions }
+        : {}),
       promptVersionIds: { ...readBindings(old), [key]: prior },
       promptVersions: { ...readLabels(old), ...(label ? { [key]: label } : {}) },
-    }),
-  );
+    });
+  });
 }
 export function runPath(stage: string, startedAt: Date, root = process.cwd()) {
   return join(

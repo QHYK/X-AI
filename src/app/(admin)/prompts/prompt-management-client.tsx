@@ -1,7 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { validatePromptBody, type PromptBody, type RegistryKey } from '@/lib/prompts/contracts.js';
+import {
+  ACTIVE_FRAGMENT_KEYS,
+  validatePromptBody,
+  type PromptBody,
+  type RegistryKey,
+} from '@/lib/prompts/contracts.js';
 import type {
   PromptRegistryItem,
   PromptManagementDetail,
@@ -508,7 +513,8 @@ export function PromptManagement() {
                                 Published Version
                                 <select
                                   aria-label={`Fragment version ${index + 1}`}
-                                  value={ref.versionId}
+                                  value={ref.activeKey ?? ref.versionId}
+                                  disabled={!!ref.activeKey}
                                   onChange={(e) =>
                                     setBody({
                                       ...body,
@@ -518,19 +524,31 @@ export function PromptManagement() {
                                     })
                                   }
                                 >
-                                  {!selected ? (
+                                  {ref.activeKey ? (
+                                    <option value={ref.activeKey}>
+                                      {ref.activeKey} · Active（Run 内固定）
+                                    </option>
+                                  ) : null}
+                                  {!selected && !ref.activeKey ? (
                                     <option value={ref.versionId}>
                                       引用不可用：{ref.versionId}
                                     </option>
                                   ) : null}
-                                  {detail.fragments.map((fragment) => (
-                                    <option
-                                      key={fragment.id}
-                                      value={fragment.id}
-                                    >
-                                      {fragment.key} · v{fragment.version}
-                                    </option>
-                                  ))}
+                                  {detail.fragments
+                                    .filter(
+                                      (fragment) =>
+                                        !(ACTIVE_FRAGMENT_KEYS as readonly string[]).includes(
+                                          fragment.key,
+                                        ),
+                                    )
+                                    .map((fragment) => (
+                                      <option
+                                        key={fragment.id}
+                                        value={fragment.id}
+                                      >
+                                        {fragment.key} · v{fragment.version}
+                                      </option>
+                                    ))}
                                 </select>
                               </label>
                               <div className={styles.toolbar}>
@@ -571,8 +589,10 @@ export function PromptManagement() {
                                 </button>
                               </div>
                               <pre className={styles.fragmentText}>
-                                {selected?.body.systemInstructions ??
-                                  '无法读取引用内容，请检查精确版本。'}
+                                {ref.activeKey
+                                  ? `${ref.activeKey}：新 Run 固定当时的 Active；已有 Run 保留快照。`
+                                  : (selected?.body.systemInstructions ??
+                                    '无法读取引用内容，请检查精确版本。')}
                               </pre>
                             </div>
                           );
@@ -581,7 +601,10 @@ export function PromptManagement() {
                           type="button"
                           disabled={!detail.fragments.length || !editable || disabled}
                           onClick={() => {
-                            const fragment = detail.fragments[0];
+                            const fragment = detail.fragments.find(
+                              (fragment) =>
+                                !(ACTIVE_FRAGMENT_KEYS as readonly string[]).includes(fragment.key),
+                            );
                             if (!fragment) return;
                             let slot = 'shared';
                             let suffix = 1;

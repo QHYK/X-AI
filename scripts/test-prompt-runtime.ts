@@ -159,7 +159,7 @@ async function testPromptLogging() {
     clear();
     const fragmentKey = 'discovery.d3.topic_discovery' as const;
     const d3 = memory.versions.get(memory.active.get(fragmentKey)!)!;
-    memory.versions.delete(d3.body.fragments[0].versionId);
+    memory.versions.delete(d3.body.fragments[0].versionId!);
     await assert.rejects(
       withPromptBindings(
         memory.db,

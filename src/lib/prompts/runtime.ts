@@ -1,19 +1,34 @@
+import {
+  captureSystemFragments,
+  readSystemFragmentSnapshot,
+  compatibleActiveRequest,
+  hasActiveFragments,
+} from './system-fragments.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Pool, PoolClient } from 'pg';
 import { getActivePrompt, getPromptVersion, resolvePromptFragments } from './registry.js';
-import { renderResolvedPrompt, type PromptKey, type PromptVersion } from './contracts.js';
+import {
+  renderResolvedPrompt,
+  type PromptKey,
+  type PromptVersion,
+  type SystemFragmentSnapshot,
+} from './contracts.js';
 
 export type PromptBindingState = 'new' | 'reused' | 'active';
 export type PromptBindings = Partial<Record<PromptKey, string>>;
 export type PromptDb = Pick<Pool | PoolClient, 'query'>;
-export type BindPrompt = (
+export type BindPrompt = ((
   key: PromptKey,
   active: (db?: PromptDb) => Promise<string>,
-) => Promise<string>;
+) => Promise<string>) & {
+  systemFragments?: (key: PromptKey) => Promise<SystemFragmentSnapshot | undefined>;
+};
 type Scope = {
   db: PromptDb;
   bind: BindPrompt;
   binding?: PromptBindingState;
+  systemFragments?: (key: PromptKey) => Promise<SystemFragmentSnapshot | undefined>;
+  fragmentSnapshot?: Promise<SystemFragmentSnapshot | undefined>;
   logged: Set<string>;
   versions: Map<
     PromptKey,
@@ -30,13 +45,18 @@ export function withPromptBindings<T>(
   db: PromptDb,
   bind: BindPrompt,
   work: () => Promise<T>,
-  logging: { binding?: PromptBindingState; logged?: Set<string> } = {},
+  logging: {
+    binding?: PromptBindingState;
+    logged?: Set<string>;
+    systemFragments?: (key: PromptKey) => Promise<SystemFragmentSnapshot | undefined>;
+  } = {},
 ): Promise<T> {
   return scopes.run(
     {
       db,
       bind,
       binding: logging.binding,
+      systemFragments: logging.systemFragments ?? bind.systemFragments,
       logged: logging.logged ?? new Set(),
       versions: new Map(),
     },
@@ -76,9 +96,17 @@ export async function productionPrompt(
       let phase: 'binding' | 'load' = 'binding';
       let selectedActive = false;
       try {
+        let snapshot = scope.systemFragments
+          ? await (scope.fragmentSnapshot ??= scope.systemFragments(key))
+          : undefined;
         const id = await scope.bind(key, async (db = scope.db) => {
           selectedActive = true;
-          return (await getActivePrompt(db, key)).id;
+          if (!snapshot && !scope.systemFragments && scope.binding === 'active') {
+            const current = await getActivePrompt(db, key);
+            if (hasActiveFragments(current))
+              snapshot = await (scope.fragmentSnapshot ??= captureSystemFragments(db));
+          }
+          return (await compatibleActiveRequest(db, key, snapshot)).id;
         });
         // BindPrompt returns only after its persistence/mirror work succeeds.
         const binding = scope.binding ?? (selectedActive ? 'new' : 'reused');
@@ -86,7 +114,9 @@ export async function productionPrompt(
         const version = await getPromptVersion(scope.db, id);
         if (version.key !== key || version.kind !== 'request' || version.status !== 'published')
           throw new Error(`Invalid bound Prompt version for ${key}: ${id}`);
-        const fragments = await resolvePromptFragments(scope.db, version);
+        if (hasActiveFragments(version) && !snapshot)
+          throw new Error(`Missing System Fragment snapshot for bound Request: ${key}`);
+        const fragments = await resolvePromptFragments(scope.db, version, snapshot);
         return { version, fragments, binding };
       } catch (error) {
         logPromptError(key, phase, scope.logged);
@@ -130,7 +160,7 @@ export function databasePromptBinder(
   options: { fresh?: boolean; observe?: (key: PromptKey, id: string) => Promise<void> } = {},
 ): BindPrompt {
   const { table, column, parent } = CARRIERS[carrier];
-  return async (key, active) => {
+  const binder: BindPrompt = async (key, active) => {
     const client = await db.connect();
     let versionId: string;
     try {
@@ -170,6 +200,34 @@ export function databasePromptBinder(
     await options.observe?.(key, versionId);
     return versionId;
   };
+  binder.systemFragments = async (key) => {
+    const client = await db.connect();
+    try {
+      await client.query('begin');
+      const row = await client.query<{ value: Record<string, unknown> | null }>(
+        `select ${column} as value from ${table} where id = $1::uuid for update`,
+        [id],
+      );
+      if (!row.rows[0]) throw new Error('Prompt binding owner not found.');
+      const value = row.rows[0].value ?? {};
+      let snapshot = readSystemFragmentSnapshot(value.systemFragmentVersions);
+      if (options.fresh && (key.startsWith('daily.') || key.startsWith('discovery.'))) {
+        snapshot = await captureSystemFragments(client);
+        await client.query(
+          `update ${table} set ${column} = coalesce(${column}, '{}'::jsonb) || $2::jsonb where id = $1::uuid`,
+          [id, JSON.stringify({ systemFragmentVersions: snapshot })],
+        );
+      }
+      await client.query('commit');
+      return snapshot;
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
+  return binder;
 }
 
 export function evaluationPromptBinder(
@@ -239,13 +297,21 @@ export async function claimManualPrompt(
         'Another generation attempt is still running; no model request was sent.',
       );
     const previous = (value.promptVersions as PromptBindings | undefined)?.[key];
+    const snapshot =
+      reuse && previous
+        ? readSystemFragmentSnapshot(value.systemFragmentVersions)
+        : key.startsWith('daily.')
+          ? await captureSystemFragments(client)
+          : undefined;
     const version =
       reuse && previous
         ? await getPromptVersion(client, previous)
-        : await getActivePrompt(client, key);
+        : await compatibleActiveRequest(client, key, snapshot);
     if (version.key !== key || version.status !== 'published')
       throw new Error('Invalid manual Prompt binding.');
-    await resolvePromptFragments(client, version);
+    if (hasActiveFragments(version) && !snapshot)
+      throw new Error('Missing historical System Fragment snapshot.');
+    await resolvePromptFragments(client, version, snapshot);
     const updated = await client.query(
       `update ${table} set ${column} = coalesce(${column}, '{}'::jsonb) || $2::jsonb where id = $1::uuid`,
       [
@@ -253,6 +319,7 @@ export async function claimManualPrompt(
         JSON.stringify({
           promptVersions: { ...(value.promptVersions as PromptBindings), [key]: version.id },
           promptAttempt: { key, status: 'running' },
+          ...(snapshot ? { systemFragmentVersions: snapshot } : {}),
         }),
       ],
     );

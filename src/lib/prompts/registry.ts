@@ -1,6 +1,11 @@
+import { addSystemPromptLayers, SYSTEM_LAYER_NOTE } from './system-layers.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import {
+  ACTIVE_FRAGMENT_KEYS,
+  PROMPT_CONTRACTS,
+  type PromptKey,
+  type SystemFragmentSnapshot,
   type PromptBody,
   type PromptVersion,
   type RegistryKey,
@@ -51,7 +56,7 @@ export function promptContentHash(body: PromptBody): string {
 }
 const SELECT_VERSION = `select v.id, v.registry_id as "registryId", r.key, r.kind,
   v.version, v.status, v.body, v.content_hash as "contentHash",
-  v.source_commit as "sourceCommit", v.legacy_version as "legacyVersion"
+  v.source_commit as "sourceCommit", v.legacy_version as "legacyVersion", v.change_note as "changeNote"
   from prompt_versions v join prompt_registry r on r.id = v.registry_id`;
 export async function getPromptVersion(db: Queryable, id: string): Promise<PromptVersion> {
   const result = await db.query<PromptVersion>(`${SELECT_VERSION} where v.id = $1::uuid`, [id]);
@@ -74,13 +79,29 @@ export async function getActivePrompt(db: Queryable, key: RegistryKey): Promise<
     throw new Error('Invalid Active Prompt binding.');
   return version;
 }
-export async function resolvePromptFragments(db: Queryable, version: Pick<PromptVersion, 'body'>) {
+export async function resolvePromptFragments(
+  db: Queryable,
+  version: Pick<PromptVersion, 'body'>,
+  snapshot?: SystemFragmentSnapshot,
+) {
   const fragments = new Map<string, PromptVersion>();
+  const seenSystem = new Set<string>();
   for (const ref of version.body.fragments) {
-    const fragment = await getPromptVersion(db, ref.versionId);
+    const fragment = ref.versionId
+      ? await getPromptVersion(db, ref.versionId)
+      : snapshot
+        ? await getPromptVersion(db, snapshot[ref.activeKey!])
+        : await getActivePrompt(db, ref.activeKey!);
+    if (ref.activeKey && fragment.key !== ref.activeKey)
+      throw new Error('Dynamic Fragment key mismatch.');
+    if ((ACTIVE_FRAGMENT_KEYS as readonly string[]).includes(fragment.key)) {
+      if (ref.versionId) throw new Error('System Fragments must use an activeKey reference.');
+      if (seenSystem.has(fragment.key)) throw new Error('Duplicate System Fragment reference.');
+      seenSystem.add(fragment.key);
+    }
     if (fragment.kind !== 'fragment' || fragment.status !== 'published')
       throw new Error('Request must reference a published fragment.');
-    fragments.set(ref.versionId, fragment);
+    fragments.set(ref.versionId ?? ref.activeKey!, fragment);
   }
   return fragments;
 }
@@ -93,12 +114,16 @@ export async function renderPromptVersion(
   const version = await getPromptVersion(db, versionId);
   return renderResolvedPrompt(version, await resolvePromptFragments(db, version), values, variant);
 }
-async function transaction<T>(db: Database, work: (client: PoolClient) => Promise<T>): Promise<T> {
+async function transaction<T>(
+  db: Database,
+  work: (client: PoolClient) => Promise<T>,
+  rollback = false,
+): Promise<T> {
   const client = await db.connect();
   try {
     await client.query('begin');
     const value = await work(client);
-    await client.query('commit');
+    await client.query(rollback ? 'rollback' : 'commit');
     return value;
   } catch (error) {
     await client.query('rollback');
@@ -215,13 +240,17 @@ export function withFragmentVersions(
   body: PromptBody,
   replacements: Readonly<Record<string, string>>,
 ): PromptBody {
-  if (Object.keys(replacements).some((slot) => !body.fragments.some((f) => f.slot === slot)))
+  if (
+    Object.keys(replacements).some(
+      (slot) => !body.fragments.some((f) => f.slot === slot && !f.activeKey),
+    )
+  )
     throw new Error('Unknown fragment slot.');
   return {
     ...body,
     fragments: body.fragments.map((ref) => ({
       ...ref,
-      versionId: replacements[ref.slot] ?? ref.versionId,
+      ...(ref.activeKey ? {} : { versionId: replacements[ref.slot] ?? ref.versionId }),
     })),
   };
 }
@@ -253,6 +282,7 @@ export async function importPromptSeeds(db: Database, seeds: PromptSeed[]) {
         continue;
       }
       for (const ref of seed.body.fragments) {
+        if (!ref.versionId) throw new Error('Frozen baseline requires exact fragments.');
         const expected = seeds.find((s) => s.id === ref.versionId);
         const stored = await getPromptVersion(client, ref.versionId);
         if (!expected || stored.contentHash !== promptContentHash(expected.body))
@@ -319,10 +349,7 @@ export async function getPromptManagementDetail(
 ): Promise<PromptManagementDetail> {
   const result = await db.query<PromptRegistryItem>(`${SELECT_REGISTRY} where r.key=$1`, [key]);
   if (!result.rows[0]) throw new PromptManagementError('Prompt Registry 不存在。', 404);
-  const select = SELECT_VERSION.replace(
-    'select v.id,',
-    'select v.created_at as "createdAt",v.change_note as "changeNote",v.id,',
-  );
+  const select = SELECT_VERSION.replace('select v.id,', 'select v.created_at as "createdAt",v.id,');
   const versions = await db.query<ManagedPromptVersion>(
     `${select} where r.key=$1 order by v.version desc`,
     [key],
@@ -400,4 +427,77 @@ export async function updatePromptDraft(
     await touchRegistry(client, registry.id);
     return getPromptVersion(client, versionId);
   });
+}
+
+/** Idempotent upgrade from the CURRENT Active bodies, serialized with ordinary admin writes. */
+export async function installSystemPromptLayers(
+  db: Database,
+  sourceCommit?: string,
+  dryRun = false,
+) {
+  return transaction(
+    db,
+    async (client) => {
+      await client.query(
+        "select pg_advisory_xact_lock(hashtextextended('prompt-system-layers-v1', 0))",
+      );
+      const changes: Array<{ key: string; from: string | null; to: string; version: number }> = [];
+      for (const key of ACTIVE_FRAGMENT_KEYS) {
+        await client.query(
+          `insert into prompt_registry (key,kind,workflow,step,request_type,display_name)
+        values ($1,$2,$3,$4,$5,$6) on conflict (key) do nothing`,
+          [key, 'fragment', 'shared', 'system', 'fragment', key],
+        );
+        const registry = await lockRegistry(client, key);
+        if (registry.kind !== 'fragment') throw new Error(`Wrong registry kind: ${key}`);
+        const existing = await client.query(
+          'select id from prompt_versions where registry_id = $1::uuid limit 1',
+          [registry.id],
+        );
+        if (existing.rows.length) {
+          await getActivePrompt(client, key);
+          continue;
+        }
+        const draft = await insertDraft(
+          client,
+          registry,
+          { systemInstructions: '', userTemplate: null, variants: {}, fragments: [] },
+          { sourceCommit, changeNote: 'Empty System Fragment initialization' },
+        );
+        await client.query("update prompt_versions set status='published' where id=$1::uuid", [
+          draft.id,
+        ]);
+        await client.query(
+          'update prompt_registry set active_version_id=$2::uuid,updated_at=now() where id=$1::uuid',
+          [registry.id, draft.id],
+        );
+        changes.push({ key, from: null, to: draft.id, version: draft.version });
+      }
+      const keys = Object.keys(PROMPT_CONTRACTS).filter(
+        (key) => key.startsWith('daily.') || key.startsWith('discovery.'),
+      ) as PromptKey[];
+      for (const key of keys) {
+        const registry = await lockRegistry(client, key);
+        const previous = await getActivePrompt(client, key);
+        const body = addSystemPromptLayers(key, previous.body);
+        if (promptContentHash(body) === previous.contentHash) continue;
+        const draft = await insertDraft(client, registry, body, {
+          sourceCommit,
+          changeNote: SYSTEM_LAYER_NOTE + previous.id,
+        });
+        await client.query("update prompt_versions set status='published' where id=$1::uuid", [
+          draft.id,
+        ]);
+        const result = await client.query(
+          'update prompt_registry set active_version_id=$2::uuid,updated_at=now() where id=$1::uuid and active_version_id=$3::uuid',
+          [registry.id, draft.id, previous.id],
+        );
+        if (result.rowCount !== 1)
+          throw new Error(`Active changed during System layer upgrade: ${key}`);
+        changes.push({ key, from: previous.id, to: draft.id, version: draft.version });
+      }
+      return changes;
+    },
+    dryRun,
+  );
 }

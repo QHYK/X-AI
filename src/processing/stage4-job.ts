@@ -439,10 +439,11 @@ async function processStage4FromDb(
       [stage4Run.id],
     );
     for (const [key, id] of Object.entries(storedPrompts.rows[0]?.prompt_versions ?? {}))
-      await observeRunPrompts(join(runDir, 'run.json'), pool)(
-        key as import('../lib/prompts/contracts.js').PromptKey,
-        id,
-      );
+      if (typeof id === 'string')
+        await observeRunPrompts(join(runDir, 'run.json'), pool)(
+          key as import('../lib/prompts/contracts.js').PromptKey,
+          id,
+        );
     const generated = await loadGeneratedReviewItemIds(pool, stage4Run.id);
     const candidateIds = selected.flatMap((item) => item.processedContentIds);
     const sourceCandidates = await loadStage4SourceCandidates(pool, candidateIds);

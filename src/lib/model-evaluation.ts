@@ -1,3 +1,4 @@
+import { captureSystemFragments, readSystemFragmentSnapshot } from './prompts/system-fragments.js';
 import { withPromptBindings, evaluationPromptBinder } from './prompts/runtime.js';
 /**
  * Stage 1–3 离线模型评测服务。
@@ -255,6 +256,9 @@ export async function executePreparedEvaluation(prepared: PreparedEvaluation): P
         prepared.pool,
         evaluationPromptBinder(prepared.pool, prepared.evaluationInput.id, run.id),
         () => execute({ stage: prepared.stage, frozenInput, model }),
+        { systemFragments: async () => readSystemFragmentSnapshot(
+          (prepared.evaluationInput.inputJson as Record<string, unknown>)?.systemFragmentVersions,
+        ) },
       );
       const completedAt = new Date();
       await prepared.storage.createOutputs(execution.outputs.map((output) => ({ ...output, evaluationRunId: run.id })));
@@ -409,11 +413,12 @@ export async function buildFrozenEvaluationInput(input: {
 export function createPostgresEvaluationStorage(pool: Pool): EvaluationStorage {
   return {
     async createInput(input) {
+      const frozen = { evaluationBusinessInput: input.inputJson, systemFragmentVersions: await captureSystemFragments(pool) };
       const result = await pool.query<EvaluationInputRecord>(
         `insert into evaluation_inputs (daily_date, stage, input_json, input_hash)
          values ($1::date, $2, $3::jsonb, $4)
          returning id, daily_date as "dailyDate", stage, input_json as "inputJson", input_hash as "inputHash"`,
-        [input.dailyDate, input.stage, JSON.stringify(input.inputJson), input.inputHash],
+        [input.dailyDate, input.stage, JSON.stringify(frozen), hashEvaluationInput(frozen)],
       );
       return result.rows[0] as EvaluationInputRecord;
     },
@@ -510,6 +515,8 @@ export async function reconstructStage1EvaluationInput(
 }
 
 async function resolveExecutionInput(pool: Pick<Pool, "query">, stage: EvaluationStage, inputJson: unknown): Promise<unknown> {
+  if (inputJson && typeof inputJson === "object" && "evaluationBusinessInput" in inputJson && "systemFragmentVersions" in inputJson)
+    inputJson = (inputJson as Record<string, unknown>).evaluationBusinessInput;
   if (stage === "stage1" && isStage1EvaluationInputReference(inputJson)) {
     return reconstructStage1EvaluationInput(pool, inputJson);
   }

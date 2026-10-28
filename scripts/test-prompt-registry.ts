@@ -1,3 +1,5 @@
+import { captureSystemFragments } from '../src/lib/prompts/system-fragments.js';
+import { ACTIVE_FRAGMENT_KEYS } from '../src/lib/prompts/contracts.js';
 import { STAGE4_CONTEXT_DECISION_INSTRUCTIONS } from './fixtures/legacy-prompts.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -21,6 +23,7 @@ import {
   createPromptDraftFromVersion,
   updatePromptDraft,
   importPromptSeeds,
+  installSystemPromptLayers,
   initialPromptVersion,
   getActivePrompt,
   getPromptVersion,
@@ -70,7 +73,7 @@ assert.deepEqual(
     .filter((s) => s.kind === 'fragment')
     .map((s) => s.key)
     .sort(),
-  [...FRAGMENT_KEYS].sort(),
+  FRAGMENT_KEYS.filter((key) => key.startsWith('shared.')).sort(),
 );
 function asVersion(seed: (typeof seeds)[number]): PromptVersion {
   return {
@@ -227,7 +230,7 @@ assert.throws(() =>
 const d3 = versions.get('discovery.d3.topic_discovery')!;
 assert.throws(() => renderResolvedPrompt(d3, new Map(), { input: 'x' }));
 assert.throws(() =>
-  renderResolvedPrompt(d3, new Map([[d3.body.fragments[0].versionId, base]]), { input: 'x' }),
+  renderResolvedPrompt(d3, new Map([[d3.body.fragments[0].versionId!, base]]), { input: 'x' }),
 );
 assert.throws(() =>
   validatePromptBody(FRAGMENT_KEYS[0], 'fragment', { ...base.body, fragments: d3.body.fragments }),
@@ -266,6 +269,13 @@ class Store {
         return { rows: [] };
       }
       if (sql.includes('pg_advisory_xact_lock')) return { rows: [] };
+      if (sql.includes('select r.key, v.id from prompt_registry r'))
+        return {
+          rows: ACTIVE_FRAGMENT_KEYS.flatMap((key) => {
+            const r = this.registries.get(key);
+            return r?.activeVersionId ? [{ key, id: r.activeVersionId }] : [];
+          }),
+        };
       if (sql.startsWith('insert into prompt_registry')) {
         if (!this.registries.has(String(values[0])))
           this.registries.set(String(values[0]), {
@@ -375,7 +385,7 @@ class Store {
         assert.equal(v.registryId, r.id);
         assert.equal(v.status, 'published');
         r.activeVersionId = v.id;
-        return { rows: [] };
+        return { rows: [], rowCount: 1 };
       }
       throw new Error(`Unhandled Mock SQL: ${sql}`);
     };
@@ -638,6 +648,62 @@ console.log(
   'PASS production Prompt dependency boundary: no Seed/Fixture/static instruction builders',
 );
 
+// Install from actual Active content, preserving existing published data and human edits.
+const layers = new Store();
+await importPromptSeeds(layers.db, seeds);
+const active = await getActivePrompt(layers.db, 'daily.stage1.content_understanding');
+const edited = await createPromptDraft(layers.db, active.key, {
+  ...active.body,
+  systemInstructions: 'Human edited instructions\n' + active.body.systemInstructions,
+});
+await publishPromptVersion(layers.db, active.key, edited.id);
+await activatePromptVersion(layers.db, active.key, edited.id);
+const originalVersions = structuredClone(layers.versions);
+assert.equal((await installSystemPromptLayers(layers.db, undefined, true)).length, 16);
+assert.deepEqual(layers.versions, originalVersions, 'dry run rolls back every change');
+const changes = await installSystemPromptLayers(layers.db);
+assert.equal(changes.length, 16);
+assert.equal(layers.registries.size, 21);
+for (const key of ACTIVE_FRAGMENT_KEYS) {
+  const fragment = await getActivePrompt(layers.db, key);
+  assert.equal(fragment.version, 1);
+  assert.equal(fragment.body.systemInstructions, '');
+}
+for (const [id, v] of originalVersions)
+  assert.deepEqual(layers.versions.get(id), v, 'Published history is unchanged');
+const layered = await getActivePrompt(layers.db, active.key);
+assert.ok(layered.body.systemInstructions?.endsWith(edited.body.systemInstructions!));
+assert.equal(layered.version, edited.version + 1);
+assert.deepEqual(layered.body.userTemplate, edited.body.userTemplate);
+assert.equal(layered.body.fragments.filter((f) => f.activeKey).length, 2);
+assert.deepEqual(await installSystemPromptLayers(layers.db), [], 'initialization is idempotent');
+const identity = await getActivePrompt(layers.db, 'xfield.identity');
+const nextIdentity = await createPromptDraft(layers.db, identity.key, {
+  ...identity.body,
+  systemInstructions: 'X-field Identity',
+});
+assert.equal(nextIdentity.version, 2);
+await publishPromptVersion(layers.db, identity.key, nextIdentity.id);
+await activatePromptVersion(layers.db, identity.key, nextIdentity.id);
+const rendered = await renderPromptVersion(layers.db, layered.id, { input: 'unchanged input' });
+assert.ok(rendered.instructions?.startsWith('X-field Identity\n\n'));
+assert.ok(rendered.instructions?.endsWith(edited.body.systemInstructions!));
+assert.equal(
+  (await getActivePrompt(layers.db, active.key)).id,
+  layered.id,
+  'Fragment activation does not republish Request',
+);
+assert.equal((await captureSystemFragments(layers.db))['xfield.identity'], nextIdentity.id);
+assert.deepEqual(await installSystemPromptLayers(layers.db), []);
+assert.equal(
+  (await getActivePrompt(layers.db, identity.key)).id,
+  nextIdentity.id,
+  'Rerun preserves human Fragment activation',
+);
+console.log(
+  'System layer installer: empty v1, first edit v2, 13 Active-derived Requests, dry-run rollback, idempotency and immutable human-edited history passed.',
+);
+
 // Optional real PostgreSQL gate: isolated schema, all DDL/data rolled back; never loads .env / production URL.
 const migration = await readFile(
   new URL('../drizzle/0021_prompt_registry.sql', import.meta.url),
@@ -659,6 +725,12 @@ if (process.env.PROMPT_REGISTRY_TEST_DATABASE_URL) {
     await client.query(`create schema ${schema}`);
     await client.query(`set local search_path to ${schema}, public`);
     await client.query(migration);
+    await client.query(
+      await readFile(
+        new URL('../drizzle/0024_active_system_fragments.sql', import.meta.url),
+        'utf8',
+      ),
+    );
     const db = {
       connect: async () => ({
         query: async (sql: string, values?: unknown[]) => {

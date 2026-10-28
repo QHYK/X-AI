@@ -1,3 +1,4 @@
+import { readSystemFragmentSnapshot } from './prompts/system-fragments.js';
 import {
   productionPrompt,
   withPromptBindings,
@@ -292,7 +293,16 @@ export async function putBackIgnoredArticle(
                 contentTruncated,
               }),
             ),
-          { binding },
+          {
+            binding,
+            systemFragments: async () => {
+              const saved = await db.query<{ metadata: Record<string, unknown> }>(
+                'select metadata from raw_articles where id = $1::uuid',
+                [input.id],
+              );
+              return readSystemFragmentSnapshot(saved.rows[0]?.metadata?.systemFragmentVersions);
+            },
+          },
         );
         const provider = resolveStageLlmProvider('stage1');
         const name = resolveStageLlmModel('stage1');

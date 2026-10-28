@@ -1,3 +1,4 @@
+import { systemFragmentFixtureQuery } from './fixtures/prompt-runtime.js';
 /** Real pg-pool checkout/timeout behavior with an in-memory PostgreSQL client; no sockets or DB. */
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -106,6 +107,8 @@ class MemoryClient extends EventEmitter {
       };
       this.pending.push(row);
       return { rows: [row] };
+    } else if (systemFragmentFixtureQuery(sql)) {
+      return systemFragmentFixtureQuery(sql)!;
     } else if (sql.trimStart().startsWith('select')) {
       assert.ok(ready, 'Only read the Daily body when upstream is ready.');
       return { rows: [] };

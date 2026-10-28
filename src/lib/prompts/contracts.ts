@@ -20,10 +20,18 @@ export const PROMPT_CONTRACTS = {
   'daily.read_more.detailed_summary': {},
 } satisfies Record<string, { category?: boolean; variants?: string[] }>;
 export type PromptKey = keyof typeof PROMPT_CONTRACTS;
+export const ACTIVE_FRAGMENT_KEYS = [
+  'xfield.identity',
+  'daily_brief.editorial',
+  'discover.editorial',
+] as const;
+export type ActiveFragmentKey = (typeof ACTIVE_FRAGMENT_KEYS)[number];
+export type SystemFragmentSnapshot = Record<ActiveFragmentKey, string>;
 export const FRAGMENT_KEYS = [
   'shared.discovery.editorial_criteria',
   'shared.discovery.tags',
   'shared.introduction.writing',
+  ...ACTIVE_FRAGMENT_KEYS,
 ] as const;
 export type RegistryKey = PromptKey | (typeof FRAGMENT_KEYS)[number];
 export type RegistryKind = 'request' | 'fragment';
@@ -46,12 +54,17 @@ export const PromptBodySchema = z
       z
         .object({
           slot: z.string().regex(/^[a-z][a-z0-9_]*$/),
-          versionId: z.uuid(),
+          versionId: z.uuid().optional(),
+          activeKey: z.enum(ACTIVE_FRAGMENT_KEYS).optional(),
         })
         .strict(),
     ),
   })
-  .strict();
+  .strict()
+  .refine(
+    (body) => body.fragments.every((ref) => !!ref.versionId !== !!ref.activeKey),
+    'Fragment requires exactly one versionId or activeKey.',
+  );
 export type PromptBody = z.infer<typeof PromptBodySchema>;
 export type PromptVersion = {
   id: string;
@@ -64,6 +77,7 @@ export type PromptVersion = {
   contentHash: string;
   sourceCommit: string | null;
   legacyVersion: string | null;
+  changeNote?: string | null;
 };
 
 export function contractFor(key: RegistryKey) {
@@ -94,6 +108,9 @@ export function validatePromptBody(key: RegistryKey, kind: RegistryKind, raw: un
     throw new Error('Unsupported or missing named variants.');
   const slots = body.fragments.map((f) => f.slot);
   if (new Set(slots).size !== slots.length) throw new Error('Duplicate fragment slots.');
+  const activeKeys = body.fragments.flatMap((ref) => (ref.activeKey ? [ref.activeKey] : []));
+  if (new Set(activeKeys).size !== activeKeys.length)
+    throw new Error('Duplicate active fragment references.');
   for (const roles of [body, ...Object.values(body.variants)]) {
     const system = variables(roles.systemInstructions);
     const user = variables(roles.userTemplate);
@@ -140,10 +157,10 @@ export function renderResolvedPrompt(
   const roles = variant ? body.variants[variant] : body;
   const literalFragments = new Map<string, string>();
   for (const ref of body.fragments) {
-    const fragment = fragments.get(ref.versionId);
+    const fragment = fragments.get(ref.versionId ?? ref.activeKey!);
     if (
       !fragment ||
-      fragment.id !== ref.versionId ||
+      (ref.versionId ? fragment.id !== ref.versionId : fragment.key !== ref.activeKey) ||
       fragment.kind !== 'fragment' ||
       fragment.status !== 'published'
     )

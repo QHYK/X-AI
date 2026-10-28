@@ -1,3 +1,4 @@
+import { captureSystemFragments } from '../lib/prompts/system-fragments.js';
 // D2-5
 // 管理 Discovery Run 的创建、状态更新、恢复及数据库操作
 import type { Pool, PoolClient } from 'pg';
@@ -76,7 +77,11 @@ export async function createOpenDiscoveryRun(
     [
       input.parentRunId,
       input.triggerSource,
-      JSON.stringify({ ...input.configSnapshot, ...(context ? { manualOpen: { context } } : {}) }),
+      JSON.stringify({
+        ...input.configSnapshot,
+        systemFragmentVersions: await captureSystemFragments(pool),
+        ...(context ? { manualOpen: { context } } : {}),
+      }),
       parent.windowStartDate,
       parent.windowEndDate,
     ],
@@ -155,7 +160,10 @@ export async function createRegularDiscoveryRunInTransaction(
     status: 'pending',
     endReason: null,
     inputContentIds: windowInput.contentIds,
-    configSnapshot: input.configSnapshot ?? null,
+    configSnapshot: {
+      ...input.configSnapshot,
+      systemFragmentVersions: await captureSystemFragments(client),
+    },
     finishedAt: null,
     errorSummary: null,
   });

@@ -82,6 +82,7 @@ npm run prompts:import -- --dry-run
 npm run prompts:import
 npm run test:prompt-registry
 npm run test:prompt-runtime
+npm run test:system-prompt-layers
 npm run test:prompt-requests
 npm run test:prompt-management
 ```
@@ -95,6 +96,22 @@ Mock / 请求一致性测试不连接生产或调用模型；B3.1 **真实 Postg
 已有环境升级 Prompt Management / 静态清理不需额外 Migration 或重导入。登录 `/ai/prompts` 管理版本；手动保存 / Activate 会写 Web 当前连接的数据库，验收须使用测试环境。`test:prompt-registry` 检查 Service 和生产依赖边界；`test:prompt-runtime` 检查绑定；`test:prompt-requests` 检查实际请求一致性；`test:prompt-management` 检查 UI。认证 / 导航回归为 `test:admin-auth`、`test:admin-navigation`。均不调用模型；真实 Stage1 冒烟 `test:stage1:chat` 需另行授权。
 
 Manual / Put Back 进程硬退出可能遗留 `promptAttempt.status=running`：先确认原请求进程已结束、无模型请求仍在进行，并检查是否已有成功结果，再由运维针对该文章 / Candidate 将标记恢复为 failed；不要自动超时接管或批量清除。Put Back 保留原绑定 UUID，Manual 下一次主动点击重新选择 Active。此流程不提供未经确认的自动修复脚本。
+
+### 三层 System Fragment 升级
+
+新环境先完成 `prompts:import`；已有环境不要重导入覆盖 Prompt。使用本次代码执行：
+
+```bash
+npm run db:migrate
+npm run prompts:system-layers -- --dry-run
+npm run prompts:system-layers -- --execute
+```
+
+`--execute` 在单事务中创建缺失的三个空 Published v1，基于每个**当前 Active** 创建带显式引用的新 Request Published 版本，再切换 Active；重复执行无变化，已有 Fragment / Draft / Published 均不覆盖。输出包含原 / 新 UUID 与实际新版本号；中途失败整体回滚。共涉及 13 个 Request，不升级 `in_depth.*`；原始 18 项 Seed / Parity 基线不变。
+
+启动新 Run 需要三个 Fragment 都有有效 Active，不能让旧代码加载新动态引用。
+
+回滚优先在 `/prompts` 按命令输出恢复各 Request 的旧 Published Active，保留 Migration、Fragment 和新版本记录；不要删表或修改 Published。新动态 Request 已绑定的 Run 仍需兼容代码完成或恢复，不能直接换回不识别该引用的旧 Runtime。历史 Run 的严格兼容和快照定义见 [Prompt Contract](07-prompt-spec/registry.md#三层-system-prompt)。真实 PostgreSQL Trigger 与并发验收需独立测试库，Mock 不代替该验证。
 
 ### 2.4 人工候选与 Put Back 部署前提
 
@@ -414,6 +431,7 @@ npm run test:in-depth-load-more
 npm run test:pipeline-env
 npm run test:prompt-registry
 npm run test:prompt-runtime
+npm run test:system-prompt-layers
 npm run test:prompt-requests
 npm run test:prompt-management
 ```
