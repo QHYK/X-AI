@@ -132,10 +132,9 @@ for (const date of ['2026-10-29', '2026-11-01', '2027-01-01', '2028-03-01']) {
   } as unknown as Pick<Pool, 'query'>;
   const recent = await loadStage4RecentEvents(db, date);
   assert.deepEqual(recent, [{ title: 'Previous event', summary: 'Stored summary' }]);
-  const input = { ...attributedToDaily.input, recent_events: recent };
+  const input = attributedToDaily.input;
   const rendered = JSON.parse(buildStage4EventEnrichmentUserPrompt(input));
-  assert.equal(Object.keys(rendered)[0], 'recent_events');
-  assert.deepEqual(rendered.recent_events, recent);
+  assert.equal('recent_events' in rendered, false);
   assert.deepEqual(rendered.sources, attributedToDaily.input.sources);
   assert.equal(rendered.event_hint, attributedToDaily.input.event_hint);
 }
@@ -147,7 +146,7 @@ assert.deepEqual(empty, []);
 assert.deepEqual(
   JSON.parse(buildStage4EventEnrichmentUserPrompt({ event_hint: 'Current event', sources: [] }))
     .recent_events,
-  [],
+  undefined,
 );
 console.log(
   'Stage4 recent_events: business-date SQL window, published-only filter, minimal fields, empty context and unchanged current event passed.',

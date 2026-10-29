@@ -18,6 +18,7 @@ const keys = [
   'discovery.d4.direct_verification',
   'discovery.d5.open_discovery',
   'discovery.d5.open_discovery',
+  'daily.stage4.event_dedup',
 ];
 const versions = keys.map((key, i) => ({
   id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
@@ -35,7 +36,18 @@ try {
       promptVersions: { [keys[2]]: 'v999' },
       promptVersionIds: { [keys[2]]: id(2), [keys[3]]: id(3), [keys[4]]: id(4) },
     },
-    stage4: { promptVersionIds: { [keys[5]]: id(5) } },
+    stage4: {
+      promptVersionIds: { [keys[5]]: id(5), [keys[11]]: id(11) },
+      dedup: {
+        status: 'fallback',
+        calls: 3,
+        duplicate_ids: [],
+        selected_ids: [],
+        errors: ['Mock failure'],
+        reason: 'dedup_fallback',
+      },
+      dedup_usage: { inputTokens: 300, outputTokens: 30, totalTokens: 330 },
+    },
   })) {
     const dir = join(root, 'runtime', stage, 'run');
     await mkdir(dir, { recursive: true });
@@ -80,6 +92,9 @@ try {
     longForm: 'v6',
   });
   assert.equal(data.details.stages.stage4?.promptVersion, 'v7');
+  assert.equal(data.details.stages.stage4?.dedupPromptVersion, 'v13');
+  assert.equal(data.details.stages.stage4?.dedup?.status, 'fallback');
+  assert.equal(data.details.stages.stage4?.dedupUsage?.totalTokens, 330);
 
   pipelineRows = ['stage1', 'stage2', 'stage3', 'stage4'].map((step, index) => ({
     daily_date: '2026-10-27',
@@ -93,7 +108,16 @@ try {
     metrics:
       step === 'stage3'
         ? { prompt_versions: { event: id(2), digest: id(3), long_form: id(4) } }
-        : { prompt_version: id(index === 3 ? 5 : index) },
+        : {
+            prompt_version: id(index === 3 ? 5 : index),
+            ...(step === 'stage4'
+              ? {
+                  prompt_versions: { [keys[11]]: id(11) },
+                  stage4_dedup: { status: 'success', calls: 1 },
+                  stage4_dedup_usage: { totalTokens: 110 },
+                }
+              : {}),
+          },
   }));
   const logged = await getDashboardData(db, {
     detailDate: '2026-10-27',
@@ -108,6 +132,9 @@ try {
     longForm: 'v6',
   });
   assert.equal(logged.details.stages.stage4?.promptVersion, 'v7');
+  assert.equal(logged.details.stages.stage4?.dedupPromptVersion, 'v13');
+  assert.equal(logged.details.stages.stage4?.dedup?.status, 'success');
+  assert.equal(logged.details.stages.stage4?.dedupUsage?.totalTokens, 110);
   pipelineRows = [
     {
       daily_date: '2026-10-27',

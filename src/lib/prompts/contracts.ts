@@ -9,6 +9,7 @@ export const PROMPT_CONTRACTS = {
   'daily.stage3.digest_ranking': { category: true },
   'daily.stage3.long_form_ranking': {},
   'daily.stage4.external_context_decision': {},
+  'daily.stage4.event_dedup': {},
   'daily.stage4.event_enrichment': { variants: ['without_search', 'with_search'] },
   'discovery.d2.topic_selection': {},
   'discovery.d3.topic_discovery': {},

@@ -115,7 +115,6 @@ export function prepareStage4Event(
   sourceCandidates: Map<string, Stage4SourceCandidate>,
   workflowRunTimestamp: Date,
   dailyDate?: string,
-  recentEvents: Array<{ title: string; summary: string }> = [],
 ): PreparedStage4Event {
   const candidates = group.processedContentIds.map((id) => {
     const candidate = sourceCandidates.get(id);
@@ -129,7 +128,6 @@ export function prepareStage4Event(
   return {
     group,
     input: {
-      recent_events: recentEvents,
       event_hint: group.eventHint,
       sources: candidates.map((candidate) => ({
         title: candidate.title,

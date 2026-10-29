@@ -42,7 +42,9 @@ processed_contents (event)
 
 `loadGeneratedReviewItemIds()` 同时核对 Run、Review Snapshot、Daily 日期与 Event 日期，仅将匹配的 `draft` / `published` / `archived` Event 视为已有成功 enrichment。不能只凭 `publication_status` 复用其他 Snapshot 的内容。
 
-已有成功 Event 跳过模型调用；Partial Run 只补缺失项。同一成功 Run 再执行仍走完整性校验和发布同步，但不为已生成项重复调用 LLM。该复用不等于并发执行时 LLM 的严格 exactly-once 保证。
+已有成功 Event 跳过模型调用；Partial Run 只补缺失项。历史 NULL Selection Snapshot 的成功 Run 保持原有完整性校验和发布同步；新 Run 成功后 Retry 直接复用，不重新发布。该复用不等于并发 enrichment 的严格 exactly-once 保证。
+
+自动 Run 的批量 Selection 由 `src/processing/stage4-selection.ts` 实现。候选 Snapshot 与 Run 创建一起落库；按 Run ID 的 Session Advisory Lock 串行化 Dedup，模型调用期间保留一条专用连接、不保留事务，要求直连 / Session Pooling（拒绝已知 Transaction Pooling 配置）。最终 Snapshot 与 `expected_count` 同一 SQL 写入，失败不开始 enrichment；锁占用明确拒绝，失去连接后不再重试模型或提交选择。Prompt 使用现有 Stage4 数据库版本绑定；已完成选择不再读取 Active。连接失效与跨进程锁仍需独立 PostgreSQL 环境验证。
 
 ### 3.2 Draft 与原子发布
 
@@ -50,7 +52,7 @@ processed_contents (event)
 
 `publishStage4Run()` 在短事务内：
 
-1. 重读并锁住当前人工排序对应的入选集合，再锁 Stage4 Run，避免使用 LLM 前捕获的旧排名。
+1. 新 Run 根据 `selection_snapshot` 锁住固定 Review Item 集合，再锁 Stage4 Run；只同步这些成员的当前人工排名，不根据最新排名重新选择成员。历史 NULL Snapshot Run 继续按原有人工排序选择。已成功的新 Run 不重新发布，避免撤销后续人工发布。
 2. 确认当前入选项全部已有匹配的成功 Event；不完整则回滚，不发布部分新结果。
 3. 归档同日期旧 Published Events，发布本 Run 的当前入选项，从 Review Items 同步 `display_rank`，刷新兼容 backlink。
 4. 将 Run 标记为 `success` 后提交；失败整体回滚。

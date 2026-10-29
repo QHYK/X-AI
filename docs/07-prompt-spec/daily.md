@@ -179,6 +179,31 @@ Rank by:
 
 ---
 
+## Stage 4 — Event Dedup
+
+Key：`daily.stage4.event_dedup`。这是 Stage4 内部的批量 Selection Request，使用 Stage4 Provider / Model；不是新 Pipeline Stage。
+
+### Input Schema
+
+```json
+{
+  "candidates": [{ "id": "event-group-uuid", "event_hint": "Stored event hint" }],
+  "recent_events": [{ "title": "Published title", "summary": "Published summary" }]
+}
+```
+
+`candidates` 是当前 Review 人工排名 Top 20，ID 为稳定 Event Group UUID，Hint 来自已保存的 Review Snapshot，不传原始正文。历史来自目标日期前两个自然日的成功 Stage4 Run / Published Events。User Template 为 `{{input}}`。
+
+### Output Schema and Validation
+
+```json
+{ "duplicate_ids": ["event-group-uuid"] }
+```
+
+严格 Object Schema，唯一字段 `duplicate_ids: string[]`。应用校验 ID 来自本次候选且没有重复；非法 Schema / JSON / ID 进入最多三次实际模型调用的重试。结果只指示排除项，不改排名或 Hint。输入信息不足确认重复时倾向保留；同主体或同主题不等于同事件，重大新决定、行动、结果或实质性进展应保留。
+
+初始 System Instructions 使用产品指定文本，仅保存在初始化 Seed，并由数据库 Published Version 管理；不在运行时代码保留第二份。初始化可发布但不 Activate，见 [Operations](../09-operations.md#stage4-dedup-部署)。固定选择、空历史跳过和失败回退见 [Workflow §9.1](../06-workflow-spec/daily.md#91-trigger)。
+
 ## Stage 4 — Selected Event Enrichment
 
 
@@ -187,7 +212,6 @@ Rank by:
 ### Input Schema
 ```json
 {
-  "recent_events": [{ "title": "Historical event title", "summary": "Historical event summary" }],
   "event_hint": "",
   "sources": [
     {
@@ -201,7 +225,7 @@ Rank by:
 }
 ```
 
-`recent_events` 读取目标 `dailyDate` 前两个自然日的已发布 Event 标题与概述（仅成功 Stage4 Run，空窗口为 `[]`），不是执行当天日期。Context Decision 和 Search / No Search enrichment 共用同一输入；该字段仅为历史参考，不进行数据库硬去重，也不改变当前 Top 15 单 Event enrichment 的候选顺序。生产 Request Prompt 正文保持数据库原版本。
+Context Decision 和 Search / No Search enrichment 共用此单 Event Request 正文与输出 Schema 不变。
 
 ### Output Schema
 ```json

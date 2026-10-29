@@ -257,7 +257,11 @@ export function withFragmentVersions(
 }
 export type PromptSeed = RegistryInput & { id: string; body: PromptBody; source: VersionSource };
 /** All registries/versions are imported atomically; any existing version protects future administrator edits. */
-export async function importPromptSeeds(db: Database, seeds: PromptSeed[]) {
+export async function importPromptSeeds(
+  db: Database,
+  seeds: PromptSeed[],
+  options: { activate?: boolean } = {},
+) {
   return transaction(db, async (client) => {
     await client.query(
       "select pg_advisory_xact_lock(hashtextextended('prompt-registry-import', 0))",
@@ -303,10 +307,11 @@ export async function importPromptSeeds(db: Database, seeds: PromptSeed[]) {
       await client.query("update prompt_versions set status = 'published' where id = $1::uuid", [
         draft.id,
       ]);
-      await client.query(
-        'update prompt_registry set active_version_id = $2::uuid, updated_at = now() where id = $1::uuid',
-        [registry.id, draft.id],
-      );
+      if (options.activate !== false)
+        await client.query(
+          'update prompt_registry set active_version_id = $2::uuid, updated_at = now() where id = $1::uuid',
+          [registry.id, draft.id],
+        );
       imported.push(seed.key);
     }
     return { imported, skipped };

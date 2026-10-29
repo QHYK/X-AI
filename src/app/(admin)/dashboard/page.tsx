@@ -768,6 +768,62 @@ function StageCard({
             value={metrics.promptVersion ?? '—'}
           />
         ) : null}
+        {metrics.stage === 'stage4' && metrics.dedup ? (
+          <>
+            <Metric
+              label="Dedup Prompt"
+              value={metrics.dedupPromptVersion ?? '—'}
+            />
+            <Metric
+              label="Dedup status"
+              value={String(metrics.dedup.status ?? '—')}
+            />
+            <Metric
+              label="Dedup calls (Run)"
+              value={String(metrics.dedup.calls ?? 0)}
+            />
+            <Metric
+              label="Dedup duplicates"
+              value={String(
+                Array.isArray(metrics.dedup.duplicate_ids) ? metrics.dedup.duplicate_ids.length : 0,
+              )}
+            />
+            <Metric
+              label="Dedup selected"
+              value={String(
+                Array.isArray(metrics.dedup.selected_ids) ? metrics.dedup.selected_ids.length : 0,
+              )}
+            />
+            <Metric
+              label="Dedup reason"
+              value={String(metrics.dedup.reason ?? '—')}
+            />
+            <Metric
+              label="Dedup input tokens (attempt)"
+              value={
+                metrics.dedupUsage?.usageComplete === false
+                  ? 'Incomplete'
+                  : String(metrics.dedupUsage?.inputTokens ?? 'N/A')
+              }
+            />
+            <Metric
+              label="Dedup output tokens (attempt)"
+              value={
+                metrics.dedupUsage?.usageComplete === false
+                  ? 'Incomplete'
+                  : String(metrics.dedupUsage?.outputTokens ?? 'N/A')
+              }
+            />
+            <Metric
+              label="Dedup total tokens (attempt)"
+              value={
+                metrics.dedupUsage?.usageComplete === false
+                  ? 'Incomplete'
+                  : String(metrics.dedupUsage?.totalTokens ?? 'N/A')
+              }
+            />
+          </>
+        ) : null}
         <Metric
           label="Model"
           value={metrics.model ?? 'N/A'}
@@ -821,6 +877,22 @@ function StageCard({
           />
         ))}
       </dl>
+      {metrics.stage === 'stage4' && metrics.dedup ? (
+        <details>
+          <summary>Dedup result</summary>
+          <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+            {JSON.stringify(
+              {
+                duplicate_ids: metrics.dedup.duplicate_ids,
+                selected_ids: metrics.dedup.selected_ids,
+                errors: metrics.dedup.errors,
+              },
+              null,
+              2,
+            )}
+          </pre>
+        </details>
+      ) : null}
     </article>
   );
 }

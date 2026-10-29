@@ -232,6 +232,12 @@ async function loadEvents(
       from events
       where events.stage4_run_id = $1::uuid
         and events.publication_status = 'draft'
+        and exists (select 1 from stage4_runs r where r.id=events.stage4_run_id
+          and (r.selection_snapshot is null or (
+            r.selection_snapshot->>'status' in ('success', 'fallback', 'skipped')
+            and exists (select 1 from event_review_items eri where eri.id=events.event_review_item_id
+              and eri.review_run_id=r.review_run_id and eri.daily_date=r.daily_date
+              and r.selection_snapshot->'selected_ids' ? eri.event_group_id::text))))
         and coalesce(events.display_rank, events.ai_rank) is not null
       order by coalesce(events.display_rank, events.ai_rank) asc, events.created_at asc, events.id asc`,
     [stage4RunId],

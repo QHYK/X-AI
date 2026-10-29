@@ -73,6 +73,8 @@ async function main() {
           draft_count: status === 'partial' ? result.enrichmentSuccessCount : 0,
           published_count: result.success ? result.eventsCreated : 0,
           llm_calls: result.llmCalls,
+          stage4_dedup: result.dedup ?? null,
+          stage4_dedup_usage: result.dedupUsage ?? null,
           prompt_version: promptVersions['daily.stage4.event_enrichment'] ?? null,
           prompt_versions: promptVersions,
           legacy_prompt_version: STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,

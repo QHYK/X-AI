@@ -154,7 +154,6 @@ const cases = [
     path: 'src/processing/stage4-llm.ts',
     fn: 'runStage4EventEnrichmentLlm',
     input: {
-      recent_events: [{ title: 'Historical event', summary: 'Historical summary' }],
       event_hint: '原始事件',
       sources: [],
     },
@@ -180,8 +179,8 @@ try {
       if (test.path.includes('stage4')) {
         for (const request of captured) {
           assert.ok(
-            JSON.stringify(request).includes('Historical event'),
-            'Decision and both enrichment variants receive historical context',
+            !JSON.stringify(request).includes('recent_events'),
+            'Decision and both enrichment variants no longer receive historical context',
           );
         }
       }

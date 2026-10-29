@@ -6,6 +6,11 @@ import { readSystemFragmentFile } from '../lib/prompts/run-file.js';
  */
 import type { Pool, PoolClient } from 'pg';
 import type { Stage4EventEnrichmentOutput } from './stage4-contract.js';
+import {
+  readStage4Selection,
+  selectedStage4Candidates,
+  type Stage4SelectionSnapshot,
+} from './stage4-selection.js';
 
 type Queryable = Pick<Pool | PoolClient, 'query'>;
 
@@ -87,10 +92,21 @@ export async function loadOrCreateStage4Run(
   dailyDate: string,
   reviewRunId: string,
   expectedCount: number,
-): Promise<{ id: string; successCount: number; status: string }> {
-  const existing = await queryable.query<{ id: string; success_count: number; status: string }>(
+  selectionSnapshot: Stage4SelectionSnapshot | null = null,
+): Promise<{
+  id: string;
+  successCount: number;
+  status: string;
+  selectionSnapshot: Stage4SelectionSnapshot | null;
+}> {
+  const existing = await queryable.query<{
+    id: string;
+    success_count: number;
+    status: string;
+    selection_snapshot: Stage4SelectionSnapshot | null;
+  }>(
     `
-    select id, success_count, status from stage4_runs where review_run_id = $1::uuid`,
+    select id, success_count, status, selection_snapshot from stage4_runs where review_run_id = $1::uuid`,
     [reviewRunId],
   );
   if (existing.rows[0])
@@ -98,26 +114,38 @@ export async function loadOrCreateStage4Run(
       id: existing.rows[0].id,
       successCount: existing.rows[0].success_count,
       status: existing.rows[0].status,
+      selectionSnapshot: existing.rows[0].selection_snapshot ?? null,
     };
   const snapshot = process.env.DAILY_PROMPT_RUN_PATH
     ? await readSystemFragmentFile(process.env.DAILY_PROMPT_RUN_PATH)
     : await captureSystemFragments(queryable);
-  const created = await queryable.query<{ id: string; success_count: number; status: string }>(
+  const created = await queryable.query<{
+    id: string;
+    success_count: number;
+    status: string;
+    selection_snapshot: Stage4SelectionSnapshot | null;
+  }>(
     `
-    insert into stage4_runs (daily_date, review_run_id, status, expected_count, prompt_versions)
-    values ($1::date, $2::uuid, 'running', $3, $4::jsonb)
+    insert into stage4_runs (daily_date, review_run_id, status, expected_count, prompt_versions, selection_snapshot)
+    values ($1::date, $2::uuid, 'running', $3, $4::jsonb, $5::jsonb)
     on conflict (review_run_id) do update set review_run_id = excluded.review_run_id
-    returning id, success_count, status`,
+    returning id, success_count, status, selection_snapshot`,
     [
       dailyDate,
       reviewRunId,
       expectedCount,
       JSON.stringify(snapshot ? { systemFragmentVersions: snapshot } : {}),
+      selectionSnapshot ? JSON.stringify(selectionSnapshot) : null,
     ],
   );
   const row = created.rows[0];
   if (!row) throw new Error('Failed to create Stage 4 run.');
-  return { id: row.id, successCount: row.success_count, status: row.status };
+  return {
+    id: row.id,
+    successCount: row.success_count,
+    status: row.status,
+    selectionSnapshot: row.selection_snapshot ?? null,
+  };
 }
 
 /** Reuse only durable Events belonging to this Run's exact Review snapshot and Daily. */
@@ -190,15 +218,25 @@ export async function publishStage4ReviewSelection(
     throw new Error('Stage 4 Review selection must contain unique selected Event Review items.');
   }
 
-  const run = await client.query<{ expected_count: number }>(
-    `select expected_count from stage4_runs where id = $1::uuid for update`,
+  const run = await client.query<{ expected_count: number; selection_snapshot: unknown }>(
+    `select expected_count, selection_snapshot from stage4_runs where id = $1::uuid for update`,
     [stage4RunId],
   );
   const expectedCount = run.rows[0]?.expected_count;
   if (expectedCount === undefined) {
     throw new Error('Stage 4 run not found for Review publication.');
   }
-  if (expectedCount !== selectedReviewItemIds.length) {
+  if (run.rows[0]?.selection_snapshot != null) {
+    if (readStage4Selection(run.rows[0].selection_snapshot).status === 'pending')
+      throw new Error(
+        'Stage4 automatic selection is not complete; retry Review after selection finishes.',
+      );
+    // Explicit human selection remains independent of automatic Dedup.
+    await client.query('update stage4_runs set expected_count=$2 where id=$1::uuid', [
+      stage4RunId,
+      selectedReviewItemIds.length,
+    ]);
+  } else if (expectedCount !== selectedReviewItemIds.length) {
     throw new Error("Stage 4 Review selection does not match the run's expected Event count.");
   }
 
@@ -262,7 +300,7 @@ export async function publishStage4ReviewSelection(
     `update stage4_runs
         set status = 'success', success_count = $2, completed_at = now()
       where id = $1::uuid`,
-    [stage4RunId, expectedCount],
+    [stage4RunId, selectedReviewItemIds.length],
   );
 
   return {
@@ -284,24 +322,49 @@ export async function publishStage4Run(
       daily_date: string;
       review_run_id: string;
       expected_count: number;
+      selection_snapshot: unknown;
+      status: string;
+      success_count: number;
     }>(
       `
-      select daily_date::text, review_run_id, expected_count from stage4_runs where id = $1::uuid`,
+      select daily_date::text, review_run_id, expected_count, selection_snapshot, status, success_count from stage4_runs where id = $1::uuid`,
       [stage4RunId],
     );
     const row = run.rows[0];
     if (!row) throw new Error('Stage 4 run not found.');
-    // Re-read human ordering at publication, rather than using ranks captured before LLM calls.
+    if (row.selection_snapshot != null && row.status === 'success') {
+      await client.query('commit');
+      return { publishedCount: row.success_count, associationCount: 0 };
+    }
+    const fixedItems =
+      row.selection_snapshot == null
+        ? null
+        : selectedStage4Candidates(readStage4Selection(row.selection_snapshot)).map(
+            (c) => c.reviewItemId,
+          );
+    // New Runs freeze membership; legacy Runs re-read human ordering. In both
+    // cases, lock Review rows before the Run, matching the explicit Review path.
     const selected = await client.query<{ id: string }>(
-      `
+      fixedItems
+        ? `select eri.id from event_review_items eri
+      where eri.review_run_id=$1::uuid and eri.daily_date=$2::date and eri.id=any($3::uuid[])
+      order by eri.id for update of eri`
+        : `
       select eri.id from event_review_items eri
       where eri.review_run_id = $1::uuid and eri.daily_date = $2::date
         and exists (select 1 from event_group_items egi where egi.event_group_id = eri.event_group_id)
       order by eri.display_rank, eri.id limit $3 for update of eri`,
-      [row.review_run_id, row.daily_date, row.expected_count],
+      [row.review_run_id, row.daily_date, fixedItems ?? row.expected_count],
     );
     // Review also locks ranking rows first; keep that order and hold the selection until commit.
-    await client.query('select id from stage4_runs where id = $1::uuid for update', [stage4RunId]);
+    const lockedRun = await client.query<{ status: string; selection_snapshot: unknown }>(
+      'select id, status, selection_snapshot from stage4_runs where id = $1::uuid for update',
+      [stage4RunId],
+    );
+    if (row.selection_snapshot != null && lockedRun.rows[0]?.status === 'success') {
+      await client.query('commit');
+      return { publishedCount: row.expected_count, associationCount: 0 };
+    }
     const selectedIds = selected.rows.map((item) => item.id);
     const generated = await loadGeneratedReviewItemIds(client, stage4RunId);
     if (
@@ -364,7 +427,8 @@ export async function updateStage4RunProgress(
     [stage4RunId],
   );
   await pool.query(
-    `update stage4_runs set status=$2, success_count=$3, completed_at=case when $2 in ('partial','failed') then now() else completed_at end where id=$1::uuid`,
+    `update stage4_runs set status=$2, success_count=$3, completed_at=case when $2 in ('partial','failed') then now() else completed_at end where id=$1::uuid
+      and (selection_snapshot is null or status <> 'success')`,
     [stage4RunId, status, Number(result.rows[0]?.count ?? 0)],
   );
 }

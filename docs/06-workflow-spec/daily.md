@@ -689,7 +689,11 @@ event_review_item_id
 
 ### 9.1 Trigger
 
-Stage 3 完成后，只处理最终 Selected Event Groups。
+Stage 3 完成后，Stage4 从当前 Review Snapshot 按人工 `display_rank` 取 Top 20，执行内部批量跨天 Dedup Selection，再处理最多 15 个选中 Event Groups。
+
+新 Run 先保存候选 Snapshot，再读取目标 `dailyDate` 前两天成功 Stage4 Run 的 Published Events。历史为空时记录 `skipped` 并取原始 Top 15；有历史时按 [Dedup Contract](../07-prompt-spec/daily.md#stage-4--event-dedup) 调用一次模型，失败最多重试两次，全部失败记录 `fallback` 并取原始 Top 15。成功仅过滤 `duplicate_ids`，保留原顺序并截取最多 15 条；不修改原始排名，不从 Top 20 外补齐。
+
+最终集合持久化后，Enrichment、Retry / Resume 和自动发布均复用它，不因人工排名或 Active Prompt 改变而重选。历史 `selection_snapshot IS NULL` Run 保留原有恢复语义，不补做 Dedup。已成功的新 Run 再次执行只返回已有状态，不撤销后续显式人工调整；人工晋级不执行整批 Dedup。
 
 每个 Event 独立 enrichment。当前 Production DB path 按 Selected Events 顺序串行执行 enrichment；不把并发参数作为当前 Production Workflow contract。具体可执行参数见 `../09-operations.md`。
 
@@ -743,6 +747,8 @@ target dailyDate
     ↓
 create Stage 4 Run
     ↓
+persist Top 20 → Dedup / fallback / skip → fixed selection (≤15)
+    ↓
 enrich each Selected Event
     ↓
 persist durable draft Event immediately
@@ -753,7 +759,7 @@ draft count == expected_count ?
              + archive previous published set for the same Daily
 ```
 
-每个 enrichment 成功后立即把对应 Event 作为当前 `stage4_run` 的 draft 持久化，避免前面已经完成的 Event 因后续单项失败而丢失。只有当前 Run 的完整 draft 数量达到 `expected_count` 时，才允许把整套结果原子发布。
+每个 enrichment 成功后立即把对应 Event 作为当前 `stage4_run` 的 draft 持久化，避免前面已经完成的 Event 因后续单项失败而丢失。发布校验固定选中集合的每个成员都有匹配的成功 Event，不能仅凭总 draft 数量判定完整。
 
 同一 Daily 的 publish / archive 只作用于该 `daily_date` 的 publication state，不影响其他 Daily 的历史 Event。发布时不得形成“部分新 Event + 部分旧 published Event”的混合正式集合。
 
@@ -773,7 +779,7 @@ Daily Brief 对同一 `daily_date` 只读取一个一致的 Stage 4 generation s
 
 - 当前 Run 已完整 publish：读取该 Run 的 published Event set；
 - 已有旧 published set、当前 Run 仍为 running / partial：继续读取旧 published Event set；不返回 draft，也不混合两套结果；
-- 尚无 published set、当前 Run 仍为 running / partial：可以返回该 Run 已完成的 draft partial set，并明确保持 partial 状态；
+- 尚无 published set、当前 Run 仍为 running / partial：可以返回该 Run 已完成的 draft partial set，并明确保持 partial 状态；新 Run 仅返回已完成 Selection Snapshot 中的成员，pending 选择不暴露 draft；
 - complete-set publish 后原子归档并替换同一 Daily 的旧 published set。
 
 因此 Stage 4 的 durable draft、complete-set publish、previous-set archive 与 Daily Brief read behavior 共同构成同一个 Production consistency contract。

@@ -197,6 +197,7 @@ export const stage4Runs = pgTable(
     reviewRunId: uuid('review_run_id').notNull(),
     status: text('status').notNull(),
     promptVersions: jsonb('prompt_versions').$type<Record<string, string>>().notNull().default({}),
+    selectionSnapshot: jsonb('selection_snapshot').$type<Record<string, unknown>>(),
     expectedCount: integer('expected_count').notNull(),
     successCount: integer('success_count').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -208,6 +209,10 @@ export const stage4Runs = pgTable(
       sql`jsonb_typeof(${table.promptVersions}) = 'object'`,
     ),
     index('stage4_runs_daily_date_idx').on(table.dailyDate),
+    check(
+      'stage4_runs_selection_snapshot_object_check',
+      sql`${table.selectionSnapshot} IS NULL OR jsonb_typeof(${table.selectionSnapshot}) = 'object'`,
+    ),
     uniqueIndex('stage4_runs_review_run_unique').on(table.reviewRunId),
   ],
 );

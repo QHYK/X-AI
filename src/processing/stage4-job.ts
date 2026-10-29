@@ -11,7 +11,6 @@ import { resolveStageLlmModel } from './llm-client.js';
 import {
   enrichStage4Event,
   loadStage4SourceCandidates,
-  loadStage4RecentEvents,
   prepareStage4Event,
   type EnrichedStage4Event,
   Stage4EnrichmentError,
@@ -28,6 +27,13 @@ import {
   type Stage4PersistenceResult,
 } from './stage4-persistence.js';
 import { DEFAULT_STAGE4_EVENT_LIMIT } from './stage4-config.js';
+import {
+  STAGE4_SELECTION_POOL_SIZE,
+  pendingStage4Selection,
+  resolveStage4Selection,
+  selectedStage4Candidates,
+  type Stage4SelectionSnapshot,
+} from './stage4-selection.js';
 import { classifyStage4LlmError, type Stage4TokenUsage } from './stage4-llm.js';
 import { emptyLlmTokenUsage, mergeLlmTokenUsage } from './llm-token-usage.js';
 import { STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION } from '../prompts/stage4-event-enrichment.js';
@@ -78,6 +84,8 @@ export type Stage4JobOptions = {
 };
 
 export type Stage4JobResult = {
+  dedup?: Stage4SelectionSnapshot;
+  dedupUsage?: Stage4TokenUsage | null;
   success: boolean;
   runDir: string;
   sourceStage3RunDir: string | null;
@@ -386,9 +394,11 @@ async function processStage4FromDb(
     webSearchEventCount = 0,
     totalWebSearchCalls = 0;
   let tokenUsage: Stage4TokenUsage = emptyLlmTokenUsage();
+  let dedup: Stage4SelectionSnapshot | undefined;
+  let dedupUsage: Stage4TokenUsage | null = null;
   const emptyCoverage = { expected: 0, updated: 0, duplicateProcessedContentIds: 0 };
   try {
-    const selected = await loadLatestStage4Selection(pool, dailyDate, DEFAULT_STAGE4_EVENT_LIMIT);
+    let selected = await loadLatestStage4Selection(pool, dailyDate, STAGE4_SELECTION_POOL_SIZE);
     selectedEventCount = selected.length;
     if (selected.length === 0) {
       await writeRunJson(
@@ -409,6 +419,8 @@ async function processStage4FromDb(
           webSearchEventCount: 0,
           totalWebSearchCalls: 0,
           eventsCreated: 0,
+          dedup,
+          dedupUsage,
           tokenUsage: null,
           error: null,
         }),
@@ -423,6 +435,8 @@ async function processStage4FromDb(
         llmCalls: 0,
         retryCount: 0,
         llmDurationMs: 0,
+        dedup,
+        dedupUsage,
         tokenUsage: null,
         webSearchEventCount: 0,
         totalWebSearchCalls: 0,
@@ -434,7 +448,70 @@ async function processStage4FromDb(
       };
     }
     const reviewRunId = selected[0]!.reviewRunId;
-    const stage4Run = await loadOrCreateStage4Run(pool, dailyDate, reviewRunId, selected.length);
+    const stage4Run = await loadOrCreateStage4Run(
+      pool,
+      dailyDate,
+      reviewRunId,
+      Math.min(selected.length, DEFAULT_STAGE4_EVENT_LIMIT),
+      pendingStage4Selection(selected),
+    );
+    if (stage4Run.selectionSnapshot != null && stage4Run.status === 'success') {
+      // A completed automatic Run must never undo later explicit human publication.
+      const versions = await pool.query<{ prompt_versions: Record<string, unknown> }>(
+        'select prompt_versions from stage4_runs where id=$1::uuid',
+        [stage4Run.id],
+      );
+      for (const [key, id] of Object.entries(versions.rows[0]?.prompt_versions ?? {}))
+        if (typeof id === 'string')
+          await observeRunPrompts(join(runDir, 'run.json'), pool)(
+            key as import('../lib/prompts/contracts.js').PromptKey,
+            id,
+          );
+      const result: Stage4JobResult = {
+        success: true,
+        runDir,
+        sourceStage3RunDir: null,
+        selectedEventCount: stage4Run.successCount,
+        enrichmentSuccessCount: stage4Run.successCount,
+        llmCalls: 0,
+        retryCount: 0,
+        llmDurationMs: 0,
+        tokenUsage: null,
+        webSearchEventCount: 0,
+        totalWebSearchCalls: 0,
+        eventsCreated: 0,
+        processedContentEventIdUpdated: 0,
+        associationCoverage: emptyCoverage,
+        persistence: null,
+        error: null,
+        dedup: stage4Run.selectionSnapshot,
+      };
+      await writeRunJson(join(runDir, 'run.json'), {
+        stage: 'stage4',
+        status: 'success',
+        daily_date: dailyDate,
+        stage4_run_id: stage4Run.id,
+        started_at: startedAt.toISOString(),
+        finished_at: new Date().toISOString(),
+        llm_call_count: 0,
+        selected_event_count: stage4Run.successCount,
+        dedup: stage4Run.selectionSnapshot,
+        reused: true,
+      });
+      return result;
+    }
+    if (stage4Run.selectionSnapshot != null) {
+      const selection = await resolveStage4Selection(pool, stage4Run.id, dailyDate, model);
+      if (!selection) throw new Error('Stage4 selection snapshot disappeared.');
+      dedup = selection.snapshot;
+      dedupUsage = selection.calls ? selection.usage : null;
+      selected = selectedStage4Candidates(dedup);
+      llmCalls += selection.calls;
+      retryCount += Math.max(0, selection.calls - 1);
+      llmDurationMs += selection.durationMs;
+      tokenUsage = addStage4TokenUsage(tokenUsage, selection.usage);
+    } else selected = selected.slice(0, DEFAULT_STAGE4_EVENT_LIMIT);
+    selectedEventCount = selected.length;
     const storedPrompts = await pool.query<{ prompt_versions: Record<string, string> }>(
       'select prompt_versions from stage4_runs where id = $1::uuid',
       [stage4Run.id],
@@ -448,7 +525,6 @@ async function processStage4FromDb(
     const generated = await loadGeneratedReviewItemIds(pool, stage4Run.id);
     const candidateIds = selected.flatMap((item) => item.processedContentIds);
     const sourceCandidates = await loadStage4SourceCandidates(pool, candidateIds);
-    const recentEvents = await loadStage4RecentEvents(pool, dailyDate);
     const failures: string[] = [];
     const promptLogs = new Set<string>();
     for (const item of selected) {
@@ -470,7 +546,6 @@ async function processStage4FromDb(
         sourceCandidates,
         startedAt,
         dailyDate,
-        recentEvents,
       );
       await writeJson(join(eventDir, 'input.json'), prepared.input);
       try {
@@ -530,6 +605,8 @@ async function processStage4FromDb(
           webSearchEventCount,
           totalWebSearchCalls,
           eventsCreated: 0,
+          dedup,
+          dedupUsage,
           tokenUsage: llmCalls > 0 ? tokenUsage : null,
           error: failures.join('; '),
         }),
@@ -544,6 +621,8 @@ async function processStage4FromDb(
         llmCalls,
         retryCount,
         llmDurationMs,
+        dedup,
+        dedupUsage,
         tokenUsage: llmCalls > 0 ? tokenUsage : null,
         webSearchEventCount,
         totalWebSearchCalls,
@@ -573,6 +652,8 @@ async function processStage4FromDb(
         webSearchEventCount,
         totalWebSearchCalls,
         eventsCreated: published.publishedCount,
+        dedup,
+        dedupUsage,
         tokenUsage: llmCalls > 0 ? tokenUsage : null,
         error: null,
       }),
@@ -587,6 +668,8 @@ async function processStage4FromDb(
       llmCalls,
       retryCount,
       llmDurationMs,
+      dedup,
+      dedupUsage,
       tokenUsage: llmCalls > 0 ? tokenUsage : null,
       webSearchEventCount,
       totalWebSearchCalls,
@@ -620,6 +703,8 @@ async function processStage4FromDb(
         webSearchEventCount,
         totalWebSearchCalls,
         eventsCreated: 0,
+        dedup,
+        dedupUsage,
         tokenUsage: llmCalls > 0 ? tokenUsage : null,
         error,
       }),
@@ -634,6 +719,8 @@ async function processStage4FromDb(
       llmCalls,
       retryCount,
       llmDurationMs,
+      dedup,
+      dedupUsage,
       tokenUsage: llmCalls > 0 ? tokenUsage : null,
       webSearchEventCount,
       totalWebSearchCalls,
@@ -654,6 +741,8 @@ function addStage4TokenUsage(
 }
 
 function stage4RuntimeArtifact(value: {
+  dedup?: Stage4SelectionSnapshot;
+  dedupUsage?: Stage4TokenUsage | null;
   startedAt: Date;
   finishedAt: Date;
   status: 'success' | 'partial' | 'failed';
@@ -679,6 +768,8 @@ function stage4RuntimeArtifact(value: {
     finished_at: value.finishedAt.toISOString(),
     daily_date: value.dailyDate,
     stage4_run_id: value.stage4RunId,
+    ...(value.dedup ? { dedup: value.dedup } : {}),
+    ...(value.dedupUsage ? { dedup_usage: value.dedupUsage } : {}),
     model: value.model,
     legacy_prompt_version: STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION,
     selected_event_count: value.selectedEventCount,

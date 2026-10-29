@@ -181,8 +181,8 @@ assert.equal(
   null,
   'Request details do not display Fragment usage',
 );
-assert.match(text(), /18 \/ 21 Registry/);
-assert.equal(document.querySelectorAll('aside li').length, 18);
+assert.match(text(), /19 \/ 22 Registry/);
+assert.equal(document.querySelectorAll('aside li').length, 19);
 await change('Prompt 类型', 'fragment');
 assert.equal(document.querySelectorAll('aside li').length, 3);
 // Filtering is local: no request, navigation, or loss of an unreferenced/new Fragment's edits.

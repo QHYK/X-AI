@@ -36,6 +36,7 @@
     "test:stage3-persistence": "tsx scripts/test-stage3-persistence-rules.ts",
     "test:stage3-event-selection": "tsx scripts/test-stage3-event-selection.ts",
     "test:stage4-event-date": "tsx scripts/test-stage4-event-date.ts",
+    "test:stage4-dedup": "tsx scripts/test-stage4-dedup.ts",
     "test:stage4-persistence": "tsx scripts/test-stage4-persistence.ts",
     "test:stage4-fail-fast": "tsx scripts/test-stage4-fail-fast.ts",
     "test:daily-llm-usage": "tsx scripts/test-daily-llm-usage.ts",

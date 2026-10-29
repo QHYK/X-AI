@@ -156,10 +156,10 @@ function createSavePool(
         if (normalized === "begin" || normalized === "commit" || normalized === "rollback") {
           return { rows: [], rowCount: 1 };
         }
-        if (normalized.startsWith("select id, success_count, status from stage4_runs")) {
+        if (normalized.startsWith("select id, success_count, status, selection_snapshot from stage4_runs")) {
           return { rows: [{ id: stage4RunId(), success_count: 15, status: "success" }], rowCount: 1 };
         }
-        if (normalized.startsWith("select expected_count from stage4_runs")) {
+        if (normalized.startsWith("select expected_count, selection_snapshot from stage4_runs")) {
           return { rows: [{ expected_count: 15 }], rowCount: 1 };
         }
         if (normalized.startsWith("select event_review_item_id from events")) {
@@ -201,7 +201,7 @@ function respondToReviewQuery(text: string, _values: unknown[] | undefined, miss
         .map((row) => ({ id: eventIdForRank(row.rank), event_review_item_id: row.id })),
     };
   }
-  if (normalized.startsWith("select id, success_count, status from stage4_runs")) {
+  if (normalized.startsWith("select id, success_count, status, selection_snapshot from stage4_runs")) {
     return { rows: [{ id: stage4RunId(), success_count: 15, status: "success" }], rowCount: 1 };
   }
   if (normalized.startsWith("select e.id from events e join processed_contents")) {

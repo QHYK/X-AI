@@ -329,12 +329,15 @@ Migration `0010` 将组合唯一索引命名为 `egi_group_content_unique`，Dri
 | `review_run_id` | uuid | NOT NULL；逻辑对应 event_review_items.review_run_id，无 FK |
 | `status` | text | NOT NULL；应用使用 running / partial / failed / success；无状态 CHECK |
 | `prompt_versions` | jsonb | NOT NULL；默认 {}；Request Key → Version UUID；JSON 对象，值与 key 归属由应用校验 |
+| `selection_snapshot` | jsonb | nullable；Migration `0026`；非 NULL 必须为 JSON object。NULL 表示历史 / 独立人工 Run，沿用原有选择语义 |
 | `expected_count` | integer | NOT NULL |
 | `success_count` | integer | NOT NULL；默认 0 |
 | `created_at` | timestamptz | NOT NULL；默认 now() |
 | `completed_at` | timestamptz | nullable |
 
 Review Snapshot 唯一；Migration `0010` 中索引名为 `stage4_runs_review_unique`，Drizzle 为 `stage4_runs_review_run_unique`。Event 复用、当前入选集合检查和原子发布见 [Daily Technical Spec](../04-technical-spec/daily.md#3-stage4-run-与-event-复用)，不能仅凭 draft 数量推断可以发布。Prompt 载体见 [版本绑定载体](prompt-registry.md#版本绑定载体)。
+
+`selection_snapshot` 的应用契约：`candidates` 按人工排名保存最多 20 条 Event Group / Review Item ID、Hint、原始排名与成员 ID；`duplicate_ids`、`selected_ids` 使用 Event Group UUID，后者保持原顺序且最多 15 条。`status` 初始为 `pending`，完成为 `success` / `fallback` / `skipped`；同时记录 `calls`（0–3）、`errors`、`reason`。最终 Snapshot 与 `expected_count` 同一 SQL 更新；模型 Usage 保存在既有运行观测记录，不写入 Snapshot。数组完整性与状态由应用校验，数据库仅校验 JSON object。自动选择完成后不重选；后续显式人工发布仍由现有 Review 流程维护。
 
 该列及对象 CHECK 由 `0022_stage4_prompt_versions.sql` 引入；已有数据库的部署状态核验见 [Operations §2.3](../09-operations.md#23-prompt-基线导入与生产接入)。
 

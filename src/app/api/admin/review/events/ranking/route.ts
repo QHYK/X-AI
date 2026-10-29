@@ -13,7 +13,6 @@ import {
 import {
   enrichStage4Event,
   loadStage4SourceCandidates,
-  loadStage4RecentEvents,
   prepareStage4Event,
   Stage4EnrichmentError,
   type EnrichedStage4Event,
@@ -34,9 +33,6 @@ export async function PATCH(request: Request): Promise<Response> {
       ...new Set(enrichmentRequests.flatMap((item) => item.processedContentIds)),
     ]);
     const enrichedEvents: EnrichedStage4Event[] = [];
-    const recentEvents = enrichmentRequests.length
-      ? await loadStage4RecentEvents(pool, input.dailyDate)
-      : [];
     const stage4Run = enrichmentRequests.length
       ? await loadOrCreateStage4Run(
           pool,
@@ -53,7 +49,7 @@ export async function PATCH(request: Request): Promise<Response> {
           databasePromptBinder(pool, 'stage4', stage4Run!.id),
           () =>
             enrichStage4Event(
-              prepareStage4Event(item, sourceCandidates, new Date(), input.dailyDate, recentEvents),
+              prepareStage4Event(item, sourceCandidates, new Date(), input.dailyDate),
             ),
           { logged: promptLogs },
         ),

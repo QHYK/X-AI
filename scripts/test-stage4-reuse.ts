@@ -17,9 +17,16 @@ import {
 } from '../src/lib/ranking-review.js';
 import { DEFAULT_STAGE4_EVENT_LIMIT } from '../src/processing/stage4-config.js';
 import type { Stage4JobResult } from '../src/processing/stage4-job.js';
+import {
+  pendingStage4Selection,
+  selectedStage4Candidates,
+  STAGE4_SELECTION_POOL_SIZE,
+  type Stage4SelectionSnapshot,
+} from '../src/processing/stage4-selection.js';
 
 type Item = { id: string; snapshot: string; rank: number; ai: number };
 type Run = {
+  selection_snapshot?: Stage4SelectionSnapshot | null;
   id: string;
   review_run_id: string;
   daily_date: string;
@@ -76,6 +83,7 @@ class Memory {
   }
   db() {
     return {
+      __memory: this,
       query: this.query.bind(this),
       connect: async () => ({
         query: this.query.bind(this),
@@ -90,7 +98,9 @@ class Memory {
     this.queries.push(q);
     const result = (rows: unknown[] = [], rowCount = rows.length) => ({ rows, rowCount });
     if (q.startsWith('select r.key, v.id from prompt_registry'))
-      return result((p[0] as string[]).map((key) => ({ key, id: '11111111-1111-4111-8111-111111111111' })));
+      return result(
+        (p[0] as string[]).map((key) => ({ key, id: '11111111-1111-4111-8111-111111111111' })),
+      );
     if (q === 'begin') {
       this.backup = JSON.stringify({
         items: this.items,
@@ -123,7 +133,7 @@ class Memory {
           processedContentIds: [i.id],
         })),
       );
-    if (q.startsWith('select id, success_count, status from stage4_runs'))
+    if (q.startsWith('select id, success_count, status, selection_snapshot from stage4_runs'))
       return result(this.runs.filter((r) => r.review_run_id === p[0]));
     if (q.startsWith('insert into stage4_runs')) {
       const r = {
@@ -133,6 +143,7 @@ class Memory {
         expected_count: Number(p[2]),
         status: 'running',
         success_count: 0,
+        selection_snapshot: p[4] ? JSON.parse(String(p[4])) : null,
       };
       this.runs.push(r);
       return result([r]);
@@ -172,9 +183,14 @@ class Memory {
       return result(this.runs.filter((r) => r.id === p[0]));
     if (q.startsWith('select eri.id from event_review_items')) {
       assert.ok(q.includes('for update of eri'));
-      return result(this.selected(String(p[0]), Number(p[2])).map((i) => ({ id: i.id })));
+      return result(
+        (Array.isArray(p[2])
+          ? this.items.filter((i) => i.snapshot === p[0] && (p[2] as string[]).includes(i.id))
+          : this.selected(String(p[0]), Number(p[2]))
+        ).map((i) => ({ id: i.id })),
+      );
     }
-    if (q.startsWith('select id from stage4_runs'))
+    if (q.startsWith('select id, status, selection_snapshot from stage4_runs'))
       return result(this.runs.filter((r) => r.id === p[0]));
     if (q.startsWith('select e.id from events e join stage4_runs'))
       return result(
@@ -182,7 +198,7 @@ class Memory {
           .filter((e) => e.date === p[0] && e.status === 'published')
           .map((e) => ({ id: e.id })),
       );
-    if (q.startsWith('select expected_count from stage4_runs'))
+    if (q.startsWith('select expected_count, selection_snapshot from stage4_runs'))
       return result(this.runs.filter((r) => r.id === p[0]));
     if (q.startsWith('select event_review_item_id from events')) {
       assert.ok(q.includes("'archived'"));
@@ -236,8 +252,19 @@ class Memory {
     }
     if (q.startsWith('update stage4_runs')) {
       const r = this.runs.find((r) => r.id === p[0])!;
-      r.status = q.includes("'success'") ? 'success' : String(p[1]);
-      r.success_count = Number(q.includes("'success'") ? p[1] : p[2]);
+      if (q.includes('set expected_count=')) {
+        r.expected_count = Number(p[1]);
+        return result();
+      }
+      if (
+        q.includes('selection_snapshot is null') &&
+        r.selection_snapshot &&
+        r.status === 'success'
+      )
+        return result();
+      const publishing = /set status\s*=\s*'success'/.test(q);
+      r.status = publishing ? 'success' : String(p[1]);
+      r.success_count = Number(publishing ? p[1] : p[2]);
       return result();
     }
     if (q.startsWith('select count(*)'))
@@ -297,6 +324,8 @@ const body = parsed.statements
   .join('\n');
 let calls = 0,
   failItem: string | undefined;
+let newSelection = false,
+  selectionCalls = 0;
 const output = {
   event_title: 'Generated Event',
   event_title_zh: '事件',
@@ -329,6 +358,24 @@ const invoke = runInNewContext(
     mergeLlmTokenUsage,
     STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION: 'test',
     DEFAULT_STAGE4_EVENT_LIMIT,
+    STAGE4_SELECTION_POOL_SIZE,
+    pendingStage4Selection: (c: Parameters<typeof pendingStage4Selection>[0]) =>
+      newSelection ? pendingStage4Selection(c) : null,
+    selectedStage4Candidates,
+    resolveStage4Selection: async (db: { __memory: Memory }, runId: string) => {
+      const run = db.__memory.runs.find((r) => r.id === runId)!;
+      const snapshot = run.selection_snapshot!;
+      if (snapshot.status === 'pending') {
+        selectionCalls++;
+        snapshot.duplicate_ids = snapshot.candidates.slice(0, 8).map((c) => c.eventGroupId);
+        snapshot.selected_ids = snapshot.candidates.slice(8, 23).map((c) => c.eventGroupId);
+        snapshot.status = 'success';
+        snapshot.calls = 1;
+        run.expected_count = snapshot.selected_ids.length;
+        return { snapshot, calls: 1, usage: emptyLlmTokenUsage(), durationMs: 0 };
+      }
+      return { snapshot, calls: 0, usage: emptyLlmTokenUsage(), durationMs: 0 };
+    },
     Stage4EnrichmentError,
     classifyStage4LlmError: () => 'ordinary',
     prepareStage4Event,
@@ -497,3 +544,78 @@ assert.deepEqual(
   'A failed replacement retains the entire previous published set and backlinks.',
 );
 console.log('Failed complete-set replacement preserves the previous published generation.');
+
+newSelection = true;
+const dedupRun = new Memory();
+for (let i = 17; i <= 20; i++)
+  dedupRun.items.push({ id: uid(i), snapshot: dedupRun.snapshot, rank: i, ai: i });
+failItem = uid(10);
+assert.equal((await run(dedupRun)).success, false);
+assert.equal(dedupRun.runs[0]!.expected_count, 12);
+assert.equal(selectionCalls, 1);
+const frozenIds = [...dedupRun.runs[0]!.selection_snapshot!.selected_ids];
+// Human order changes during a partial Run do not reselect automatic membership.
+[dedupRun.items[0]!.rank, dedupRun.items[8]!.rank] = [
+  dedupRun.items[8]!.rank,
+  dedupRun.items[0]!.rank,
+];
+failItem = undefined;
+const priorDedupCalls = calls;
+assert.equal((await run(dedupRun)).success, true);
+assert.equal(selectionCalls, 1);
+assert.equal(calls, priorDedupCalls + 1, 'Resume enriches only the missing frozen member');
+assert.deepEqual(
+  dedupRun.events
+    .filter((e) => e.status === 'published')
+    .map((e) => e.item)
+    .sort(),
+  [...frozenIds].sort(),
+);
+
+const humanOrder = dedupRun.selected(dedupRun.snapshot, 20).map((i) => i.id);
+const reviewInput = {
+  dailyDate: date,
+  reviewRunId: dedupRun.snapshot,
+  orderedIds: humanOrder,
+  touchedIds: [humanOrder[0]!],
+};
+const humanRequests = await getEventReviewEnrichmentRequests(dedupRun.db(), reviewInput);
+const humanEnriched = humanRequests.map((item) => ({
+  ...prepareStage4Event(
+    item,
+    new Map(
+      item.processedContentIds.map((id) => [
+        id,
+        {
+          processedContentId: id,
+          title: 'Evidence',
+          summary: 'Evidence',
+          entities: [],
+          source: 'Source',
+          url: null,
+          publishedAt: null,
+        },
+      ]),
+    ),
+    new Date(),
+    date,
+  ),
+  output,
+  llm: {} as never,
+  toolUsage: {} as never,
+}));
+await saveEventReviewRanking(dedupRun.db(), { ...reviewInput, enrichedEvents: humanEnriched });
+assert.equal(dedupRun.runs[0]!.expected_count, 15);
+const afterHuman = structuredClone(dedupRun.events);
+const beforeRetryCalls = calls;
+assert.equal((await run(dedupRun)).success, true);
+assert.equal(calls, beforeRetryCalls);
+assert.deepEqual(
+  dedupRun.events,
+  afterHuman,
+  'Successful Run Retry must not revert explicit human publication',
+);
+assert.equal(selectionCalls, 1);
+console.log(
+  'PASS frozen Dedup membership → partial → Resume → publish → human override → successful Retry no-op.',
+);

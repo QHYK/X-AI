@@ -78,6 +78,9 @@ type Stage4BusinessRow = {
 };
 
 export type DashboardStageMetrics = {
+  dedup?: JsonObject | null;
+  dedupUsage?: JsonObject | null;
+  dedupPromptVersion?: string | null;
   stage: DashboardStage;
   status: string | null;
   errorSummary: string | null;
@@ -493,11 +496,17 @@ export async function getDashboardData(
     pool,
     displayedStages.flatMap((metrics) => [
       metrics.promptVersion,
+      metrics.dedupPromptVersion ?? null,
       ...Object.values(metrics.promptVersions ?? {}),
     ]),
   );
   for (const metrics of displayedStages) {
     metrics.promptVersionRecorded = metrics.promptVersion !== null;
+    if (metrics.stage === 'stage4')
+      metrics.dedupPromptVersion = promptLabel(
+        metrics.dedupPromptVersion ?? null,
+        'daily.stage4.event_dedup',
+      );
     metrics.promptVersion = promptLabel(metrics.promptVersion, DAILY_PROMPT_KEYS[metrics.stage]);
     if (metrics.promptVersions) {
       metrics.promptVersions = {
@@ -789,6 +798,13 @@ function stageMetricsFromPipelineRun(
     errorSummary: row.error_summary,
     startedAt,
     model: row.model,
+    ...(stage === 'stage4'
+      ? {
+          dedup: asObject(metrics.stage4_dedup),
+          dedupUsage: asObject(metrics.stage4_dedup_usage),
+          dedupPromptVersion: dashboardBindingId(metrics, 'daily.stage4.event_dedup', null),
+        }
+      : {}),
     promptVersion: dashboardBindingId(
       metrics,
       DAILY_PROMPT_KEYS[stage],
@@ -1245,6 +1261,13 @@ async function parseStageMetrics(
     errorSummary: stringValue(artifact.error),
     startedAt,
     model: stringValue(artifact.model),
+    ...(stage === 'stage4'
+      ? {
+          dedup: asObject(artifact.dedup),
+          dedupUsage: asObject(artifact.dedup_usage),
+          dedupPromptVersion: dashboardBindingId(artifact, 'daily.stage4.event_dedup', null),
+        }
+      : {}),
     promptVersion: dashboardBindingId(
       artifact,
       DAILY_PROMPT_KEYS[stage],

@@ -87,7 +87,7 @@ npm run test:prompt-requests
 npm run test:prompt-management
 ```
 
-Dry-run 只读当前 Git / 冻结 Seed 数据，输出 18 项 key、拟导入的 `vN` 编号、来源和 Hash，不连接数据库。测试默认使用 Mock；若显式提供 `PROMPT_REGISTRY_TEST_DATABASE_URL`（独立测试数据库），同一测试还会创建隔离 Schema 并在事务结束时回滚全部 DDL / 数据，用于验证真实 PostgreSQL 约束。不要填生产连接。正式导入使用现有环境加载顺序与 DATABASE_URL，单事务导入 3 个 Fragment 和 15 个 Request；已有任意版本的 Registry 全部跳过，不覆盖人工 Draft / Published / Active。正式导入要求 `production-seeds.ts` 和 `seed-baseline.json` 已提交且无未提交修改，否则拒绝标注不真实的来源 Commit；未提交时 dry-run 允许预览，但会明确警告，不能作为已提交来源验收。无新环境变量、依赖或付费调用。
+Dry-run 只读当前 Git / 冻结 Seed 数据，输出基础 Seed key、拟导入的 `vN` 编号、来源和 Hash，不连接数据库。测试默认使用 Mock；若显式提供 `PROMPT_REGISTRY_TEST_DATABASE_URL`（独立测试数据库），同一测试还会创建隔离 Schema 并在事务结束时回滚全部 DDL / 数据，用于验证真实 PostgreSQL 约束。不要填生产连接。正式导入使用现有环境加载顺序与 DATABASE_URL，单事务导入 3 个 Fragment 和 16 个 Request；已有任意版本的 Registry 全部跳过，不覆盖人工 Draft / Published / Active。正式导入要求 `production-seeds.ts` 和 `seed-baseline.json` 已提交且无未提交修改，否则拒绝标注不真实的来源 Commit；未提交时 dry-run 允许预览，但会明确警告，不能作为已提交来源验收。无新环境变量、依赖或付费调用。
 
 新环境按 Migration → 幂等导入 → 启动调用方部署；已有版本的 Registry 不会被导入覆盖，启用前核对有效 Active 和精确 Fragment。回滚保留表、Stage4 映射列和历史版本，不自动删表或重置 Active。运行时契约见 `07-prompt-spec/registry.md`。
 
@@ -96,6 +96,23 @@ Mock / 请求一致性测试不连接生产或调用模型；B3.1 **真实 Postg
 已有环境升级 Prompt Management / 静态清理不需额外 Migration 或重导入。直接 Fragment Key 引用需先执行新增 `0025_fragment_key_references.sql`（通过既有 `npm run db:migrate`）；它仅替换 Guard Function，不改写 Prompt 数据或 Active。部署后从旧 Request 创建 Draft 时仅转换本地编辑副本，保存、Publish 和 Activate 均须人工操作。登录 `/ai/prompts` 管理版本；手动保存 / Activate 会写 Web 当前连接的数据库，验收须使用测试环境。`test:prompt-registry` 检查 Service 和生产依赖边界；`test:prompt-runtime` 检查绑定；`test:prompt-requests` 检查实际请求一致性；`test:prompt-management` 检查 UI。认证 / 导航回归为 `test:admin-auth`、`test:admin-navigation`。均不调用模型；真实 Stage1 冒烟 `test:stage1:chat` 需另行授权。
 
 Manual / Put Back 进程硬退出可能遗留 `promptAttempt.status=running`：先确认原请求进程已结束、无模型请求仍在进行，并检查是否已有成功结果，再由运维针对该文章 / Candidate 将标记恢复为 failed；不要自动超时接管或批量清除。Put Back 保留原绑定 UUID，Manual 下一次主动点击重新选择 Active。此流程不提供未经确认的自动修复脚本。
+
+### Stage4 Dedup 部署
+
+先提交代码与 Seed，核对部署目标，再由运维执行增量 Migration `0026_stage4_selection_snapshot.sql`（通过现有 `npm run db:migrate`；会应用该目标尚未执行的 Migration）。不要在旧代码 / 新 Schema 未就绪时启动新 Stage4。新增可空 JSONB 保留历史 Run，无需回填或重跑。
+
+只初始化新增 Request，不切换 Active：
+
+```bash
+npm run prompts:import -- --only=daily.stage4.event_dedup --no-activate --dry-run
+npm run prompts:import -- --only=daily.stage4.event_dedup --no-activate
+```
+
+正式导入须 Seed 已提交；幂等跳过已有任意版本，保留人工编辑。结果为 Published v1、Active 为空；管理员在 `/prompts` 检查产品指定原文及 User Template `{{input}}` 后，显式 Activate。需要修改时先创建 Draft，Publish 与 Activate 仍独立。该初始 Request 不自动添加 System Fragment，不改既有 Enrichment Prompt。未初始化 / 未 Activate / Prompt 数据库加载失败会明确报错，不伪装成成功 Dedup。
+
+Stage4 Selection 锁要求 PostgreSQL 直连或 Session Pooling；每个执行中的 Selection 占用一条连接，但不跨模型调用持有事务，复用现有连接池预算。进程终止会释放 Session Lock；已保存最终集合的 Retry 不再调用 Dedup。若进程在最终 Snapshot 成功提交前退出，不能宣称模型结果已持久化，后续可重新执行尚未完成的 Selection。
+
+Dashboard Stage4 Card 展示 Dedup Prompt 可读版本、Run 调用数、状态、数量、fallback 原因和可展开 ID / 错误。Dedup Token 为本次执行的 Provider Usage，汇入 Stage4 总 Usage；Resume 未调用 Dedup 时没有新的独立 Usage，显示 N/A，不能将旧消耗重复计入新执行。`run.json` / `pipeline_runs.metrics` 保留诊断，`stage4_runs.selection_snapshot` 是选择状态权威来源。
 
 ### 三层 System Fragment 升级
 
@@ -376,6 +393,7 @@ npm run test:stage2-retry
 npm run test:stage3-persistence
 npm run test:stage3-category-recovery
 npm run test:stage4-event-date
+npm run test:stage4-dedup
 npm run test:daily-llm-usage
 ```
 

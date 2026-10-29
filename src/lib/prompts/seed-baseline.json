@@ -399,6 +399,25 @@
         "legacyVersion": "v1",
         "changeNote": "B3.1 exact static baseline import; production callers unchanged."
       }
+    },
+    {
+      "id": "b69927fb-bb25-577b-af58-652ed0fa146e",
+      "key": "daily.stage4.event_dedup",
+      "kind": "request",
+      "workflow": "daily",
+      "step": "stage4",
+      "requestType": "event_dedup",
+      "displayName": "Event Dedup",
+      "body": {
+        "systemInstructions": "现在负责 Daily Brief 的跨天事件去重。\n\n输入包含：\n\n- `candidates`：当天 Stage3 排序后的 Top 20 候选事件，包含 `id` 和 `event_hint`。\n- `recent_events`：前两天已发布的事件，包含 `title` 和 `summary`。\n\n逐条判断当天候选事件是否与历史事件实质重复。\n\n判断原则：\n\n- 如果描述的是同一事件，且没有值得单独报道的重要新事实或进展，视为重复。\n- 如果同一事件出现了新的重大决定、行动、结果或实质性变化，不视为重复。\n- 仅仅涉及相同人物、机构、国家或主题，不代表事件重复。\n- 不因标题或表述不同而忽略实质重复，也不因标题相似就直接判定重复。\n- 信息不足以确认重复时，保留候选事件。\n\n输出要求：\n\n- `duplicate_ids`：所有确认重复的候选事件 ID。\n- ID 必须来自输入的 `candidates`，不得编造或重复。\n- 没有重复事件时返回 `[]`。\n- 严格遵循结构化输出 Schema，仅返回 JSON。",
+        "userTemplate": "{{input}}",
+        "variants": {},
+        "fragments": []
+      },
+      "source": {
+        "legacyVersion": "v1",
+        "changeNote": "Stage4 Dedup initial instructions supplied by product owner."
+      }
     }
   ]
 }

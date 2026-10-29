@@ -14,7 +14,7 @@
 
 ### 三层 System Prompt
 
-Daily 的 9 类 Request（Stage1–4、Put Back、Read More）和 Discovery D2–D5 显式采用 Identity → 业务 Editorial → 原 Request Instructions；`in_depth.*` 暂不接入。新编辑器直接使用 Fragment Key：
+已完成三层升级的 Daily Request（Stage1–4、Put Back、Read More）和 Discovery D2–D5 显式采用 Identity → 业务 Editorial → 原 Request Instructions；`in_depth.*` 暂不接入。新增 Dedup 初始 Request 按产品指定文本独立初始化，不自动注入 Fragment；需要引用时通过编辑器显式加入。新编辑器直接使用 Fragment Key：
 
 ```text
 {{fragment.xfield.identity}}
@@ -30,7 +30,7 @@ Daily 的 9 类 Request（Stage1–4、Put Back、Read More）和 Discovery D2�
 
 历史绑定旧 Request 继续使用原版。历史无快照且 Request 未绑定时，只接受升级工具在新 Published 的 `change_note` 中记录的明确前序 UUID（仍须同 Key、Published、无动态引用）；没有可证明前序则报错，不选最新 Active 凑数。不得将不同 System Fragment 快照的排名拼入一次恢复执行。缺 Fragment、无有效 Active 或快照 UUID / Key 不符均在模型调用前失败。
 
-三个 Fragment 以空内容 Published `v1` 初始化，首次编辑 Draft 为 `v2`，Publish / Activate 仍分开。初始化和基于现有 Active 内容的幂等升级由 Operations 的独立命令执行，不修改冻结的历史 Seed 或 Published。新环境也需完成该升级，不能只导入原始 18 项。
+三个 Fragment 以空内容 Published `v1` 初始化，首次编辑 Draft 为 `v2`，Publish / Activate 仍分开。初始化和基于现有 Active 内容的幂等升级由 Operations 的独立命令执行，不修改冻结的历史 Seed 或 Published。新环境也需完成该升级，不能只导入基础 Seed。
 
 管理页通过一个 Fragment Select 选择已注册 Fragment 并插入 Key 占位符。普通 Fragment 必须另外明确选择 Published Version；动态项显示当前 Active，不能把此显示当成历史 Run 实际版本。手动输入合法 Key 同样建立待校验引用，普通项未选版本不能保存。删除占位符时按所有变体的并集清理绑定。旧 Slot 只在本地 Draft 编辑副本中转换，不修改 Published 或历史 Run。
 

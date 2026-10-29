@@ -183,6 +183,13 @@
       "when": 1793246400000,
       "tag": "0025_fragment_key_references",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793347200000,
+      "tag": "0026_stage4_selection_snapshot",
+      "breakpoints": true
     }
   ]
 }
