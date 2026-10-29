@@ -89,6 +89,8 @@ class Memory {
     const q = text.trim().replace(/\s+/g, ' ').toLowerCase();
     this.queries.push(q);
     const result = (rows: unknown[] = [], rowCount = rows.length) => ({ rows, rowCount });
+    if (q.startsWith('select r.key, v.id from prompt_registry'))
+      return result((p[0] as string[]).map((key) => ({ key, id: '11111111-1111-4111-8111-111111111111' })));
     if (q === 'begin') {
       this.backup = JSON.stringify({
         items: this.items,
@@ -330,6 +332,10 @@ const invoke = runInNewContext(
     Stage4EnrichmentError,
     classifyStage4LlmError: () => 'ordinary',
     prepareStage4Event,
+    loadStage4RecentEvents: async (_db: unknown, targetDate: string) => {
+      assert.equal(targetDate, date, 'Retry uses the original business date');
+      return [{ title: 'Historical event', summary: 'Stored history' }];
+    },
     loadStage4SourceCandidates: async (_db: unknown, ids: string[]) =>
       new Map(
         ids.map((id) => [
@@ -360,7 +366,8 @@ const invoke = runInNewContext(
 const run = (m: Memory) => invoke(m.db(), { dailyDate: date, rootDir: '/mock-stage4' });
 
 const m = new Memory();
-assert.equal((await run(m)).success, true);
+const initialRun = await run(m);
+assert.equal(initialRun.success, true, initialRun.error ?? 'Stage4 initial Run failed');
 assert.equal(calls, DEFAULT_STAGE4_EVENT_LIMIT);
 const firstIds = m.events.map((e) => e.id);
 assert.equal((await run(m)).success, true);

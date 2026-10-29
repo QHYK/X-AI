@@ -11,6 +11,7 @@ import { resolveStageLlmModel } from './llm-client.js';
 import {
   enrichStage4Event,
   loadStage4SourceCandidates,
+  loadStage4RecentEvents,
   prepareStage4Event,
   type EnrichedStage4Event,
   Stage4EnrichmentError,
@@ -447,6 +448,7 @@ async function processStage4FromDb(
     const generated = await loadGeneratedReviewItemIds(pool, stage4Run.id);
     const candidateIds = selected.flatMap((item) => item.processedContentIds);
     const sourceCandidates = await loadStage4SourceCandidates(pool, candidateIds);
+    const recentEvents = await loadStage4RecentEvents(pool, dailyDate);
     const failures: string[] = [];
     const promptLogs = new Set<string>();
     for (const item of selected) {
@@ -468,6 +470,7 @@ async function processStage4FromDb(
         sourceCandidates,
         startedAt,
         dailyDate,
+        recentEvents,
       );
       await writeJson(join(eventDir, 'input.json'), prepared.input);
       try {

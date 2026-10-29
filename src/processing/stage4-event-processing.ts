@@ -4,16 +4,16 @@
  * 正常 Stage 4 Job 与 Human Review 的按需晋级都从这里构造输入并调用同一 LLM / validation 层，
  * 因而不会出现两套 Prompt、工具配置或 Structured Output 处理逻辑。
  */
-import type { Pool } from "pg";
-import type { Stage4EventEnrichmentInput } from "../prompts/stage4-event-enrichment.js";
-import { deriveEventDate, type EventDateDerivation } from "./event-date.js";
+import type { Pool } from 'pg';
+import type { Stage4EventEnrichmentInput } from '../prompts/stage4-event-enrichment.js';
+import { deriveEventDate, type EventDateDerivation } from './event-date.js';
 import {
   runStage4EventEnrichmentLlm,
   type Stage4LlmOptions,
   type Stage4LlmSuccess,
   type Stage4TokenUsage,
   type Stage4WebSearchToolUsage,
-} from "./stage4-llm.js";
+} from './stage4-llm.js';
 
 export type Stage4EventGroup = {
   eventGroupId: string;
@@ -43,9 +43,26 @@ export type PreparedStage4Event = {
 
 export type EnrichedStage4Event = PreparedStage4Event & {
   llm: Stage4LlmSuccess;
-  output: Stage4LlmSuccess["output"];
+  output: Stage4LlmSuccess['output'];
   toolUsage: Stage4WebSearchToolUsage;
 };
+
+/** Published historical context only; date arithmetic uses business dates, not session timezones. */
+export async function loadStage4RecentEvents(
+  db: Pick<Pool, 'query'>,
+  dailyDate: string,
+): Promise<Array<{ title: string; summary: string }>> {
+  const result = await db.query<{ title: string; summary: string }>(
+    `select e.title, e.summary from events e
+     join stage4_runs r on r.id = e.stage4_run_id
+     where r.daily_date >= $1::date - 2 and r.daily_date < $1::date
+       and r.status = 'success' and e.publication_status = 'published'
+       and e.event_date = r.daily_date
+     order by r.daily_date, coalesce(e.display_rank, e.ai_rank), e.created_at, e.id`,
+    [dailyDate],
+  );
+  return result.rows.map(({ title, summary }) => ({ title, summary }));
+}
 
 /** 保留既有 retry/耗时信息，供 Stage 4 runtime 与 Review API 在失败时使用。 */
 export class Stage4EnrichmentError extends Error {
@@ -59,7 +76,7 @@ export class Stage4EnrichmentError extends Error {
     readonly rawOutputText: string | null,
   ) {
     super(message);
-    this.name = "Stage4EnrichmentError";
+    this.name = 'Stage4EnrichmentError';
   }
 }
 
@@ -98,6 +115,7 @@ export function prepareStage4Event(
   sourceCandidates: Map<string, Stage4SourceCandidate>,
   workflowRunTimestamp: Date,
   dailyDate?: string,
+  recentEvents: Array<{ title: string; summary: string }> = [],
 ): PreparedStage4Event {
   const candidates = group.processedContentIds.map((id) => {
     const candidate = sourceCandidates.get(id);
@@ -111,6 +129,7 @@ export function prepareStage4Event(
   return {
     group,
     input: {
+      recent_events: recentEvents,
       event_hint: group.eventHint,
       sources: candidates.map((candidate) => ({
         title: candidate.title,
@@ -121,7 +140,7 @@ export function prepareStage4Event(
       })),
     },
     eventDate: dailyDate
-      ? { eventDate: dailyDate, source: "daily_attribution" }
+      ? { eventDate: dailyDate, source: 'daily_attribution' }
       : deriveEventDate({ publishedAtValues, workflowRunTimestamp }),
     publishedAtValues,
   };

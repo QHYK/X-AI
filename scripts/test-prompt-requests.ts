@@ -153,7 +153,11 @@ const cases = [
   {
     path: 'src/processing/stage4-llm.ts',
     fn: 'runStage4EventEnrichmentLlm',
-    input: { event_hint: '原始事件', sources: [] },
+    input: {
+      recent_events: [{ title: 'Historical event', summary: 'Historical summary' }],
+      event_hint: '原始事件',
+      sources: [],
+    },
   },
 ];
 try {
@@ -173,6 +177,14 @@ try {
         () => current[test.fn](test.input, { maxRetries: 0, provider: 'openai' }),
       );
       assert.deepEqual(captured, oldRequests, `${test.fn}, search=${webSearch}`);
+      if (test.path.includes('stage4')) {
+        for (const request of captured) {
+          assert.ok(
+            JSON.stringify(request).includes('Historical event'),
+            'Decision and both enrichment variants receive historical context',
+          );
+        }
+      }
     }
   }
   const originalKey = process.env.CODEX_API_KEY;

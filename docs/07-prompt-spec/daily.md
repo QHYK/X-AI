@@ -187,6 +187,7 @@ Rank by:
 ### Input Schema
 ```json
 {
+  "recent_events": [{ "title": "Historical event title", "summary": "Historical event summary" }],
   "event_hint": "",
   "sources": [
     {
@@ -199,6 +200,8 @@ Rank by:
   ]
 }
 ```
+
+`recent_events` 读取目标 `dailyDate` 前两个自然日的已发布 Event 标题与概述（仅成功 Stage4 Run，空窗口为 `[]`），不是执行当天日期。Context Decision 和 Search / No Search enrichment 共用同一输入；该字段仅为历史参考，不进行数据库硬去重，也不改变当前 Top 15 单 Event enrichment 的候选顺序。生产 Request Prompt 正文保持数据库原版本。
 
 ### Output Schema
 ```json
