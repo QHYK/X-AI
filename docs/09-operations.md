@@ -435,6 +435,7 @@ npm run test:in-depth-introduction-ui
 npm run test:in-depth-review
 npm run test:digest-put-back
 npm run test:digest-put-back-ui
+npm run test:ignored-review
 npm run test:in-depth-pagination
 ```
 

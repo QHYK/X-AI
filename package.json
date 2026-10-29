@@ -79,6 +79,7 @@
     "test:in-depth-review": "tsx scripts/test-in-depth-review.ts",
     "test:admin-auth": "tsx scripts/test-admin-auth.ts",
     "test:admin-navigation": "tsx scripts/test-admin-navigation.ts",
+    "test:ignored-review": "tsx scripts/test-ignored-review.ts",
     "test:openai": "tsx scripts/test-openai-call.ts openai",
     "test:openai:chat": "tsx scripts/test-openai-call.ts openai chat-completions",
     "test:openai:chat:structured": "tsx scripts/test-openai-call.ts openai chat-completions-structured",

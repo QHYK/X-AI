@@ -100,6 +100,7 @@ try {
     '/review/events',
     '/review/long-form',
     '/review/in-depth',
+    '/review/ignored',
     '/review/models',
   ]) {
     const request = new NextRequest(`${origin}/ai${page}`, { nextConfig: { basePath: '/ai' } });

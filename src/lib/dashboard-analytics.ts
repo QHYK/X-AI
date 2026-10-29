@@ -30,6 +30,34 @@ export type IgnoredArticle = {
   dailyDate?: string | null;
 };
 
+export type AiIgnoredArticle = Pick<IgnoredArticle, 'id' | 'title' | 'sourceName' | 'url'> & {
+  contentText: string | null;
+  ignoreReason: string | null;
+};
+
+/** Stage1 LLM writes ignored + NULL error; exact-dedup writes 'duplicate'.
+ * Require the processing timestamp and exclude unknown error markers for legacy safety.
+ * Ignore reasons are not durably recorded by the current Stage1 output path.
+ */
+export async function loadAiIgnoredArticles(
+  pool: Pick<Pool, 'query'>,
+  scope: DailyScope,
+): Promise<AiIgnoredArticle[]> {
+  const result = await pool.query<AiIgnoredArticle>(`
+    select ra.id, ra.title, s.name as "sourceName", ra.url,
+      ra.content_text as "contentText", null::text as "ignoreReason"
+    from raw_articles ra join sources s on s.id = ra.source_id
+    where ra.published_at >= $1::timestamptz and ra.published_at < $2::timestamptz
+      and ra.stage1_status = 'ignored' and ra.processing_error is null
+      and ra.stage1_processed_at is not null
+      and not exists (select 1 from processed_contents pc
+        where pc.raw_article_id = ra.id and pc.routing = 'digest'
+          and coalesce(pc.display_rank, pc.ai_rank) is not null)
+    order by ra.stage1_processed_at desc, ra.id
+  `, [scope.startAt, scope.endAt]);
+  return result.rows;
+}
+
 type CountRow = {
   source_id?: string;
   source_name?: string;

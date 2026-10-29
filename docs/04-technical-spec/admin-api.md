@@ -114,6 +114,8 @@ Discovery Run Card 按 Dashboard 业务日期匹配 `window_end_date`，不按�
 
 ### 7.3 Human Review
 
+`/review/ignored` 是独立的 Stage1 筛选质量审查页（含 basePath 时为 `/ai/review/ignored`），位于 REVIEW 分组 In-depth 与 Model Evaluation 之间，复用 Review 日期布局、鉴权和导航 Active 逻辑。按 Daily Scope 的 `published_at` 半开区间读取所有来源；仅接受 `stage1_status='ignored'`、`processing_error IS NULL`、`stage1_processed_at IS NOT NULL`，排除规则去重的 `duplicate`、其他错误标记和无处理时间的历史记录，并排除已进入有效 Digest 的文章。查询由 `src/lib/dashboard-analytics.ts` 的 `loadAiIgnoredArticles()` 提供，不改变 Analytics 原查询口径。使用 Source / Title & Content / 操作三列表格；Title 后以小箭头链接原文，正文显示单行预览并可展开完整 `content_text`。当前 Stage1 未保存 Ignore Reason，因此不展示理由占位、不补调模型，缺失正文明确提示。日期仅允许审查已结束 Scope；Put Back 直接复用下述按钮、API 与幂等 / 恢复能力，成功后移除列表项并提示结果，失败保留文章和错误。列表读取不调用模型，Put Back 仍按既有流程必要时补齐 Digest 字段。
+
 Analytics 的 Ignored Articles 提供 Put Back，调用 `POST /api/admin/dashboard/analytics/ignored-articles/put-back`，复用 Admin Session / 同源保护。列表同时保留尚未被 Stage3 重排的恢复记录，以便刷新后确认结果；统计继续按实际 Raw 状态计数。交互与错误状态在原列表内完成，不另建编辑页面。业务规则见 `../06-workflow-spec/manual-operations.md` 的 Put Back，生成契约见 `../07-prompt-spec/editorial.md`。
 
 提供人工 Review 界面：
