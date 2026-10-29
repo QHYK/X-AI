@@ -9,6 +9,7 @@ import { STAGE1_PROMPT_VERSION } from '../src/prompts/stage1-content-understandi
 import {
   pipelineTriggerSource,
   safelyFinishPipelineRun,
+  safelyRecordPipelineRuntime,
   safelyStartPipelineRun,
 } from '../src/processing/pipeline-run-log.js';
 import { resolveStageLlmProvider } from '../src/processing/llm-client.js';
@@ -59,6 +60,7 @@ async function main() {
       inheritedDailyScope ??
       readPublishedAtScopeFromEnv(process.env);
     await mkdir(join(runDir, 'batches'), { recursive: true });
+    await safelyRecordPipelineRuntime(pool, pipelineRunId, runDir);
     try {
       const summary = await withFilePrompts(pool, join(runDir, 'run.json'), () =>
         processStage1Batch(pool, {

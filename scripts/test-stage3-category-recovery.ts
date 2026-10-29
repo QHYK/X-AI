@@ -294,10 +294,11 @@ class Store {
       };
     },
   } as unknown as NonNullable<Parameters<typeof processStage3>[1]>['rankers'];
-  async run(root: string) {
+  async run(root: string, onRuntimeCreated?: (directory: string) => Promise<void>) {
     return processStage3(this.pool, {
       dailyDate: date,
       rootDir: root,
+      onRuntimeCreated,
       pipelineRunId: randomUUID(),
       rankers: this.rankers,
     });
@@ -319,7 +320,25 @@ try {
   manual.ai = 9;
   manual.display = 1;
   store.generalFails = true;
-  const first = await store.run(root);
+  const observationErrors: unknown[][] = [];
+  const logError = console.error;
+  console.error = (...args) => {
+    observationErrors.push(args);
+  };
+  let first: Awaited<ReturnType<Store['run']>>;
+  try {
+    first = await store.run(root, async (directory) => {
+      assert.match(directory, /runtime\/stage3\//);
+      throw new Error('Mock Runtime observation failure');
+    });
+  } finally {
+    console.error = logError;
+  }
+  assert.equal(
+    observationErrors.length,
+    1,
+    'Runtime observation failure is logged, not propagated',
+  );
   assert.equal(first.status, 'partial');
   assert.equal(first.categoryCorrections.length, 1);
   assert.equal(invalid.category, 'General');

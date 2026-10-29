@@ -112,6 +112,16 @@ Discovery Run Card 按 Dashboard 业务日期匹配 `window_end_date`，不按�
 
 阶段状态和指标取持久化业务数据，历史缺失显示未知，不由 Trace 猜测成功。查询与稳定排序实现见 `src/lib/discovery-dashboard.ts`。Retry Discovery / Retry D2 / Retry Open 均经付费确认后提交并轮询；按钮可用性由持久化状态决定，不能据此跳过服务端检查。提交和恢复边界见 [Discovery §7](discovery.md#7-运行入口人工触发与失败处理)。D2–D5 Usage 来自实际模型响应，缺失缓存统计显示 N/A，不与 Fetch Cache 命中混用；采集和累加见 [Trace 与 Usage](discovery.md#61-trace-与-usage-的失败边界)。
 
+#### Runtime Files
+
+Overview 非 `success` 步骤沿用 Retry 右侧 Info 图标打开 Runtime Drawer（移动端全屏）。目录和文件原位展开，内容按需读取，可复制脱敏后的文本；成功任务交互不变。
+
+`GET /api/admin/dashboard/runtime-files?runId=<pipeline_runs.id>` 列目录；`path` 指定子目录，`file=1&path=...` 单独读取文件内容。沿用 Admin 服务端认证，响应禁止缓存。请求固定到具体 Attempt UUID，不随 Retry 或页面轮询切换。`metrics.runtime_dir` 保存项目内相对目录；Stage3/4 在目录创建后通过辅助观测回调记录。记录使用 JSONB 局部更新，结束日志保留已记录的路径；观测失败仅记录错误，不改变 Pipeline 结果。
+
+历史 Completion、Duplicate Filter、Stage1/2 可使用与 DB `started_at` **完全相同**的目录时间戳，且要求该步骤该时间只有一个 Attempt；旧 Stage3/4 或仅有 Dashboard Runtime fallback 而无可靠 Attempt 的数据不可推测目录。不使用最新目录或时间接近匹配。
+
+读取仅允许对应步骤的 Runtime 根目录及 `.json` / `.jsonl` / `.txt` / `.log` / `.md`，拒绝路径穿越、隐藏路径和符号链接。单文件最多 1 MiB，每层最多 500 个目录项，路径深度有界；JSON 格式化，JSONL/文本保留可读内容，常见凭据字段和连接串脱敏。脱敏不是任意敏感业务信息识别器，仍仅供管理员访问。无可靠映射、文件缺失返回 404，非法路径 400，符号链接或成功 Attempt 403，超大文件或目录 413，其他读取失败 500；UI 显示明确反馈。
+
 ### 7.3 Human Review
 
 `/review/ignored` 是独立的 Stage1 筛选质量审查页（含 basePath 时为 `/ai/review/ignored`），位于 REVIEW 分组 In-depth 与 Model Evaluation 之间，复用 Review 日期布局、鉴权和导航 Active 逻辑。按 Daily Scope 的 `published_at` 半开区间读取所有来源；仅接受 `stage1_status='ignored'`、`processing_error IS NULL`、`stage1_processed_at IS NOT NULL`，排除规则去重的 `duplicate`、其他错误标记和无处理时间的历史记录，并排除已进入有效 Digest 的文章。查询由 `src/lib/dashboard-analytics.ts` 的 `loadAiIgnoredArticles()` 提供，不改变 Analytics 原查询口径。使用 Source / Title & Content / 操作三列表格；Title 后以小箭头链接原文，正文显示单行预览并可展开完整 `content_text`。当前 Stage1 未保存 Ignore Reason，因此不展示理由占位、不补调模型，缺失正文明确提示。日期仅允许审查已结束 Scope；Put Back 直接复用下述按钮、API 与幂等 / 恢复能力，成功后移除列表项并提示结果，失败保留文章和错误。列表读取不调用模型，Put Back 仍按既有流程必要时补齐 Digest 字段。

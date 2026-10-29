@@ -22,7 +22,7 @@ import {
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Pool, PoolClient } from 'pg';
 import {
   STAGE3_DIGEST_RANKING_PROMPT_VERSION,
@@ -188,6 +188,7 @@ type Stage3ResumeArtifact = {
 };
 
 export type Stage3JobOptions = {
+  onRuntimeCreated?: (directory: string) => Promise<void>;
   stage2RunDir?: string;
   stage1RunDir?: string;
   publishedWithinHours?: number;
@@ -271,7 +272,14 @@ export async function processStage3(
   options: Stage3JobOptions = {},
 ): Promise<Stage3JobResult> {
   const startedAt = new Date();
-  return withFilePrompts(pool, runPath('stage3', startedAt, options.rootDir), () =>
+  const path = runPath('stage3', startedAt, options.rootDir);
+  await mkdir(dirname(path), { recursive: true });
+  try {
+    await options.onRuntimeCreated?.(dirname(path));
+  } catch (error) {
+    console.error('Failed to observe Runtime directory.', error);
+  }
+  return withFilePrompts(pool, path, () =>
     processStage3Bound(pool, options, startedAt),
   );
 }

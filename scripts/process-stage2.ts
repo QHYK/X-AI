@@ -1,3 +1,4 @@
+import { dirname } from 'node:path';
 import { withFilePrompts, runPath } from '../src/lib/prompts/run-file.js';
 import { writeFile } from 'node:fs/promises';
 import { Pool } from 'pg';
@@ -57,6 +58,11 @@ async function main() {
       triggerSource: pipelineRunLog.pipelineTriggerSource(process.env.PIPELINE_TRIGGER_SOURCE),
       startedAt,
     });
+    await pipelineRunLog.safelyRecordPipelineRuntime(
+      pool,
+      pipelineRunId,
+      dirname(runPath('stage2', startedAt)),
+    );
     try {
       const stage1 = await stage1Runtime.loadOptionalStage1Runtime(
         process.cwd(),

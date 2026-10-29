@@ -76,6 +76,7 @@ type PreviousStage4PersistencePlanArtifact = {
 };
 
 export type Stage4JobOptions = {
+  onRuntimeCreated?: (directory: string) => Promise<void>;
   stage3RunDir?: string;
   concurrency?: number;
   model?: string;
@@ -386,6 +387,11 @@ async function processStage4FromDb(
   const dailyDate = options.dailyDate ?? resolveDailyScope(undefined, startedAt).dailyDate;
   const model = resolveStageLlmModel('stage4', options.model);
   await mkdir(eventsDir, { recursive: true });
+  try {
+    await options.onRuntimeCreated?.(runDir);
+  } catch (error) {
+    console.error('Failed to observe Runtime directory.', error);
+  }
   let selectedEventCount = 0,
     enrichmentSuccessCount = 0,
     llmCalls = 0,

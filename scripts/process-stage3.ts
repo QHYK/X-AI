@@ -10,6 +10,7 @@ import { resolveStageLlmModel, resolveStageLlmProvider } from '../src/processing
 import {
   pipelineTriggerSource,
   safelyFinishPipelineRun,
+  safelyRecordPipelineRuntime,
   safelyStartPipelineRun,
 } from '../src/processing/pipeline-run-log.js';
 import { STAGE3_EVENT_RANKING_PROMPT_VERSION } from '../src/prompts/stage3-event-ranking.js';
@@ -53,6 +54,8 @@ async function main() {
       if (!pipelineRunId)
         throw new Error('Stage3 cannot run without its durable pipeline_runs record.');
       const result = await processStage3(pool, {
+        onRuntimeCreated: (directory) =>
+          safelyRecordPipelineRuntime(pool, pipelineRunId, directory),
         pipelineRunId,
         stage2RunDir: inheritedStage2RunDir ?? process.env.STAGE3_STAGE2_RUN_DIR,
         publishedWithinHours: parseOptionalPositiveInt(

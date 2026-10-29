@@ -1,3 +1,4 @@
+import { safelyRecordPipelineRuntime } from '../src/processing/pipeline-run-log.js';
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Pool } from "pg";
@@ -91,6 +92,7 @@ async function main() {
           : undefined,
     });
     pipelineRunId = await safelyStartPipelineRun(pool, { dailyDate: dailyScope.dailyDate, step: "content_completion", triggerSource: pipelineTriggerSource(process.env.PIPELINE_TRIGGER_SOURCE), startedAt });
+    await safelyRecordPipelineRuntime(pool, pipelineRunId, runDir);
     const summary = await completeRawArticleContent(pool, options, (metrics) => {
       applyMetrics(artifact, metrics);
     });

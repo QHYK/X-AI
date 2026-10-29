@@ -16,7 +16,7 @@ import {
   saveEventReviewRanking,
 } from '../src/lib/ranking-review.js';
 import { DEFAULT_STAGE4_EVENT_LIMIT } from '../src/processing/stage4-config.js';
-import type { Stage4JobResult } from '../src/processing/stage4-job.js';
+import type { Stage4JobResult, Stage4JobOptions } from '../src/processing/stage4-job.js';
 import {
   pendingStage4Selection,
   selectedStage4Candidates,
@@ -338,12 +338,18 @@ const output = {
   source_perspectives: [],
   external_context: { performed: false, sources: [], sources_summary: '' },
 };
+const observationErrors: unknown[][] = [];
 const invoke = runInNewContext(
   ts.transpileModule(`${body}\nprocessStage4FromDb;`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText,
   {
     ...persistence,
+    console: {
+      error: (...args: unknown[]) => {
+        observationErrors.push(args);
+      },
+    },
     join,
     resolveDailyScope: () => ({ dailyDate: date }),
     resolveStageLlmModel: () => 'mock',
@@ -409,11 +415,19 @@ const invoke = runInNewContext(
       };
     },
   },
-) as (db: Pool, options: { dailyDate: string; rootDir: string }) => Promise<Stage4JobResult>;
-const run = (m: Memory) => invoke(m.db(), { dailyDate: date, rootDir: '/mock-stage4' });
+) as (db: Pool, options: Stage4JobOptions) => Promise<Stage4JobResult>;
+const run = (m: Memory, onRuntimeCreated?: Stage4JobOptions['onRuntimeCreated']) =>
+  invoke(m.db(), { dailyDate: date, rootDir: '/mock-stage4', onRuntimeCreated });
 
 const m = new Memory();
-const initialRun = await run(m);
+const initialRun = await run(m, async () => {
+  throw new Error('Mock Runtime observation failure');
+});
+assert.equal(
+  observationErrors.length,
+  1,
+  'Runtime observation failure logs without failing Stage4',
+);
 assert.equal(initialRun.success, true, initialRun.error ?? 'Stage4 initial Run failed');
 assert.equal(calls, DEFAULT_STAGE4_EVENT_LIMIT);
 const firstIds = m.events.map((e) => e.id);

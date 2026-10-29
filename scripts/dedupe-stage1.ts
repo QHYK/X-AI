@@ -1,3 +1,4 @@
+import { safelyRecordPipelineRuntime } from '../src/processing/pipeline-run-log.js';
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Pool } from "pg";
@@ -21,6 +22,7 @@ async function main() {
   try {
     const runDir = join(process.cwd(), "runtime/pre-stage1-duplicates", toRunTimestamp(startedAt));
     await mkdir(runDir, { recursive: true });
+    await safelyRecordPipelineRuntime(pool, pipelineRunId, runDir);
     const summary = await ignorePreStage1ExactDuplicates(pool, scope);
     await writeFile(join(runDir, "run.json"), `${JSON.stringify({
       status: "success", started_at: startedAt.toISOString(),

@@ -553,6 +553,7 @@ function ContentCompletionCard({
             step="content_completion"
             label="Content Completion"
             initiallyRunning={metrics.status === 'running'}
+            pipelineRunId={metrics.pipelineRunId}
           />
         ) : null}
         <StatusBadge status={metrics.status} />
@@ -626,6 +627,7 @@ function DuplicateFilterCard({
             step="exact_duplicate_filter"
             label="Exact Duplicate Filter"
             initiallyRunning={metrics.status === 'running'}
+            pipelineRunId={metrics.pipelineRunId}
           />
         ) : null}
       </div>
@@ -736,6 +738,7 @@ function StageCard({
             step={step}
             label={label}
             initiallyRunning={metrics.status === 'running'}
+            pipelineRunId={metrics.pipelineRunId}
           />
         ) : null}
         <StatusBadge

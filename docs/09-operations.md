@@ -436,6 +436,8 @@ npm run test:in-depth-review
 npm run test:digest-put-back
 npm run test:digest-put-back-ui
 npm run test:ignored-review
+npm run test:dashboard-runtime
+npm run test:dashboard-runtime-ui
 npm run test:in-depth-pagination
 ```
 
@@ -531,3 +533,6 @@ Discovery Run 的正式恢复边界见 `06-workflow-spec/discovery.md` §8.3。�
 ## 9. Runtime Artifact 操作注意事项
 
 `runtime/` 是本地 execution diagnostic artifact，不是跨机器业务真相。仅在本文件登记的 diagnostic/recovery command 会直接读取历史 runtime
+
+
+Dashboard Runtime 查看要求 Web 与 CLI 能访问同一项目的 `runtime/` 文件系统（部署时须保留或共享对应目录）。只有数据库中的 `runtime_dir` 不能恢复已删除或另一台机器上的文件。升级后新 Attempt 记录路径；旧 Attempt 的定位限制与只读接口见 [Runtime Files](04-technical-spec/admin-api.md#runtime-files)。无 Migration、无需回填历史数据。上述 Runtime 回归使用临时文件、Mock DB 和 JSDOM，不访问远程数据库或模型。

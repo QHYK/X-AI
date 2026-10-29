@@ -12,6 +12,7 @@ import { resolveDailyScope } from '../src/lib/daily-scope.js';
 import {
   pipelineTriggerSource,
   safelyFinishPipelineRun,
+  safelyRecordPipelineRuntime,
   safelyStartPipelineRun,
 } from '../src/processing/pipeline-run-log.js';
 import { STAGE4_EVENT_ENRICHMENT_PROMPT_VERSION } from '../src/prompts/stage4-event-enrichment.js';
@@ -49,6 +50,8 @@ async function main() {
     });
     try {
       const result = await processStage4(pool, {
+        onRuntimeCreated: (directory) =>
+          safelyRecordPipelineRuntime(pool, pipelineRunId, directory),
         stage3RunDir: inheritedStage3RunDir ?? process.env.STAGE4_STAGE3_RUN_DIR,
         dailyDate: process.env.DAILY_DATE,
         concurrency: parseOptionalPositiveInt(process.env.STAGE4_CONCURRENCY),

@@ -129,6 +129,7 @@ try {
     ['dashboard/analytics/sources', ['GET']],
     ['dashboard/daily/retry', ['POST']],
     ['dashboard/step/retry', ['GET', 'POST']],
+    ['dashboard/runtime-files', ['GET']],
     ['discovery', ['GET', 'POST']],
     ['review/events', ['GET']],
     ['review/events/ranking', ['PATCH']],

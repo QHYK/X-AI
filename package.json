@@ -61,6 +61,8 @@
     "test:content-completion-runtime": "tsx scripts/test-content-completion-runtime.ts",
     "test:content-completion-pools": "tsx scripts/test-content-completion-pools.ts",
     "test:pipeline-env": "tsx scripts/test-pipeline-env.ts",
+    "test:dashboard-runtime": "tsx scripts/test-dashboard-runtime.ts",
+    "test:dashboard-runtime-ui": "tsx scripts/test-dashboard-runtime-ui.ts",
     "test:pipeline-run-log": "tsx scripts/test-pipeline-run-log.ts",
     "test:discovery-phase1": "tsx scripts/test-discovery-phase1.ts",
     "test:d2-input": "tsx scripts/preview-d2-input.ts",

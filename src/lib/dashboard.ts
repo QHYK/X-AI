@@ -58,6 +58,7 @@ type ContentFunnelRow = {
 type JsonObject = Record<string, unknown>;
 
 type PipelineRunRow = {
+  id?: string;
   daily_date: string;
   step: string;
   status: string;
@@ -78,6 +79,7 @@ type Stage4BusinessRow = {
 };
 
 export type DashboardStageMetrics = {
+  pipelineRunId?: string;
   dedup?: JsonObject | null;
   dedupUsage?: JsonObject | null;
   dedupPromptVersion?: string | null;
@@ -129,6 +131,7 @@ export type DashboardStageMetrics = {
 };
 
 export type DashboardContentCompletionMetrics = {
+  pipelineRunId?: string;
   status: string | null;
   startedAt: string | null;
   durationMs: number | null;
@@ -143,6 +146,7 @@ export type DashboardContentCompletionMetrics = {
 };
 
 export type DashboardDuplicateFilterMetrics = {
+  pipelineRunId?: string;
   status: string | null;
   inputCount: number;
   duplicateCount: number;
@@ -742,7 +746,7 @@ async function loadPipelineRunsByDate(pool: Pool, dates: Set<string>): Promise<P
     const result = await pool.query<PipelineRunRow>(
       `
       select distinct on (daily_date, step)
-        daily_date::text, step, status, provider, model, started_at, finished_at, metrics, error_summary
+        id, daily_date::text, step, status, provider, model, started_at, finished_at, metrics, error_summary
       from pipeline_runs
       where daily_date = any($1::date[])
         and step = any($2::text[])
@@ -792,6 +796,7 @@ function stageMetricsFromPipelineRun(
   const finishedAt = toIsoString(row.finished_at);
   const selectedEventCount = numberFrom(metrics, 'selected_count', 'event_selected_count');
   return {
+    pipelineRunId: row.id,
     ...emptyStageMetrics(stage),
     stage,
     status: row.status,
@@ -866,6 +871,7 @@ function completionMetricsFromPipelineRun(row: PipelineRunRow): DashboardContent
   const metrics = asObject(row.metrics) ?? {};
   const startedAt = toIsoString(row.started_at)!;
   return {
+    pipelineRunId: row.id,
     status: row.status,
     startedAt,
     durationMs:
@@ -885,6 +891,7 @@ function completionMetricsFromPipelineRun(row: PipelineRunRow): DashboardContent
 function duplicateMetricsFromPipelineRun(row: PipelineRunRow): DashboardDuplicateFilterMetrics {
   const metrics = asObject(row.metrics) ?? {};
   return {
+    pipelineRunId: row.id,
     status: row.status,
     inputCount: numberFrom(metrics, 'input_count') ?? 0,
     duplicateCount: numberFrom(metrics, 'duplicate_count') ?? 0,
