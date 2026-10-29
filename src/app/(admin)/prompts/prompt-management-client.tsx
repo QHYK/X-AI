@@ -49,6 +49,7 @@ export function PromptManagement() {
   const [items, setItems] = useState<PromptRegistryItem[]>([]);
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState('all');
+  const [showUnreferenced, setShowUnreferenced] = useState(false);
   const [key, setKey] = useState<RegistryKey | null>(null);
   const [detail, setDetail] = useState<PromptManagementDetail | null>(null);
   const [versionId, setVersionId] = useState('');
@@ -170,10 +171,18 @@ export function PromptManagement() {
     const controller = new AbortController();
     mutation.current = controller;
     try {
-      const data = await json<PromptManagementDetail>(
-        await fetch(endpoint(key), { cache: 'no-store', signal: controller.signal }),
-      );
-      if (!controller.signal.aborted) apply(data, versionId);
+      const [data, list] = await Promise.all([
+        fetch(endpoint(key), { cache: 'no-store', signal: controller.signal }).then(
+          json<PromptManagementDetail>,
+        ),
+        fetch(endpoint(), { cache: 'no-store', signal: controller.signal }).then(
+          json<{ items: PromptRegistryItem[] }>,
+        ),
+      ]);
+      if (!controller.signal.aborted) {
+        apply(data, versionId);
+        setItems(list.items);
+      }
     } catch (e) {
       if (!controller.signal.aborted) setError((e as Error).message);
     } finally {
@@ -230,12 +239,17 @@ export function PromptManagement() {
         }),
       );
       committed = true;
-      const latest = await json<PromptManagementDetail>(
-        await fetch(endpoint(key), { cache: 'no-store', signal: controller.signal }),
-      );
+      const [latest, list] = await Promise.all([
+        fetch(endpoint(key), { cache: 'no-store', signal: controller.signal }).then(
+          json<PromptManagementDetail>,
+        ),
+        fetch(endpoint(), { cache: 'no-store', signal: controller.signal }).then(
+          json<{ items: PromptRegistryItem[] }>,
+        ),
+      ]);
       if (controller.signal.aborted) return;
       apply(latest, result.version.id);
-      setItems((rows) => rows.map((row) => (row.key === key ? latest.registry : row)));
+      setItems(list.items);
       setMessage(
         action === 'save'
           ? 'Draft 已保存。'
@@ -318,6 +332,7 @@ export function PromptManagement() {
   const filtered = items.filter(
     (item) =>
       (kind === 'all' || item.kind === kind) &&
+      (item.kind !== 'fragment' || showUnreferenced || item.usedByRequests.length > 0) &&
       item.key.toLowerCase().includes(query.toLowerCase()),
   );
   return (
@@ -363,6 +378,15 @@ export function PromptManagement() {
               <option value="request">Request</option>
               <option value="fragment">Fragment</option>
             </select>
+          </label>
+          <label className={styles.filterToggle}>
+            <input
+              type="checkbox"
+              aria-label="Show unreferenced"
+              checked={showUnreferenced}
+              onChange={(e) => setShowUnreferenced(e.target.checked)}
+            />
+            Show unreferenced
           </label>
           <p className={styles.muted}>
             {filtered.length} / {items.length} Registry
@@ -433,6 +457,28 @@ export function PromptManagement() {
                       ? '动态 Active Fragment：新 Run 固定开始时的 Active；已有 Run 的 Retry / Resume 使用原快照。'
                       : '普通 Fragment：Request 绑定精确 Published Version；发布或激活新 Fragment 不会自动升级已有引用。'}
                   </p>
+                ) : null}
+                {detail.registry.kind === 'fragment' ? (
+                  <section aria-label="Used by Requests">
+                    <h3>Used by Requests</h3>
+                    {detail.registry.usedByRequests.length ? (
+                      <ul className={styles.usedBy}>
+                        {detail.registry.usedByRequests.map((requestKey) => (
+                          <li key={requestKey}>
+                            <button
+                              type="button"
+                              disabled={disabled}
+                              onClick={() => selectKey(requestKey)}
+                            >
+                              <code>{requestKey}</code>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className={styles.muted}>No current Request references</p>
+                    )}
+                  </section>
                 ) : null}
               </header>
               <section

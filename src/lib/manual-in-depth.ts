@@ -405,7 +405,12 @@ export async function generateManualInDepthIntroduction(
       whyWorthReading: output.whyWorthReading.trim(),
       extra_info: output.extra_info.trim(),
     };
-    const tags = row.evaluation?.manualTags ? readDiscoveryContentMetadata(row).tags : output.tags;
+    let tags = row.evaluation?.manualTags ? readDiscoveryContentMetadata(row).tags : [];
+    // Keep human choices first; reuse the bilingual contract to deduplicate additions.
+    for (const tag of output.tags) {
+      if (tags.length === 3) break;
+      tags = DiscoveryTagsSchema.parse([...tags, tag]);
+    }
     client = await db.connect();
     released = false;
     await client.query('begin');

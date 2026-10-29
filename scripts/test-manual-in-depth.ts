@@ -293,7 +293,10 @@ await generateManualInDepthIntroduction(fetched.db, 'review-1', { request, regen
 assert.equal(modelCalls, priorCalls + 1);
 
 await generateManualInDepthIntroduction(store.db, first.item.id, { request });
-assert.deepEqual(store.rows.get(first.item.id)?.evaluation?.tags, humanTags);
+assert.deepEqual(store.rows.get(first.item.id)?.evaluation?.tags, [
+  ...humanTags,
+  ...generated.tags,
+]);
 assert.equal(store.rows.get(first.item.id)?.evaluation?.decision, undefined);
 assert.equal(store.rows.get(first.item.id)?.reviewStatus, 'approved');
 assert.equal(store.rows.get(first.item.id)?.editorialNotes, 'Preserve notes');
@@ -303,6 +306,53 @@ assert.equal(
   (await getPublishedInDepthPage(store.db)).items[0]?.editorial.summary,
   generated.summary,
 );
+
+const supplementalTags = [
+  { zh: '人工智能', en: 'Artificial Intelligence' },
+  { zh: '科学研究', en: 'Scientific Research' },
+];
+for (const manualTags of [
+  [],
+  humanTags,
+  [...humanTags, supplementalTags[0]!],
+  [...humanTags, ...supplementalTags],
+]) {
+  const target = fresh();
+  const created = await createManualInDepthCandidate(
+    target.db,
+    { url: articleUrl, tags: manualTags },
+    { fetchDocument: noFetch },
+  );
+  await generateManualInDepthIntroduction(target.db, created.item.id, {
+    request: async () => ({
+      id: 'mock-tags',
+      output: [],
+      api_mode: 'chat_completions' as const,
+      output_text: JSON.stringify({
+        ...generated,
+        tags: [
+          { zh: '科学方法', en: 'SCIENTIFIC METHOD' },
+          ...generated.tags,
+          supplementalTags[1]!,
+        ],
+      }),
+    }),
+  });
+  const expected =
+    manualTags.length === 0
+      ? [{ zh: '科学方法', en: 'SCIENTIFIC METHOD' }, ...generated.tags, supplementalTags[1]!]
+      : [...manualTags, ...generated.tags, supplementalTags[1]!].slice(0, 3);
+  assert.deepEqual(target.rows.get(created.item.id)?.evaluation?.tags, expected);
+  await generateManualInDepthIntroduction(target.db, created.item.id, {
+    request,
+    regenerate: true,
+  });
+  assert.deepEqual(
+    target.rows.get(created.item.id)?.evaluation?.tags,
+    manualTags.length ? expected : generated.tags,
+    'Regenerate retains human tags and previously filled slots',
+  );
+}
 
 for (const doc of [
   article({ status: 'error', markdown: '', isComplete: false, error: 'blocked' }),

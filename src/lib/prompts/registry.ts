@@ -317,6 +317,7 @@ export type PromptRegistryItem = RegistryInput & {
   id: string;
   activeVersionId: string | null;
   activeVersion: number | null;
+  usedByRequests: RegistryKey[];
   updatedAt: string;
 };
 export type ManagedPromptVersion = PromptVersion & { createdAt: string; changeNote: string | null };
@@ -331,18 +332,54 @@ const SELECT_REGISTRY = `select r.id,r.key,r.kind,r.workflow,r.step,r.request_ty
 function iso(value: Date | string) {
   return new Date(value).toISOString();
 }
+/** Resolve Active Request bindings in one batch; template text and historical Requests are not usage evidence. */
+async function currentFragmentReferences(db: Queryable): Promise<Map<RegistryKey, RegistryKey[]>> {
+  const result = await db.query<{ fragmentKey: RegistryKey; requestKey: RegistryKey }>(
+    `
+    with current_request_fragments as (
+      select r.key as request_key,ref from prompt_registry r
+      join prompt_versions v on v.id=r.active_version_id and v.registry_id=r.id and v.status='published'
+      cross join lateral jsonb_array_elements(v.body->'fragments') as refs(ref)
+      where r.kind='request'
+    )
+    select distinct f.key as "fragmentKey",c.request_key as "requestKey"
+    from current_request_fragments c
+    left join prompt_versions pinned on pinned.id::text=lower(c.ref->>'versionId') and pinned.status='published'
+    join prompt_registry f on f.kind='fragment' and (
+      (c.ref ? 'versionId' and not c.ref ? 'activeKey' and f.id=pinned.registry_id)
+      or (c.ref ? 'activeKey' and not c.ref ? 'versionId' and f.key=c.ref->>'activeKey' and f.key=any($1::text[]))
+    )
+    where not c.ref ? 'key' or c.ref->>'key'=f.key
+    order by f.key,c.request_key`,
+    [[...ACTIVE_FRAGMENT_KEYS]],
+  );
+  const map = new Map<RegistryKey, RegistryKey[]>();
+  for (const { fragmentKey, requestKey } of result.rows) {
+    const requests = map.get(fragmentKey) ?? [];
+    requests.push(requestKey);
+    map.set(fragmentKey, requests);
+  }
+  return map;
+}
 export async function listPromptRegistries(
   db: Queryable,
   search = '',
   kind?: RegistryKind,
 ): Promise<PromptRegistryItem[]> {
-  const result = await db.query<PromptRegistryItem>(
-    `${SELECT_REGISTRY}
-    where strpos(lower(r.key),lower($1::text))>0 and ($2::text is null or r.kind=$2)
-    order by r.workflow,r.step,r.key`,
-    [search, kind ?? null],
-  );
-  return result.rows.map((row) => ({ ...row, updatedAt: iso(row.updatedAt) }));
+  const [result, references] = await Promise.all([
+    db.query<PromptRegistryItem>(
+      `${SELECT_REGISTRY}
+      where strpos(lower(r.key),lower($1::text))>0 and ($2::text is null or r.kind=$2)
+      order by r.workflow,r.step,r.key`,
+      [search, kind ?? null],
+    ),
+    currentFragmentReferences(db),
+  ]);
+  return result.rows.map((row) => ({
+    ...row,
+    updatedAt: iso(row.updatedAt),
+    usedByRequests: references.get(row.key) ?? [],
+  }));
 }
 export async function getPromptManagementDetail(
   db: Queryable,
@@ -358,6 +395,7 @@ export async function getPromptManagementDetail(
   const fragments = await db.query<ManagedPromptVersion>(
     `${select} where r.kind='fragment' and v.status='published' order by r.key,v.version desc`,
   );
+  const references = await currentFragmentReferences(db);
   const checked = (row: ManagedPromptVersion) => {
     validatePromptBody(row.key, row.kind, row.body);
     if (promptContentHash(row.body) !== row.contentHash)
@@ -365,7 +403,11 @@ export async function getPromptManagementDetail(
     return { ...row, createdAt: iso(row.createdAt) };
   };
   return {
-    registry: { ...result.rows[0], updatedAt: iso(result.rows[0].updatedAt) },
+    registry: {
+      ...result.rows[0],
+      updatedAt: iso(result.rows[0].updatedAt),
+      usedByRequests: references.get(key) ?? [],
+    },
     versions: versions.rows.map(checked),
     fragments: fragments.rows.map(checked),
   };

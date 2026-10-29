@@ -58,7 +58,7 @@ In-depth Reads 经人工审核后展示：`approved` 即上架，`pending` 与 `
 
 编辑人员可提交原始 URL 和最多三组可选双语 Tags。先查找相同作品的现有审核候选：命中时展示完整已有记录，不新增、不改状态、不覆盖 Tags 或介绍、不自动生成。未命中时优先复用已有元数据与完整正文；必要时只抓取该 URL，成功后创建 manual / pending 候选。正文无法获取或不完整时明确失败，不创建无正文的候选。
 
-Generate 由编辑人员另行触发，基于已保存正文生成中文标题、内容概要、推荐理由、补充评价及适用 Tags；不做 D4 的入选判断，不改变审核状态。完整生成结果默认直接复用，Regenerate 必须显式请求。人工 Tags 优先保留。三段介绍仍可人工编辑保存，Approve / Reject 与 Notes 独立；只有 Approved 才公开。本功能不恢复标题、作者人工编辑。技术与数据边界见 `04-technical-spec/discovery.md` §6.4、[Discovery Data Model](05-data-model/discovery.md)，Prompt 契约见 `07-prompt-spec/editorial.md` 的 Manual In-depth Generate。
+Generate 由编辑人员另行触发，基于已保存正文生成中文标题、内容概要、推荐理由、补充评价及适用 Tags；不做 D4 的入选判断，不改变审核状态。完整生成结果默认直接复用，Regenerate 必须显式请求。人工 Tags 优先保留，不足三个时按模型返回顺序补入不重复的标签，最多三个。Regenerate 保留人工候选已保存的标签，仅补空位；未指定人工 Tags 时采用本次模型标签。三段介绍仍可人工编辑保存，Approve / Reject 与 Notes 独立；只有 Approved 才公开。本功能不恢复标题、作者人工编辑。技术与数据边界见 `04-technical-spec/discovery.md` §6.4、[Discovery Data Model](05-data-model/discovery.md)，Prompt 契约见 `07-prompt-spec/editorial.md` 的 Manual In-depth Generate。
 
 ## 5. Design Principles
 

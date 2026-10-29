@@ -50,13 +50,18 @@ const versions: ManagedPromptVersion[] = seeds.map((s) => ({
   changeNote: null,
 }));
 const fragments = versions.filter((v) => v.kind === 'fragment');
+// A registered Fragment may have only its first Draft and no Active yet.
+const fresh = versions.find((v) => v.key === 'xfield.identity')!;
+fresh.status = 'draft';
+
 const items: PromptRegistryItem[] = seeds.map((s) => {
   const v = versions.find((v) => v.key === s.key)!;
   return {
     ...s,
     id: v.registryId,
-    activeVersionId: v.id,
-    activeVersion: v.version,
+    activeVersionId: v.status === 'draft' ? null : v.id,
+    activeVersion: v.status === 'draft' ? null : v.version,
+    usedByRequests: [],
     updatedAt: v.createdAt,
   };
 });
@@ -89,10 +94,23 @@ globalThis.fetch = async (url, init) => {
   assert.ok(!pathname.includes('/ai/ai/'));
   const body = init?.body ? JSON.parse(String(init.body)) : null;
   requests.push({ url: String(url), method, body });
-  if (method === 'GET')
+  if (method === 'GET') {
+    for (const item of items) item.usedByRequests = [];
+    for (const item of items.filter((r) => r.kind === 'request')) {
+      const current = details
+        .get(item.key)
+        ?.versions.find((v) => v.id === item.activeVersionId && v.status === 'published');
+      for (const ref of current?.body.fragments ?? []) {
+        const targetKey = ref.activeKey ?? fragments.find((f) => f.id === ref.versionId)?.key;
+        const target = items.find((r) => r.key === targetKey && r.kind === 'fragment');
+        if (target && !target.usedByRequests.includes(item.key))
+          target.usedByRequests.push(item.key);
+      }
+    }
     return pathname.endsWith('/prompts')
       ? Response.json({ items })
       : Response.json(details.get(decodeURIComponent(pathname.split('/').at(-1)!)));
+  }
   if (hold)
     return new Promise<Response>((resolve) => {
       pending = resolve;
@@ -158,14 +176,66 @@ const text = () => document.body.textContent!;
 const field = (label: string) =>
   document.querySelector(`[aria-label="${label}"]`) as HTMLTextAreaElement;
 await mount();
-assert.match(text(), /21 \/ 21 Registry/);
-assert.equal(document.querySelectorAll('aside li').length, 21);
+assert.equal(
+  document.querySelector('[aria-label="Used by Requests"]'),
+  null,
+  'Request details do not display Fragment usage',
+);
+assert.match(text(), /18 \/ 21 Registry/);
+assert.equal(document.querySelectorAll('aside li').length, 18);
 await change('Prompt 类型', 'fragment');
+assert.equal(document.querySelectorAll('aside li').length, 3);
+// Filtering is local: no request, navigation, or loss of an unreferenced/new Fragment's edits.
+const toggle = () => document.querySelector('[aria-label="Show unreferenced"]') as HTMLInputElement;
+await act(async () => toggle().click());
 assert.equal(document.querySelectorAll('aside li').length, 6);
+await selectKey('xfield.identity');
+assert.match(
+  document.querySelector('[aria-label="Used by Requests"]')!.textContent!,
+  /No current Request references/,
+);
+assert.equal(
+  field('Fragment 内容').matches(':disabled'),
+  false,
+  'New Fragment Draft remains editable without Active',
+);
+await change('Fragment 内容', 'Unsaved Fragment text');
+const beforeFilter = requests.length;
+await act(async () => toggle().click());
+assert.equal(requests.length, beforeFilter);
+assert.equal(field('Fragment 内容').value, 'Unsaved Fragment text');
+assert.ok(
+  ![...document.querySelectorAll('aside button')].some((b) =>
+    b.textContent?.includes('xfield.identity'),
+  ),
+);
+assert.ok(
+  document.querySelector('[aria-label="Prompt 详情"]')!.textContent!.includes('xfield.identity'),
+);
+await act(async () => toggle().click());
+assert.equal(field('Fragment 内容').value, 'Unsaved Fragment text');
+await change(
+  'Fragment 内容',
+  versions.find((v) => v.key === 'xfield.identity')!.body.systemInstructions!,
+);
+await selectKey('shared.discovery.editorial_criteria');
+const referenced = document.querySelector('[aria-label="Used by Requests"]')!;
+assert.ok(referenced.querySelectorAll('button').length > 1, 'Multiple current Request references');
+const link = [...referenced.querySelectorAll('button')].find((b) =>
+  b.textContent?.includes('discovery.d3.topic_discovery'),
+)!;
+await act(async () => link.click());
+assert.ok(
+  document
+    .querySelector('[aria-label="Prompt 详情"]')!
+    .textContent!.includes('discovery.d3.topic_discovery'),
+);
+await act(async () => toggle().click()); // Restore default hidden-unreferenced filter.
 await change('Prompt 类型', 'all');
 await change('搜索 Prompt Key', 'daily.stage1');
 assert.equal(document.querySelectorAll('aside li').length, 1);
 await change('搜索 Prompt Key', '');
+await selectKey('daily.stage1.content_understanding');
 assert.equal(
   field('基础 System Instructions').matches(':disabled'),
   true,
@@ -266,6 +336,52 @@ assert.equal(
   pinned,
 );
 assert.ok(document.querySelector('pre')?.textContent, 'Exact Fragment content visible');
+// Publishing a changed Request keeps current usage; Activate removes/adds it and refreshes the entire list.
+await selectKey('daily.stage1.content_understanding');
+await click('从此版本创建 Draft');
+await change('添加 Fragment', 'daily_brief.editorial');
+await click('保存 Draft');
+await click('Publish');
+assert.ok(
+  ![...document.querySelectorAll('aside button')].some((b) =>
+    b.textContent?.includes('daily_brief.editorial'),
+  ),
+  'Published-only reference stays hidden',
+);
+await click('设为 Active');
+assert.ok(
+  [...document.querySelectorAll('aside button')].some((b) =>
+    b.textContent?.includes('daily_brief.editorial'),
+  ),
+  'Activate refreshes Fragment usage',
+);
+await selectKey('daily_brief.editorial');
+assert.match(
+  document.querySelector('[aria-label="Used by Requests"]')!.textContent!,
+  /daily.stage1.content_understanding/,
+);
+const activeDaily = daily.registry.activeVersionId;
+const previousDaily = daily.versions.find(
+  (v) => v.id !== activeDaily && v.status === 'published' && !v.body.fragments.length,
+)!;
+daily.registry.activeVersionId = previousDaily.id;
+daily.registry.activeVersion = previousDaily.version;
+await click('刷新详情');
+assert.match(
+  document.querySelector('[aria-label="Used by Requests"]')!.textContent!,
+  /No current Request references/,
+);
+assert.ok(
+  ![...document.querySelectorAll('aside button')].some((b) =>
+    b.textContent?.includes('daily_brief.editorial'),
+  ),
+);
+assert.ok(
+  document
+    .querySelector('[aria-label="Prompt 详情"]')!
+    .textContent!.includes('daily_brief.editorial'),
+  'Selected hidden Fragment stays accessible',
+);
 await selectKey(fragments[0].key);
 assert.match(text(), /不会自动升级/);
 assert.ok(field('Fragment 内容'));

@@ -291,6 +291,41 @@ class Store {
           });
         return { rows: [] };
       }
+      if (sql.includes('with current_request_fragments as')) {
+        const rows: { fragmentKey: RegistryKey; requestKey: RegistryKey }[] = [];
+        for (const request of this.registries.values()) {
+          if (request.kind !== 'request' || !request.activeVersionId) continue;
+          const active = this.versions.get(request.activeVersionId);
+          if (active?.status !== 'published' || active.registryId !== request.id) continue;
+          const seen = new Set<RegistryKey>();
+          for (const ref of active.body.fragments) {
+            const pinned = ref.versionId
+              ? this.versions.get(ref.versionId.toLowerCase())
+              : undefined;
+            const target = ref.activeKey
+              ? this.registries.get(ref.activeKey)
+              : pinned?.kind === 'fragment' && pinned.status === 'published'
+                ? this.registries.get(pinned.key)
+                : undefined;
+            if (
+              !target ||
+              target.kind !== 'fragment' ||
+              (ref.key && ref.key !== target.key) ||
+              seen.has(target.key)
+            )
+              continue;
+            seen.add(target.key);
+            rows.push({ fragmentKey: target.key, requestKey: request.key });
+          }
+        }
+        return {
+          rows: rows.sort(
+            (a, b) =>
+              a.fragmentKey.localeCompare(b.fragmentKey) ||
+              a.requestKey.localeCompare(b.requestKey),
+          ),
+        };
+      }
       if (sql.includes('from prompt_registry r left join')) {
         const rows = [...this.registries.values()].filter((r) =>
           sql.includes('where r.key=$1')
@@ -517,6 +552,37 @@ store.versions.set(base.id, originalStored);
 assert.equal((await listPromptRegistries(store.db)).length, 18);
 assert.equal((await listPromptRegistries(store.db, '', 'fragment')).length, 3);
 assert.equal((await listPromptRegistries(store.db, 'DAILY.STAGE1')).length, 1);
+const currentList = await listPromptRegistries(store.db);
+const sharedKey = 'shared.discovery.editorial_criteria';
+const used = currentList.find((r) => r.key === sharedKey)!;
+assert.ok(used.usedByRequests.includes('discovery.d3.topic_discovery'));
+assert.ok(used.usedByRequests.includes('discovery.d4.direct_verification'));
+assert.deepEqual(
+  (await getPromptManagementDetail(store.db, sharedKey)).registry.usedByRequests,
+  used.usedByRequests,
+);
+// Publish a new Active Request without its old Fragment bindings; history must not count.
+const oldRequest = await getActivePrompt(store.db, 'discovery.d3.topic_discovery');
+const noRefs = await createPromptDraft(store.db, oldRequest.key, {
+  ...oldRequest.body,
+  systemInstructions: 'No shared references.',
+  fragments: [],
+});
+await publishPromptVersion(store.db, oldRequest.key, noRefs.id);
+assert.ok(
+  (await listPromptRegistries(store.db))
+    .find((r) => r.key === sharedKey)!
+    .usedByRequests.includes(oldRequest.key),
+  'Draft/Publish alone do not change current references',
+);
+await activatePromptVersion(store.db, oldRequest.key, noRefs.id);
+assert.ok(
+  !(await listPromptRegistries(store.db))
+    .find((r) => r.key === sharedKey)!
+    .usedByRequests.includes(oldRequest.key),
+);
+await activatePromptVersion(store.db, oldRequest.key, oldRequest.id);
+
 const detail = await getPromptManagementDetail(store.db, base.key);
 assert.equal(detail.registry.activeVersionId, base.id);
 assert.ok(detail.versions.length >= 2);
@@ -648,6 +714,42 @@ console.log(
   'PASS production Prompt dependency boundary: no Seed/Fixture/static instruction builders',
 );
 
+// A Fragment with only historical usage must have no current edges.
+const historical = new Store();
+await importPromptSeeds(historical.db, seeds);
+const historyConsumers = (await listPromptRegistries(historical.db)).find(
+  (r) => r.key === sharedKey,
+)!.usedByRequests;
+for (const requestKey of historyConsumers) {
+  const previous = await getActivePrompt(historical.db, requestKey);
+  const next = await createPromptDraft(historical.db, requestKey, {
+    ...previous.body,
+    systemInstructions: 'No Fragment use.',
+    fragments: [],
+  });
+  await publishPromptVersion(historical.db, requestKey, next.id);
+  await activatePromptVersion(historical.db, requestKey, next.id);
+}
+assert.deepEqual(
+  (await getPromptManagementDetail(historical.db, sharedKey)).registry.usedByRequests,
+  [],
+);
+assert.ok(
+  [...historical.versions.values()].some(
+    (v) => v.key === 'discovery.d3.topic_discovery' && v.body.fragments.length,
+  ),
+  'Historical Published references remain intact',
+);
+const queryStart = historical.statements.length;
+await listPromptRegistries(historical.db);
+assert.equal(
+  historical.statements
+    .slice(queryStart)
+    .filter((s) => s.includes('with current_request_fragments as')).length,
+  1,
+  'One batch lookup, not one per Registry',
+);
+
 // Install from actual Active content, preserving existing published data and human edits.
 const layers = new Store();
 await importPromptSeeds(layers.db, seeds);
@@ -676,6 +778,10 @@ assert.ok(layered.body.systemInstructions?.endsWith(edited.body.systemInstructio
 assert.equal(layered.version, edited.version + 1);
 assert.deepEqual(layered.body.userTemplate, edited.body.userTemplate);
 assert.equal(layered.body.fragments.filter((f) => f.activeKey).length, 2);
+const dynamicUsage = await listPromptRegistries(layers.db);
+assert.equal(dynamicUsage.find((r) => r.key === 'xfield.identity')!.usedByRequests.length, 13);
+assert.equal(dynamicUsage.find((r) => r.key === 'daily_brief.editorial')!.usedByRequests.length, 9);
+assert.equal(dynamicUsage.find((r) => r.key === 'discover.editorial')!.usedByRequests.length, 4);
 assert.deepEqual(await installSystemPromptLayers(layers.db), [], 'initialization is idempotent');
 const identity = await getActivePrompt(layers.db, 'xfield.identity');
 const nextIdentity = await createPromptDraft(layers.db, identity.key, {

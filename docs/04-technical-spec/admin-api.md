@@ -94,6 +94,8 @@ X-AI-field 包含一个 Internal Dashboard，用于运行观察、Human Review �
 
 `/prompts` 提供 Registry 搜索 / 类型筛选、版本历史、Draft 编辑、Publish 及独立 Activate / 回滚；历史 Published 只读。服务复用 `src/lib/prompts/registry.ts`，接口为 `/api/admin/prompts` 与 `/api/admin/prompts/[key]`，沿用 §3 的服务端认证和同源校验，不提供在线模型调用。
 
+Fragment 详情 Introduction Card 的 `Used by Requests` 和列表筛选读取当前 Active Published Request 的结构化引用配置：精确 UUID 解析所属 Fragment Registry，三个动态项按 activeKey 关联；不统计历史 Request 或搜索模板文本。Service 批量读取关系，避免逐 Fragment 查询。左侧默认隐藏无当前引用的 Fragment，`Show unreferenced` 可查看全部（包括尚无 Active 的新 Fragment）；过滤仅改变列表，不改变当前详情或未保存编辑。保存、Activate 和手动刷新同步更新引用展示，点击 Request Key 复用现有详情切换。
+
 Publish 不改变生产 Active；Activate / 回滚确认起止版本，不影响已绑定任务。Registry 行锁内校验 Draft Content Hash / 旧 Active ID；并发冲突返回 409，前端保留未保存内容，不自动刷新覆盖。Fragment 与条件变体的校验见 `../07-prompt-spec/registry.md`。
 
 Dashboard 不是 Production Source of Truth。它读取 Production 数据与 Runtime Artifacts，并调用已有 Application Services，不应在 UI 层复制 Processing、Review 或 Evaluation 的业务逻辑。

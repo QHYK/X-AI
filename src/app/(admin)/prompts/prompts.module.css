@@ -251,3 +251,20 @@
     padding: 9px;
   }
 }
+
+.card .filterToggle {
+  display: flex;
+  align-items: center;
+}
+.card .filterToggle input {
+  width: auto;
+}
+.usedBy {
+  display: grid;
+  gap: 8px;
+  padding-left: 20px;
+}
+.usedBy button {
+  text-align: left;
+  overflow-wrap: anywhere;
+}

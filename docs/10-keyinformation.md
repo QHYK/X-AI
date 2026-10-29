@@ -17,8 +17,11 @@ Long-form| 直接剔除    | 去重	 | 按输入顺序追加到末尾
 4. Generate 顺序为：
 完整 Cache／已有 Candidate 正文 → Daily 已存全文 → 固定 URL 的 Firecrawl → 普通 LLM。
 5. 可恢复执行：D2 不重复选择 Topic，D3 整体重试，D4 逐篇恢复。
-- **D3** ：一次 Agent Run 接收全部 Topic Leads，自主决定搜索顺序、是否切换方向、是否继续探索
+- **D3** ：一次 Agent Run 接收全部 Topic Leads，自主决定搜索顺序、是否切换方向、是否继续探索。
 - **D4** 串行调用llm，每完成一篇 立刻更新数据库
+- **D3 & D5** llm给出阅读时长预估；**人工添加 & D4** code 预估
+- `in_depth.editorial.introduction` 用在In-depth Review 中，在 `/ai/review/in-depth` 选中候选，点击 Generate / Regenerate
+- `in_depth.manual.generate` 用于 人工提交 URL 创建的候选，在 Review 页面点击 Generate / Regenerate 时。
 
 Candidate 创建后，LLM 成功或失败分别是什么状态：
 阶段	Candidate 状态
