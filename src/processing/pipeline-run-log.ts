@@ -31,6 +31,7 @@ export async function finishPipelineRun(
     provider?: string | null;
     model?: string | null;
     metrics?: PipelineMetrics;
+    mergeMetrics?: boolean;
     errorSummary?: string | null;
     finishedAt?: Date;
   },
@@ -38,7 +39,7 @@ export async function finishPipelineRun(
   await pool.query(
     `update pipeline_runs
      set status=$2, provider=$3, model=$4, finished_at=$5::timestamptz,
-         metrics=$6::jsonb, error_summary=$7, updated_at=now()
+         metrics=${input.mergeMetrics ? 'metrics || $6::jsonb' : '$6::jsonb'}, error_summary=$7, updated_at=now()
      where id=$1::uuid`,
     [id, input.status, input.provider ?? null, input.model ?? null,
       (input.finishedAt ?? new Date()).toISOString(), JSON.stringify(input.metrics ?? {}), input.errorSummary ?? null],

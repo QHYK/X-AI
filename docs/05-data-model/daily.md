@@ -376,6 +376,7 @@ runtime artifact 或原始模型输出。
   `stage4_runs.status` 保持同一 canonical 值。
 - `trigger_source`（应用取值，无数据库 CHECK）: `daily_orchestrator`、`standalone`、`dashboard`。
 - `metrics` 为小型 JSONB 摘要（调用数、重试、耗时、Stage 特有计数及 Provider usage）；LLM Stage 可记录 `input_tokens`、`output_tokens`、`total_tokens`、`cached_input_tokens` 与 `token_usage_complete`。缓存命中率是由完整统计派生的 `cached_input_tokens / input_tokens`，不持久化，也不机械复制 runtime JSON。
+- Stage3 的 `metrics.stage3_digest_checkpoints[category]` 为分类成功记录：`status=success`、category、input_hash、prompt_version_id、system_fragment_versions、按排名排列的 processed content UUID 数组 `ranked_ids`，以及本次 execution 摘要。它与对应业务排名同事务提交，不保存正文或模型原始响应。去重后空分类只清理过期排名，`prompt_version_id=null`，不加载 Prompt 或调用模型；父 Run 为 partial / failed / running 并不否定已提交的分类。不存在标记、版本 / Hash 不符或实际排名不完整时，不可据此复用。`digest_categories` 和 `category_corrections` 提供本次执行诊断；结束日志不得覆盖已提交标记。这是现有 JSONB 的应用结构扩展，无新增 Schema / Migration。
 - Dashboard 对指定 `daily_date + step` 选择 `started_at` 最新的一条，即 Latest Attempt。
 
 Migration `0011` 的索引尾列为 `started_at DESC`；当前 Drizzle `.on()` 未声明 DESC。这里分别记录定义，不声称两者方向完全相同。`metrics` 只声明 JSONB 非空及默认对象，没有 JSON 对象类型 CHECK。

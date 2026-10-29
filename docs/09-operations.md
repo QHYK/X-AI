@@ -153,6 +153,8 @@ DAILY_DATE=2026-09-14 npm run daily
 
 `dedupe:stage1` 的 published scope 通常由 `daily` 或 Dashboard Retry 注入。若手工执行，必须同时提供成对的 `DAILY_PUBLISHED_SCOPE_START_AT`、`DAILY_PUBLISHED_SCOPE_END_AT`（旧 alias 见 §5.2）。不要把 runtime pointer/lineage 变量作为正常人工输入。
 
+Dashboard Stage3 Retry；不要为恢复分类重跑 Stage1/2。保留原机器 `runtime/stage3` 目录，以便验证旧付费输出；同日旧 Run 的 Prompt / Fragment UUID 必须可读取，Active 切换不会升级已绑定版本。先检查 `run.json` 的 `digest_categories` / `category_corrections`、各类 `*-status.json`，再核对数据库排名；不要把 reused 计入新 LLM calls。旧输出缺失或验证不通过会重新调用；进程中断遗留 `pipeline_runs.status=running` 时，Dashboard 仍按既有运行检查拦截，需先核对执行进程与遗留状态，不要连续点击提交。
+
 ### 3.3 Discovery D2–D5 Workflow
 
 ```bash
@@ -372,6 +374,7 @@ npm run test:content-completion-pools
 npm run test:stage1-codex-rollout
 npm run test:stage2-retry
 npm run test:stage3-persistence
+npm run test:stage3-category-recovery
 npm run test:stage4-event-date
 npm run test:daily-llm-usage
 ```

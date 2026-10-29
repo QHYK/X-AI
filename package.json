@@ -106,7 +106,8 @@
     "test:prompt-management": "tsx scripts/test-prompt-management-ui.ts",
     "test:memories": "tsx scripts/test-memories.ts",
     "test:memories-ui": "tsx scripts/test-memories-ui.ts",
-    "test:fragment-key-references": "tsx scripts/test-fragment-key-references.ts"
+    "test:fragment-key-references": "tsx scripts/test-fragment-key-references.ts",
+    "test:stage3-category-recovery": "tsx scripts/test-stage3-category-recovery.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

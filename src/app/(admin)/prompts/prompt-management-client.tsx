@@ -382,10 +382,10 @@ export function PromptManagement() {
                   </span>
                   <strong>{item.displayName}</strong>
                   <code>{item.key}</code>
-                  <span>
-                    Active {item.activeVersion === null ? '未设置' : `v${item.activeVersion}`}
+                  <span className={styles.version}>
+                    {item.activeVersion === null ? '未设置' : `v${item.activeVersion}`}
                   </span>
-                  <small className={styles.muted}>更新于 {time(item.updatedAt)}</small>
+                  {/* <small className={styles.muted}>更新于 {time(item.updatedAt)}</small> */}
                 </button>
               </li>
             ))}
@@ -419,7 +419,7 @@ export function PromptManagement() {
                 </div>
                 <code>{detail.registry.key}</code>
                 <p>
-                  当前 Active：
+                  Active 版本：
                   <strong>
                     {detail.registry.activeVersion === null
                       ? '未设置'
@@ -472,14 +472,11 @@ export function PromptManagement() {
                     创建于 {time(version.createdAt)}
                     {version.changeNote ? ` · ${version.changeNote}` : ''}
                   </p>
-                  <details>
-                    <summary>版本标识与来源</summary>
-                    <p className={styles.muted}>
-                      UUID：{version.id}
-                      <br />
-                      来源 Commit：{version.sourceCommit ?? '—'}
-                    </p>
-                  </details>
+                  <p className={styles.muted}>
+                    UUID：{version.id}
+                    <br />
+                    来源 Commit：{version.sourceCommit ?? '—'}
+                  </p>
                   {detail.registry.kind === 'fragment' ? (
                     <fieldset
                       className={styles.roles}

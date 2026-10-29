@@ -10,7 +10,7 @@
 | Content Completion | 正文补全，不进行内容价值判断，不调用 LLM | `raw_articles` 与来源元数据  |
 | Stage1 | 共享 LLM Client 完成内容理解，验证输出后映射 Routing | 保留内容写入 `processed_contents`；Ignored 状态留在 Raw，不创建对应处理结果 |
 | Stage2 | 将 Event Candidates 合并为中间分组，不生成最终 Event | `event_groups` / `event_group_items`，由 `src/processing/event-group-persistence.ts` 写入 |
-| Stage3 | Event / Digest / Long-form 独立排名 | Event 写 Review Snapshot；Digest / Long-form 写处理结果的排名字段 |
+| Stage3 | Event / Digest Category / Long-form 独立排名 | Event 写 Review Snapshot；每个 Digest Category 和 Long-form 独立事务写排名 |
 | Stage4 | 对选中 Review Items 独立 enrichment；按需使用外部上下文 | `stage4_runs`、Event drafts，完整后事务发布 |
 
 业务编排在 `src/processing/*-job.ts` 与 Daily CLI，HTTP / Review 复用业务服务；不在 UI 维护第二套 Pipeline。Prompt 通过数据库 Published Version 加载，Schema、模型参数与工具由代码管理，通用边界见 [Architecture §5](architecture.md#5-llm-integration)。
@@ -82,3 +82,9 @@ Review 保存事务校验 enrichment 对应集合仍与当前排序一致，随�
 - **跨 Stage4 Run 发布**：单 Run 发布具有事务原子性，但同日期不同 Run 的并发发布尚无日期级全局串行保证，仍可能留下重复 Published 结果。
 
 本文件只说明上述限制对技术行为的影响，不定义新的修复方案或操作入口。运行与恢复仍以 [Daily Workflow](../06-workflow-spec/daily.md) 为准。
+
+### Stage3 Digest 恢复一致性
+
+`src/processing/stage3-digest-recovery.ts` 使用已有 `pipeline_runs.metrics` 保存 Category 成功标记，和该分类的 `processed_contents` 排名在同一短事务提交；CLI 完成日志以 merge 保留标记。Stage3 开始前必须创建 durable Run，不能在日志创建失败时继续付费生成。
+
+分类提交在共享排名锁内重新校验日期 / routing / category 成员，只更新该分类的排名并清除其去重后过期项；不清理其他 Category。复用时同时核对标记、精确 Prompt/Fragment 版本、输入 Hash、完整 ID 集合以及当前 ai_rank 的唯一连续性。状态文件丢失不改变已经提交的数据库成功标记；旧文件只能作为经严格校验的付费输出缓存，不能替代当前数据库业务输入；Run ID 必须与目录身份一致，恢复诊断以 `source_run_id` 记录来源。同一分类整份恢复，不拼接不同 Run 的 ID；按最新完整有效产物优先，旧产物回退也须通过相同校验。恢复分类本次 LLM calls 和 input/output tokens 均为 0。Runtime 记录 Category 的状态、复用来源、调用数、usage、Warning 和错误。

@@ -568,6 +568,8 @@ processed_contents.daily_date = target dailyDate
 raw_articles.stage1_status = selected
 ```
 
+Digest 分组和输入 Hash 计算前，Stage3 将当前 Daily、`routing=digest`、Raw 为 `selected` 且不属于六个 Digest 分类的记录统一写回 `General`，保留 routing。六分类集合复用 `DIGEST_CATEGORY_KEYS`，不修改全局 Category 枚举。每条修正保存 `invalid_digest_category` Warning（内容 ID、原分类、General）；修正失败停止执行，修正成功本身不导致 PARTIAL，后续 Retry 不重复统计。
+
 ### 8.2 Execution Order
 
 ```text
@@ -641,7 +643,11 @@ Digest    → 按 Category 独立排序
 Long-form → 全局排序
 ```
 
-Event Review snapshot、Digest Ranking 与 Long-form Ranking 分别在自身完成 parse、validation 与可确定性 normalization 后持久化。任一子 Ranking 后续失败不回滚已经完成的独立产物；Stage 3 在已有至少一个合法产物、且没有持久化错误时记录 `partial`，只有未形成任何可用产物时记录 `failed`。数据库持久化错误仍为 `failed`，不以 `partial` 掩盖。Stage 4 只依赖有效的 Event Review snapshot，不要求整个 Stage 3 execution 为 `success`。同一上游输入 snapshot 的 Retry 会复用已持久化且可验证的子 Ranking；输入 hash 变化时重新执行该子 Ranking。
+Event Review snapshot、每个 Digest Category、Long-form 是独立持久化单元。Category 通过 parse、validation、确定性 normalization 后立即原子提交；某类模型失败继续其他 Category 和 Long-form，不回滚成功分类。所有有效 Ranking 完成为 `success`（可带 Warning）；部分产物成功、部分失败为 `partial`；关键数据库写入失败仍为 `failed`。Stage4 只依赖有效 Event Review snapshot。
+
+Retry 对各 Category 分别核对输入 Hash、同一 Digest Request 的 Published UUID / Fragment 快照、成功记录及当前完整排名；其他分类变化不使本类失效。Hash 覆盖 Category、候选的实际模型字段、输入顺序与内容 UUID 映射。不能只凭 ai_rank 非空复用，也不能把遗漏 ID 再补齐后宣称旧产物完整。成功结果复用不计本次 LLM calls，失败或输入变化的分类才重新调用。
+
+旧 Run 的分类输出即使未落库，也可在输入、ID 映射、Prompt/Fragment UUID 及完整唯一连续排名均验证通过后，作为已付费结果重新原子落库；不能验证则重新生成。恢复技术及状态载体见 [Daily Technical Spec](../04-technical-spec/daily.md#4-排名与人工操作一致性)。
 
 结果写入：
 
@@ -863,7 +869,7 @@ Stage 4
 
 ### 12.1 Prompt 绑定与原子运行记录（B3.2）
 
-Request Type 第一次真正发出请求前选择 Active 并持久化精确 Version ID；同一 Stage 内后续批次、分类、自动重试和 Provider fallback 固定该版本。Stage3 的 Event / Digest / Long-form 各自懒绑定；匹配现有 Resume 输入快照时继承原绑定，复用已完成结果不改写旧 Run。尚未执行的类型不提前绑定。Stage1/2 的重新启动本来就是新 Stage 执行，并不新增 Resume 模式。
+Request Type 第一次真正发出请求前选择 Active 并持久化精确 Version ID；同一 Stage 内后续批次、分类、自动重试和 Provider fallback 固定该版本。Stage3 的 Event / Digest / Long-form 各自懒绑定；Digest 任一分类匹配先前输入时继承该 Run 的 Digest 绑定，所有分类（含变化分类）固定同一 Request 版本；不存在匹配证据时选择当前 Active。Event / Long-form 沿用原 Resume 输入快照规则，复用不改写旧 Run。尚未执行的类型不提前绑定。Stage1/2 的重新启动本来就是新 Stage 执行，并不新增 Resume 模式。
 
 Stage4 先按 Review snapshot 获取唯一 Run，再锁该数据库行首次绑定 Decision / Enrichment；数据库提交后才发请求。CLI Retry 与后台 Event Review 均复用相同 Run；全新 Run 不复制其他 Run 的版本。文件镜像失败明确报错，不以镜像取代数据库权威。字段位置见 [版本绑定载体](../05-data-model/prompt-registry.md#版本绑定载体)。
 

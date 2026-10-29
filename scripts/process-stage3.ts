@@ -50,7 +50,10 @@ async function main() {
       startedAt,
     });
     try {
+      if (!pipelineRunId)
+        throw new Error('Stage3 cannot run without its durable pipeline_runs record.');
       const result = await processStage3(pool, {
+        pipelineRunId,
         stage2RunDir: inheritedStage2RunDir ?? process.env.STAGE3_STAGE2_RUN_DIR,
         publishedWithinHours: parseOptionalPositiveInt(
           process.env.STAGE3_PUBLISHED_WITHIN_HOURS ?? process.env.STAGE3_COLLECTED_WITHIN_HOURS,
@@ -62,6 +65,7 @@ async function main() {
       await writeRunPointer(result.runDir);
       await safelyFinishPipelineRun(pool, pipelineRunId, {
         status: result.status,
+        mergeMetrics: true,
         provider: resolveStageLlmProvider('stage3'),
         model: resolveStageLlmModel('stage3'),
         metrics: {
@@ -97,6 +101,9 @@ async function main() {
               }
             : null,
           ranking_statuses: result.rankingStatuses,
+          category_correction_count: result.categoryCorrections.length,
+          digest_categories: JSON.parse(JSON.stringify(result.digestCategories)),
+          category_corrections: JSON.parse(JSON.stringify(result.categoryCorrections)),
           ...stage3WarningMetrics(result),
         },
         errorSummary: result.error,
@@ -111,6 +118,7 @@ async function main() {
     } catch (error) {
       await safelyFinishPipelineRun(pool, pipelineRunId, {
         status: 'failed',
+        mergeMetrics: true,
         provider: resolveStageLlmProvider('stage3'),
         model: resolveStageLlmModel('stage3'),
         errorSummary: error instanceof Error ? error.message : String(error),

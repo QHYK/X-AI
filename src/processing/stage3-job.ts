@@ -1,3 +1,15 @@
+import { productionPrompt } from '../lib/prompts/runtime.js';
+import { readSystemFragmentFile } from '../lib/prompts/run-file.js';
+import {
+  correctInvalidDigestCategories,
+  stableDigestHash,
+  strictDigestOutput,
+  persistDigestCategory,
+  reusableDigestCheckpoint,
+  reusableDigestArtifact,
+  type DigestCategoryProgress,
+  type DigestCategoryWarning,
+} from './stage3-digest-recovery.js';
 import {
   withFilePrompts,
   runPath,
@@ -157,7 +169,7 @@ type Stage3RankingStatuses = {
 type Stage3RankingLlmResult =
   Stage3EventRankingResult | Stage3DigestRankingResult | Stage3LongFormRankingResult;
 
-class Stage3RankingFailureError extends Error {
+export class Stage3RankingFailureError extends Error {
   constructor(
     label: string,
     readonly result: Extract<Stage3RankingLlmResult, { success: false }>,
@@ -183,6 +195,12 @@ export type Stage3JobOptions = {
   model?: string;
   rootDir?: string;
   dailyDate?: string;
+  pipelineRunId?: string;
+  rankers?: {
+    events?: typeof rankEvents;
+    digest?: typeof rankDigest;
+    longForm?: typeof rankLongForm;
+  };
 };
 
 export type Stage3JobResult = {
@@ -210,6 +228,8 @@ export type Stage3JobResult = {
   deterministicFallbackCount: number;
   inputSnapshotHashes: { event: string; digest: string; longForm: string } | null;
   rankingStatuses: Stage3RankingStatuses;
+  digestCategories: Record<string, DigestCategoryProgress>;
+  categoryCorrections: DigestCategoryWarning[];
 };
 
 export function stage3WarningMetrics(
@@ -301,6 +321,9 @@ async function processStage3Bound(
   };
   let inputSnapshotHashes: Stage3JobResult['inputSnapshotHashes'] = null;
   let error: string | null = null;
+  const digestCategories: Record<string, DigestCategoryProgress> = {};
+  let categoryCorrections: DigestCategoryWarning[] = [];
+  const digestErrors: string[] = [];
   let warningCount = 0;
   let duplicateRankingCount = 0;
   let missingRankingCount = 0;
@@ -308,6 +331,14 @@ async function processStage3Bound(
   let deterministicFallbackCount = 0;
 
   try {
+    if (!options.pipelineRunId)
+      throw new Error('Stage3 requires a durable pipeline_runs ID before ranking.');
+    categoryCorrections = await correctInvalidDigestCategories(pool, dailyDate);
+    warningCount += categoryCorrections.length;
+    if (categoryCorrections.length) {
+      await writeJson(join(runDir, 'category-corrections.json'), categoryCorrections);
+      for (const warning of categoryCorrections) console.warn('[stage3]', JSON.stringify(warning));
+    }
     // Runtime is retained as optional lineage only. DB event_groups is the business input.
     if (options.stage2RunDir) sourceStage2RunDir = options.stage2RunDir;
     const eventBundle = await buildStage3EventRankingInputFromDb(pool, dailyDate);
@@ -333,7 +364,9 @@ async function processStage3Bound(
       resume && canReuseStage3Ranking(eventHash, resume.hashes.event, resume.statuses.event)
         ? await loadReusableEventRanking(pool, resume, eventBundle.input)
         : null;
-    const eventRanking = reusableEvent ?? (await rankEvents(eventBundle.input, { model }));
+    const eventRanking =
+      reusableEvent ??
+      (await (options.rankers?.events ?? rankEvents)(eventBundle.input, { model }));
     if (reusableEvent) {
       rankingStatuses.event = 'skipped';
       eventReviewRunId = resume!.eventReviewRunId;
@@ -441,79 +474,261 @@ async function processStage3Bound(
     }
     await writeJson(join(longFormDir, 'input.json'), longFormInput);
 
-    if (resume && resume.hashes.digest === inputSnapshotHashes.digest)
+    // Save the recovery identity before any category can commit. A crash after a database
+    // commit must still leave a discoverable Run carrying the pre-call Prompt binding.
+    await writeJson(join(runDir, 'run.json'), {
+      run_id: runId,
+      daily_date: dailyDate,
+      event_review_run_id: eventReviewRunId,
+      input_snapshot_hashes: {
+        event: eventHash,
+        digest: inputSnapshotHashes.digest,
+        long_form: inputSnapshotHashes.longForm,
+      },
+      ranking_statuses: rankingStatuses,
+      digest_categories: digestCategories,
+      category_corrections: categoryCorrections,
+    });
+
+    // Fix one Request version for every category, including categories whose inputs changed.
+    // A matching prior category is sufficient evidence to retain that Run's Digest binding.
+    if (
+      resume &&
+      (resume.hashes.digest === inputSnapshotHashes.digest ||
+        (await hasMatchingDigestCategory(resume.runDir, digestInputs, idMap.digest)))
+    )
       await inheritRunPrompt(
         join(runDir, 'run.json'),
         join(resume.runDir, 'run.json'),
         'daily.stage3.digest_ranking',
         pool,
       );
-    const reusableDigest =
-      resume &&
-      canReuseStage3Ranking(
-        inputSnapshotHashes.digest,
-        resume.hashes.digest,
-        resume.statuses.digest,
-      )
-        ? await loadReusableDigestRankings(resume, digestInputs)
-        : null;
-    const digestRankings: Record<string, Stage3RankingOutput> = reusableDigest ?? {};
-    if (reusableDigest) rankingStatuses.digest = 'skipped';
-    for (const category of reusableDigest
-      ? []
-      : Object.keys(digestInputs).sort(compareCategoryNames)) {
-      const input = digestInputs[category];
-      if (!input || input.candidates.length === 0) {
+    const digestRankings: Record<string, Stage3RankingOutput> = {};
+    const snapshot = await readSystemFragmentFile(join(runDir, 'run.json'));
+    const digestCategoriesToProcess = [
+      ...new Set([...Object.keys(digestInputs), ...digestRecords.map((r) => r.category)]),
+    ].sort(compareCategoryNames);
+    for (const category of digestCategoriesToProcess) {
+      const input = digestInputs[category] ?? { category, candidates: [] };
+      const inputHash = stableDigestHash(input, idMap.digest[category] ?? {});
+      const progress: DigestCategoryProgress = {
+        category,
+        input_hash: inputHash,
+        status: 'failed',
+        reused: null,
+        llm_calls: 0,
+        input_tokens: null,
+        output_tokens: null,
+        warning_count: 0,
+        error: null,
+      };
+      digestCategories[category] = progress;
+      if (!input.candidates.length) {
+        // All members were deduplicated away. Clear only this category's stale ranks, with no Prompt or LLM.
+        persistenceStatus = 'failed';
+        const committed = await persistDigestCategory(
+          pool,
+          options.pipelineRunId,
+          dailyDate,
+          {
+            status: 'success',
+            category,
+            input_hash: inputHash,
+            prompt_version_id: null,
+            system_fragment_versions: snapshot ?? null,
+            ranked_ids: [],
+            execution: { ...progress, status: 'success' },
+          },
+          {
+            ranked: [],
+            staleProcessedContentIds: digestRecords
+              .filter((r) => r.category === category)
+              .map((r) => r.processedContentId),
+          },
+        );
+        persistence = combineStage3Persistence(persistence, committed);
+        persistenceStatus = 'success';
+        progress.status = 'success';
+        await writeJson(join(digestDir, `${toSlug(category)}-status.json`), progress);
         continue;
       }
-
-      const result = await rankDigest(input, { model });
-      ({
-        warningCount,
-        duplicateRankingCount,
-        missingRankingCount,
-        invalidRankingCount,
-        deterministicFallbackCount,
-      } = addRankingWarnings(
-        {
-          warningCount,
-          duplicateRankingCount,
-          missingRankingCount,
-          invalidRankingCount,
-          deterministicFallbackCount,
-        },
-        result.warnings,
-      ));
-      llmCallCount += result.calls;
-      retryCount += result.retries;
-      llmDurationMs += result.durationMs;
-      tokenUsage = addStage3TokenUsage(tokenUsage, result.tokenUsage);
-      digestRankings[category] = result.output;
-      await writeJson(join(digestDir, `${toSlug(category)}-ranking-output.json`), result.output);
-      await writeJson(
-        join(digestDir, `${toSlug(category)}-ranking-diagnostics.json`),
-        result.diagnostics,
-      );
-    }
-
-    // Digest and Long-form are independent durable products. Commit the
-    // complete, validated Digest set before beginning Long-form work.
-    if (!reusableDigest) {
+      // Registry loading errors are fatal configuration failures, not per-category model failures.
+      const prompt = await productionPrompt('daily.stage3.digest_ranking', JSON.stringify(input), {
+        category,
+      });
+      const beforeLookup: 'not_started' | 'success' | 'failed' = persistenceStatus;
       persistenceStatus = 'failed';
-      persistence = await persistStage3Plan(
+      const reused = await reusableDigestCheckpoint(
         pool,
-        buildPersistencePlan({
-          allDigestRecords: digestRecords,
-          allLongFormRecords: [],
-          finalDigestIdMap: idMap.digest,
-          finalLongFormIdMap: {},
-          digestRankings,
-          longFormRanking: { rankings: [] },
-        }),
+        dailyDate,
+        input,
+        idMap.digest[category],
+        inputHash,
+        prompt.versionId,
+        snapshot,
       );
-      persistenceStatus = 'success';
-      rankingStatuses.digest = 'success';
+      persistenceStatus = beforeLookup;
+      const artifact = reused
+        ? null
+        : await reusableDigestArtifact(
+            rootDir,
+            runDir,
+            dailyDate,
+            input,
+            idMap.digest[category],
+            inputHash,
+            prompt.versionId,
+            snapshot,
+          );
+      let output: Stage3RankingOutput;
+      try {
+        if (reused || artifact) {
+          output = (reused ?? artifact)!;
+          progress.reused = reused ? 'database' : 'artifact';
+          progress.input_tokens = 0;
+          progress.output_tokens = 0;
+          if (artifact) progress.source_run_id = artifact.source_run_id;
+        } else {
+          const result = await (options.rankers?.digest ?? rankDigest)(input, { model });
+          ({
+            warningCount,
+            duplicateRankingCount,
+            missingRankingCount,
+            invalidRankingCount,
+            deterministicFallbackCount,
+          } = addRankingWarnings(
+            {
+              warningCount,
+              duplicateRankingCount,
+              missingRankingCount,
+              invalidRankingCount,
+              deterministicFallbackCount,
+            },
+            result.warnings,
+          ));
+          llmCallCount += result.calls;
+          retryCount += result.retries;
+          llmDurationMs += result.durationMs;
+          tokenUsage = addStage3TokenUsage(tokenUsage, result.tokenUsage);
+          progress.llm_calls = result.calls;
+          progress.input_tokens = result.tokenUsage?.inputTokens ?? null;
+          progress.output_tokens = result.tokenUsage?.outputTokens ?? null;
+          progress.warning_count =
+            result.warnings.duplicateIds.length +
+            result.warnings.missingIds.length +
+            result.warnings.inventedIds.length +
+            result.warnings.rankNormalizationCount;
+          output = result.output;
+          await writeJson(join(digestDir, `${toSlug(category)}-ranking-diagnostics.json`), {
+            ...result.diagnostics,
+            input_hash: inputHash,
+          });
+        }
+      } catch (caught) {
+        if (caught instanceof Stage3RankingFailureError) {
+          const metrics = stage3RankingFailureMetrics(caught.result);
+          llmCallCount += metrics.calls;
+          retryCount += metrics.retries;
+          llmDurationMs += metrics.durationMs;
+          tokenUsage = addStage3TokenUsage(tokenUsage, metrics.tokenUsage);
+          const warnings = rankingFailureWarnings(caught.result);
+          ({
+            warningCount,
+            duplicateRankingCount,
+            missingRankingCount,
+            invalidRankingCount,
+            deterministicFallbackCount,
+          } = addRankingWarnings(
+            {
+              warningCount,
+              duplicateRankingCount,
+              missingRankingCount,
+              invalidRankingCount,
+              deterministicFallbackCount,
+            },
+            warnings,
+          ));
+          progress.llm_calls = metrics.calls;
+          progress.input_tokens = metrics.tokenUsage?.inputTokens ?? null;
+          progress.output_tokens = metrics.tokenUsage?.outputTokens ?? null;
+          progress.warning_count =
+            warnings.duplicateIds.length +
+            warnings.missingIds.length +
+            warnings.inventedIds.length +
+            warnings.rankNormalizationCount;
+          await writeJson(
+            join(digestDir, `${toSlug(category)}-ranking-failure-diagnostics.json`),
+            rankingFailureDiagnostics(caught.result),
+          );
+        }
+        progress.error = caught instanceof Error ? caught.message : String(caught);
+        digestErrors.push(`${category}: ${progress.error}`);
+        await writeJson(join(digestDir, `${toSlug(category)}-status.json`), progress);
+        continue;
+      }
+      const validated = strictDigestOutput(output, input);
+      if (!validated) throw new Error(`Digest ${category} did not produce a complete ranking.`);
+      output = validated;
+      await writeJson(join(digestDir, `${toSlug(category)}-ranking-output.json`), output);
+      digestRankings[category] = output;
+      if (progress.reused)
+        await writeJson(join(digestDir, `${toSlug(category)}-ranking-diagnostics.json`), {
+          category,
+          input_count: input.candidates.length,
+          input_hash: inputHash,
+          normalized_output_count: output.rankings.length,
+          reused: progress.reused,
+        });
+      {
+        // Reapply only this category, including stale/deduplicated members, even when the ranking is reused.
+        persistenceStatus = 'failed';
+        const committed = await persistDigestCategory(
+          pool,
+          options.pipelineRunId,
+          dailyDate,
+          {
+            status: 'success',
+            category,
+            input_hash: inputHash,
+            prompt_version_id: prompt.versionId,
+            system_fragment_versions: snapshot ?? null,
+            ranked_ids: output.rankings.map((r) => idMap.digest[category][r.id]),
+            execution: { ...progress, status: progress.reused ? 'skipped' : 'success' },
+          },
+          buildPersistencePlan({
+            allDigestRecords: digestRecords.filter((r) => r.category === category),
+            allLongFormRecords: [],
+            finalDigestIdMap: idMap.digest,
+            finalLongFormIdMap: {},
+            digestRankings: { [category]: output },
+            longFormRanking: { rankings: [] },
+          }),
+        );
+        persistence = combineStage3Persistence(persistence, committed);
+        persistenceStatus = 'success';
+      }
+      progress.status = progress.reused ? 'skipped' : 'success';
+      await writeJson(join(digestDir, `${toSlug(category)}-status.json`), progress);
+      // Helpful on crash, but the database checkpoint is the authoritative committed marker.
+      await writeJson(join(runDir, 'run.json'), {
+        run_id: runId,
+        daily_date: dailyDate,
+        event_review_run_id: eventReviewRunId,
+        input_snapshot_hashes: {
+          event: eventHash,
+          digest: inputSnapshotHashes.digest,
+          long_form: inputSnapshotHashes.longForm,
+        },
+        ranking_statuses: rankingStatuses,
+        digest_categories: digestCategories,
+        category_corrections: categoryCorrections,
+      });
     }
+    rankingStatuses.digest = digestErrors.length
+      ? 'failed'
+      : Object.values(digestCategories).every((c) => c.reused)
+        ? 'skipped'
+        : 'success';
 
     if (resume && resume.hashes.longForm === inputSnapshotHashes.longForm)
       await inheritRunPrompt(
@@ -531,7 +746,9 @@ async function processStage3Bound(
       )
         ? await loadReusableLongFormRanking(resume, longFormInput)
         : null;
-    const longFormRanking = reusableLongForm ?? (await rankLongForm(longFormInput, { model }));
+    const longFormRanking =
+      reusableLongForm ??
+      (await (options.rankers?.longForm ?? rankLongForm)(longFormInput, { model }));
     if (reusableLongForm) {
       rankingStatuses.long_form = 'skipped';
     } else {
@@ -585,6 +802,9 @@ async function processStage3Bound(
       rankingStatuses.long_form = 'success';
     }
 
+    if (digestErrors.length)
+      throw new Error(`Digest categories failed: ${digestErrors.join('; ')}`);
+
     await writeRunJson(join(runDir, 'run.json'), {
       runId,
       sourceStage2RunDir,
@@ -619,6 +839,8 @@ async function processStage3Bound(
       deterministicFallbackCount,
       inputSnapshotHashes,
       rankingStatuses,
+      digestCategories,
+      categoryCorrections,
     });
 
     return {
@@ -646,9 +868,21 @@ async function processStage3Bound(
       deterministicFallbackCount,
       inputSnapshotHashes,
       rankingStatuses,
+      digestCategories,
+      categoryCorrections,
     };
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
+    const interruptedCategory = Object.values(digestCategories).find(
+      (item) => item.status === 'failed' && item.error === null,
+    );
+    if (interruptedCategory) {
+      interruptedCategory.error = error;
+      await writeJson(
+        join(digestDir, `${toSlug(interruptedCategory.category)}-status.json`),
+        interruptedCategory,
+      );
+    }
     if (caught instanceof Stage3RankingFailureError) {
       const failureMetrics = stage3RankingFailureMetrics(caught.result);
       llmCallCount += failureMetrics.calls;
@@ -722,6 +956,8 @@ async function processStage3Bound(
       deterministicFallbackCount,
       inputSnapshotHashes,
       rankingStatuses,
+      digestCategories,
+      categoryCorrections,
     });
 
     return {
@@ -749,6 +985,8 @@ async function processStage3Bound(
       deterministicFallbackCount,
       inputSnapshotHashes,
       rankingStatuses,
+      digestCategories,
+      categoryCorrections,
     };
   }
 }
@@ -1912,6 +2150,8 @@ async function writeRunJson(
     deterministicFallbackCount: number;
     inputSnapshotHashes: Stage3JobResult['inputSnapshotHashes'];
     rankingStatuses: Stage3RankingStatuses;
+    digestCategories: Record<string, DigestCategoryProgress>;
+    categoryCorrections: DigestCategoryWarning[];
   },
 ): Promise<void> {
   await writeJson(path, {
@@ -1961,6 +2201,8 @@ async function writeRunJson(
       long_form: value.inputSnapshotHashes.longForm,
     },
     ranking_statuses: value.rankingStatuses,
+    digest_categories: value.digestCategories,
+    category_corrections: value.categoryCorrections,
     error: value.error,
   });
 }
@@ -2078,29 +2320,33 @@ async function loadReusableEventRanking(
   }
 }
 
-async function loadReusableDigestRankings(
-  resume: Stage3ResumeArtifact,
+async function hasMatchingDigestCategory(
+  dir: string,
   inputs: Record<string, Stage3DigestRankingInput>,
-): Promise<Record<string, Stage3RankingOutput> | null> {
+  maps: Stage3IdMap['digest'],
+) {
   try {
-    const rankings: Record<string, Stage3RankingOutput> = {};
+    const priorMap = await readJson<Stage3IdMap>(join(dir, 'id-map.json'));
     for (const input of Object.values(inputs)) {
-      if (input.candidates.length === 0) continue;
-      const output = await readJson<Stage3RankingOutput>(
-        join(resume.runDir, 'digest', `${toSlug(input.category)}-ranking-output.json`),
-      );
-      const normalized = normalizeStage3RankingOutput(
-        output,
-        input.candidates.map((candidate) => candidate.id),
-      );
-      if (!normalized.success) return null;
-      rankings[input.category] = normalized.output;
+      try {
+        const prior = await readJson<Stage3DigestRankingInput>(
+          join(dir, 'digest', `${toSlug(input.category)}-input.json`),
+        );
+        if (
+          priorMap.digest[input.category] &&
+          stableDigestHash(prior, priorMap.digest[input.category]) ===
+            stableDigestHash(input, maps[input.category])
+        )
+          return true;
+      } catch (e) {
+        if (isMissingPathError(e) || e instanceof SyntaxError || e instanceof TypeError) continue;
+        throw e;
+      }
     }
-    return rankings;
-  } catch (error) {
-    if (isMissingPathError(error) || error instanceof SyntaxError) return null;
-    throw error;
+  } catch (e) {
+    if (!isMissingPathError(e) && !(e instanceof SyntaxError) && !(e instanceof TypeError)) throw e;
   }
+  return false;
 }
 
 async function loadReusableLongFormRanking(
