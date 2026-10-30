@@ -57,6 +57,14 @@ D2 / D4 复用共享 LLM Client 和 Structured Output，校验后才能进入业
 
 Direct 的 `estimated_duration_minutes` 在 D4 前置检查 / Candidate 创建时确定：优先保留已有有效值，再复用 Daily 中带明确分钟或秒单位的时长元数据；文章缺失时按完整正文的 CJK 字符与其他语言词数估算，算法见 `resolveDirectDuration()`（`src/discovery/direct-verification.ts`）。完整正文包括 `full_content_text`，以及满足下述原文复用证明的完整短 `content_text`；摘要、未知片段和媒体转录不能用于估算整篇阅读 / 播放时长。视频 / 播客只使用可信时长元数据，证据不足仍为 null。结果及依据写入 Candidate / evidence；恢复尚未完成的 Candidate 时可补空值，不覆盖有效值，已完成结果不自动回填。已知超过 30 分钟仍由原前置检查拒绝。D3/D5 的时长仍来自 Agent 输出，持久化硬检查不变；展示与 API 直接读取同一字段。
 
+#### D2 响应恢复
+
+`topic-selection.ts` 在模型返回后、JSON / 业务校验前，用一条 UPDATE 同时保存原始响应恢复记录和累计 D2 Usage；不跨模型调用持有数据库事务。记录写入失败则停止后处理并报告失败；保存成功后的解析或 Selection 写入失败不丢失该响应。业务 Selection 仍只在校验通过后提交，恢复记录不代表 D2 已完成。
+
+恢复只限同一 Run：SHA-256 指纹覆盖完整请求参数、Provider、固定窗口 / 当前输入（含资格标记）、实际 Request Prompt UUID 与 System Fragment Snapshot。已解析的 Instructions、Schema 和当次 Memory 文本也参与请求指纹；不另存 Memory / 完整输入快照。准备请求时仍重新读取 Memory，任何相关变化均不能复用旧响应。校验恢复记录格式及指纹匹配后，使用原 Response ID / 文本，不重新记入 LLM calls 或 Token；已完成 Selection 的 D2 禁止再次执行。全局执行互斥和 Retry 提交边界沿用 §7。
+
+跳过不合格 Direct 的诊断写入失败只记录错误，不覆盖业务结果。进程在响应到达与数据库提交之间退出，或数据库无法保存响应时，仍可能无法避免再次付费；无法凭空恢复没有持久化的输出。
+
 ### 4.2 Discovery Agent
 
 使用 **OpenAI Agents SDK（TypeScript）** 实现一个可复用的 Discovery Agent：

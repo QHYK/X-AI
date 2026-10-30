@@ -47,6 +47,9 @@ Run、Trace、候选、审核队列与正文 Cache 均已有 Schema / Migration�
 
 `config_snapshot.dashboardJob.d2RetryRequestIds` 保存同 Run D2 Retry 请求标识数组，原 `requestId` 保留；这些 JSONB 键没有 UNIQUE / FK 或数据库结构 CHECK，幂等依赖提交服务。`config_snapshot.promptVersions` 见 [版本绑定载体](prompt-registry.md#版本绑定载体)。
 
+`config_snapshot.d2Response` 是单 Run 最近一次 D2 原始响应恢复记录：`{formatVersion: 1, requestHash, promptVersion, savedAt, response: {id, output_text, api_mode}}`。`requestHash` 为 SHA-256，`promptVersion` 为实际 Request Version UUID；不包含完整请求、Memory Snapshot 或另份 Usage。字段格式由应用校验，不增加数据库约束。`selection_output` 仍只保存通过校验的业务结果，两者不能互相替代；匹配和原子记账机制见 [D2 响应恢复](../04-technical-spec/discovery.md#d2-响应恢复)。历史缺少该键时没有可复用响应，不伪造旧输出。
+
+
 `status` / `end_reason` 的允许值分别有 CHECK，但数据库不强制二者组合、Lead 数量或父 Run 类型，也没有同窗口唯一索引。
 
 ### 索引与数据库约束

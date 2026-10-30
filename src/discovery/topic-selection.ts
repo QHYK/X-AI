@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import { getActiveMemories, formatMemories } from '../lib/memories.js';
 import { withPromptBindings, databasePromptBinder } from '../lib/prompts/runtime.js';
 import { productionPrompt } from '../lib/prompts/runtime.js';
@@ -30,6 +32,7 @@ import {
   initialDiscoveryStageState,
   stageHasHistoricConfig,
   usageFromLlmResponse,
+  missingDiscoveryStageUsage,
 } from './execution-diagnostics.js';
 import { getDiscoveryRun, updateDiscoveryBranchExecutionState } from './run-service.js';
 
@@ -95,6 +98,47 @@ export type RunDiscoveryD2Result = {
   timeoutMs: number | undefined;
   tokenUsage: LlmResponse['usage'] | null;
 };
+
+// One response per Run, not a generic request cache. Usage is accounted atomically with this record.
+const D2ResponseCheckpointSchema = z
+  .object({
+    formatVersion: z.literal(1),
+    requestHash: z.string().regex(/^[a-f0-9]{64}$/),
+    promptVersion: z.uuid(),
+    savedAt: z.string(),
+    response: z
+      .object({
+        id: z.string(),
+        output_text: z.string(),
+        api_mode: z.enum(['chat_completions', 'responses']),
+      })
+      .strict(),
+  })
+  .strict();
+type D2ResponseCheckpoint = z.infer<typeof D2ResponseCheckpointSchema>;
+type SkippedD2DirectLead = {
+  sourceContentId: string;
+  leadId: string;
+  reason: 'direct_not_eligible';
+};
+
+async function saveD2ResponseCheckpoint(
+  pool: Pool,
+  runId: string,
+  checkpoint: D2ResponseCheckpoint,
+  state: Parameters<typeof updateDiscoveryBranchExecutionState>[3],
+): Promise<void> {
+  const saved = await pool.query(
+    `update discovery_runs
+       set config_snapshot = jsonb_set(coalesce(config_snapshot, '{}'::jsonb), '{d2Response}', $2::jsonb, true),
+           execution_state = jsonb_set(coalesce(execution_state, '{}'::jsonb), '{d2}', $3::jsonb, true),
+           updated_at = now()
+     where id = $1::uuid and status = 'running' and selection_output is null`,
+    [runId, JSON.stringify(checkpoint), JSON.stringify(state)],
+  );
+  if (saved.rowCount !== 1)
+    throw new Error('D2 could not save its raw response for the running Run.');
+}
 
 export const discoveryD2OutputJsonSchema = {
   type: 'object',
@@ -177,6 +221,8 @@ async function runDiscoveryD2Bound(
   if (!run || run.status !== 'running' || run.runType !== 'regular') {
     throw new Error('D2 requires a running regular Discovery Run.');
   }
+  if (run.selectionOutput)
+    throw new Error('D2 already has a persisted selection; do not rerun a completed D2.');
   if (!run.windowStartDate || !run.windowEndDate || !run.inputContentIds) {
     throw new Error('D2 requires a fixed Daily window and input content membership.');
   }
@@ -188,12 +234,10 @@ async function runDiscoveryD2Bound(
   const provider = resolveDiscoveryLlmProvider('d2', options.provider);
   const model = resolveProviderLlmModel(provider);
   const timeoutMs = resolveDiscoveryLlmTimeout('d2', options.timeoutMs);
-  const client = options.request ? null : createLlmClient({ provider, timeoutMs, maxRetries: 0 });
-  const request = options.request ?? client?.structured.create;
-  if (!request) throw new Error('D2 LLM request function is unavailable.');
+  let client: ReturnType<typeof createLlmClient> | null = null;
 
   const metadata = { provider, model, apiMode: 'chat_completions' };
-  const prior = initialDiscoveryStageState(
+  let prior = initialDiscoveryStageState(
     run.executionState.d2,
     stageHasHistoricConfig(run.configSnapshot, 'd2'),
   );
@@ -211,14 +255,100 @@ async function runDiscoveryD2Bound(
     }),
   );
   let responseUsage: LlmResponse['usage'] | null = null;
+  let pendingUsage: ReturnType<typeof usageFromLlmResponse> | undefined;
+  let accountedAt = stageStartedAt;
 
   try {
     const prepared = await prepareDiscoveryD2Request(pool, input, model);
-    const requestStartedAt = Date.now();
-    const response = await request(prepared.request, toDiscoveryRequestOptions(timeoutMs));
-    responseUsage = response.usage ?? null;
-
-    const validatedSelection = parseAndValidateDiscoveryD2Output(response.output_text, input);
+    // Hash both exact model parameters and validation context. Memory text is hashed, not saved.
+    const requestHash = createHash('sha256')
+      .update(
+        JSON.stringify({
+          runId,
+          provider,
+          request: prepared.request,
+          input,
+          promptVersion: prepared.promptVersion,
+          systemFragmentVersions: run.configSnapshot?.systemFragmentVersions ?? null,
+        }),
+      )
+      .digest('hex');
+    const stored = run.configSnapshot?.d2Response;
+    const checkpoint = stored == null ? null : D2ResponseCheckpointSchema.parse(stored);
+    let response: D2ResponseCheckpoint['response'];
+    let requestElapsedMs = 0;
+    if (
+      checkpoint?.requestHash === requestHash &&
+      checkpoint.promptVersion === prepared.promptVersion
+    ) {
+      response = checkpoint.response;
+      console.info('[discovery:d2] Reusing saved response.', { runId, responseId: response.id });
+    } else {
+      const request =
+        options.request ??
+        (client = createLlmClient({ provider, timeoutMs, maxRetries: 0 })).structured.create;
+      const requestStartedAt = Date.now();
+      pendingUsage = missingDiscoveryStageUsage();
+      const received = await request(prepared.request, toDiscoveryRequestOptions(timeoutMs));
+      requestElapsedMs = Date.now() - requestStartedAt;
+      responseUsage = received.usage ?? null;
+      pendingUsage = usageFromLlmResponse(responseUsage);
+      response = {
+        id: received.id,
+        output_text: received.output_text,
+        api_mode: received.api_mode,
+      };
+      const receivedAt = Date.now();
+      const accounted = buildDiscoveryStageState({
+        status: 'running',
+        endReason: null,
+        errorSummary: null,
+        metadata: { ...metadata, apiMode: response.api_mode },
+        prior,
+        attemptUsage: pendingUsage,
+        attemptElapsedMs: receivedAt - accountedAt,
+      });
+      // A single UPDATE commits the raw output and its Usage before any parsing/validation.
+      await saveD2ResponseCheckpoint(
+        pool,
+        runId,
+        {
+          formatVersion: 1,
+          requestHash,
+          promptVersion: prepared.promptVersion,
+          savedAt: new Date(receivedAt).toISOString(),
+          response,
+        },
+        accounted,
+      );
+      prior = { usage: accounted.usage, elapsedMs: accounted.elapsedMs };
+      pendingUsage = undefined;
+      accountedAt = receivedAt;
+    }
+    const skipped: SkippedD2DirectLead[] = [];
+    const validatedSelection = parseAndValidateDiscoveryD2Output(
+      response.output_text,
+      input,
+      (lead) => skipped.push(lead),
+    );
+    for (const lead of skipped) {
+      console.warn('[discovery:d2] Skipped ineligible Direct Lead.', { runId, ...lead });
+      try {
+        await recordDiscoveryDiagnostic(pool, {
+          runId,
+          name: 'd2_direct_lead_skipped',
+          status: 'warning',
+          payload: lead,
+        });
+      } catch (error) {
+        console.error('Failed to record skipped D2 Lead diagnostic.', error);
+      }
+    }
+    if (validatedSelection.leads.length === 0) {
+      throw new Error(
+        'D2 has no valid leads after eligibility validation; saved response retained.',
+      );
+    }
     const selection = await attachDirectLeadUrls(pool, validatedSelection);
     await persistDiscoveryD2Output(
       pool,
@@ -233,12 +363,12 @@ async function runDiscoveryD2Bound(
       },
       buildDiscoveryStageState({
         status: 'completed',
-        endReason: selection.leads.length > 0 ? 'candidates_found' : 'no_candidates',
+        endReason: 'candidates_found',
         errorSummary: null,
         metadata: { ...metadata, apiMode: response.api_mode },
         prior,
-        attemptUsage: usageFromLlmResponse(responseUsage),
-        attemptElapsedMs: Date.now() - stageStartedAt,
+        attemptUsage: pendingUsage,
+        attemptElapsedMs: Date.now() - accountedAt,
         completedAt: new Date().toISOString(),
       }),
     );
@@ -250,7 +380,7 @@ async function runDiscoveryD2Bound(
       promptVersion: prepared.promptVersion,
       responseId: response.id,
       apiMode: response.api_mode,
-      requestElapsedMs: Date.now() - requestStartedAt,
+      requestElapsedMs,
       timeoutMs,
       tokenUsage: responseUsage,
     };
@@ -265,8 +395,8 @@ async function runDiscoveryD2Bound(
         errorSummary: toErrorMessage(error),
         metadata,
         prior,
-        attemptUsage: usageFromLlmResponse(responseUsage),
-        attemptElapsedMs: Date.now() - stageStartedAt,
+        attemptUsage: pendingUsage,
+        attemptElapsedMs: Date.now() - accountedAt,
         completedAt: new Date().toISOString(),
       }),
     );
@@ -279,6 +409,7 @@ async function runDiscoveryD2Bound(
 export function parseAndValidateDiscoveryD2Output(
   rawOutput: string,
   input: DiscoveryWindowInput,
+  onSkippedDirect?: (lead: SkippedD2DirectLead) => void,
 ): DiscoverySelectionOutput {
   let value: unknown;
   try {
@@ -311,9 +442,17 @@ export function parseAndValidateDiscoveryD2Output(
   });
 
   return {
-    leads: leads.map((lead, index): DiscoveryLead => {
+    leads: leads.flatMap((lead, index): DiscoveryLead[] => {
       const leadId = `lead-${String(index + 1).padStart(2, '0')}`;
-      return lead.kind === 'direct' ? { leadId, ...lead, url: null } : { leadId, ...lead };
+      if (lead.kind === 'direct' && !itemsById.get(lead.sourceContentId)!.directEligible) {
+        onSkippedDirect?.({
+          leadId,
+          sourceContentId: lead.sourceContentId,
+          reason: 'direct_not_eligible',
+        });
+        return [];
+      }
+      return [lead.kind === 'direct' ? { leadId, ...lead, url: null } : { leadId, ...lead }];
     }),
   };
 }
@@ -370,9 +509,6 @@ function validateLead(
     if (!source) throw new Error(`D2 direct lead references unknown ID: ${sourceContentId}`);
     if (source.kind === 'event') {
       throw new Error(`D2 direct lead cannot reference Event: ${sourceContentId}`);
-    }
-    if (!source.directEligible) {
-      throw new Error(`D2 direct lead is not eligible: ${sourceContentId}`);
     }
     return {
       kind: 'direct',

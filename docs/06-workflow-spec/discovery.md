@@ -253,11 +253,15 @@ Agent 可发现多个可比较候选；**Open Discovery 最多提交 3 篇 / 个
 
 Discovery 分支失败后不自动重跑。是否复用原 Run，以 D2 的持久化结果为边界：
 
-- `discovery_runs.selection_output` 尚未成功持久化时，D2 不视为完成。不得恢复该 Run；应创建新的 Regular Run ID，并从 D2 重新执行。
+- `discovery_runs.selection_output` 尚未成功持久化时，D2 不视为完成，普通 Resume 不接受该 Run。满足现有提交条件的失败 Regular Run 可使用同 Run 的 Retry D2，由 Worker 重新处理；保留窗口、输入成员及已绑定 Prompt / Fragment。历史记录不满足 Retry 条件时创建新的 Regular Run。
 - `selection_output` 已成功持久化时，D2 即视为完成，不能仅凭整体 Run status 判断。后续 D3 或 D4 失败时，Resume 复用原 Run ID、固定输入成员和 D2 结果，只执行尚未完成的任务。
 - Resume 不覆盖或重复执行已经完成并持久化的评价结果；各分支根据已有持久化结果跳过完成项，只继续 missing / failed 项。
 - D2 的完成以持久化 `selection_output` 为准；D3 / D4 的完成判断读取 `discovery_runs.execution_state` 中各自阶段状态。已执行阶段还在其中保存实际 Provider、模型、耗时与 Usage 诊断；字段完整性语义由 [Data Model](../05-data-model/discovery.md) 定义。D3 正常返回 0 篇仍写入 `completed + no_candidates`；缺失状态或进程异常遗留的 `running` 不视为完成。阶段状态独立更新，任何一条分支失败都不得覆盖另一条分支的完成记录或候选。
 - Resume 用于继续未完成的同一次执行。若操作目的为主动重新生成内容，而不是完成失败任务，则创建 New Run，不覆盖原 Run 的 Selection、Candidate、评价或 Trace。
+
+D2 Retry 优先重新校验已保存且匹配的模型响应，不重复调用模型；匹配条件及 Usage 原子记账见 [Technical Spec](../04-technical-spec/discovery.md#d2-响应恢复)。没有响应或输入 / 版本不匹配时才发出新请求。损坏的恢复记录明确失败，不静默付费重生成；匹配响应仍有结构 / 业务错误时保持失败，主动重新生成需新建 Run。
+
+D2 只过滤已知非 Event 输入中 `directEligible=false` 的 Direct Lead，并记录原 Lead ID、内容 ID 及原因；保留其他有效 Lead 的顺序和 ID。未知 ID、Event Direct、重复引用、非法字段或 JSON 仍导致整批失败。过滤后无有效 Lead（包括模型返回空数组）时不标记 D2 成功，不继续下游分支；不为补足数量放宽资格或将 Direct 自动改为 Topic。
 
 **Prompt 绑定**：通用规则见 `../07-prompt-spec/registry.md` 的执行版本边界，载体见 [版本绑定载体](../05-data-model/prompt-registry.md#版本绑定载体)。D2–D5 在同一 Run 按步骤首次绑定；D4 多篇、D3/D5 Agent Loop 固定该步骤版本。Resume 复用旧绑定，已完成步骤不补写或重跑；新 Regular / Open Run 不继承父 Run 的绑定。
 

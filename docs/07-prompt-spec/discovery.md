@@ -95,7 +95,7 @@ Key：`discovery.d2.topic_selection`；Shared Fragment：`shared.discovery.edito
 
 传输 Schema 限定 `kind = direct | topic`、`rationale` 为字符串、`leads` 最多 8 项，允许空数组。应用层进一步校验：
 
-- Direct 的 `question` / `newsContext` / `sourceContentIds` 必须为 null；`sourceContentId` 与 `rationale` 非空，引用非 Event 且 `directEligible=true` 的输入；Direct 不得重复引用同一内容。
+- Direct 的 `question` / `newsContext` / `sourceContentIds` 必须为 null；`sourceContentId` 与 `rationale` 非空，引用非 Event 且 `directEligible=true` 的输入；Direct 不得重复引用同一内容。 完成结构校验后，已知但不满足资格的 Direct 单条过滤；其他错误仍严格失败，无有效 Lead 的执行结果不视为成功，见 [Workflow 恢复规则](../06-workflow-spec/discovery.md#83-run-恢复与重新生成)。
 - Topic 的 `sourceContentId` 必须为 null；`question` / `rationale` / `newsContext` 非空，`sourceContentIds` 至少一个，全部来自输入且内部不重复。
 
 模型不输出 `leadId` 或 URL。应用层按输出顺序生成 `lead-01` 等 ID，为 Direct 从 Daily 关联补充 URL，再保存逻辑 Lead；无关分支的 null 占位不保留为逻辑字段。非法或缺失引用不能猜测补齐。执行与保存边界见 `../06-workflow-spec/discovery.md` §3、§8。

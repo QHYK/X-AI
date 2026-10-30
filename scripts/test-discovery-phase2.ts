@@ -155,7 +155,10 @@ function testD2Validation() {
   );
 
   checks.push(
-    ['D2 accepts an empty result', empty.leads.length === 0],
+    [
+      'D2 transport parser accepts empty output; execution enforces valid Leads',
+      empty.leads.length === 0,
+    ],
     [
       'D2 accepts an eligible Digest and assigns stable ordered Lead IDs',
       acceptedDigest.leads[0]?.kind === 'direct' &&
@@ -186,8 +189,8 @@ function testD2Validation() {
       ),
     ],
     [
-      'D2 rejects Event and directEligible=false Direct references',
-      [IDS.event, IDS.digestIneligible].every((sourceContentId) =>
+      'D2 still rejects Event Direct references',
+      [IDS.event].every((sourceContentId) =>
         throws(() =>
           parseAndValidateDiscoveryD2Output(
             JSON.stringify({
@@ -314,6 +317,199 @@ async function testD2PersistenceAndUrlEnrichment() {
   );
 }
 
+async function testD2ResponseRecovery() {
+  const input = discoveryWindowFixture();
+  const mixed = {
+    leads: [
+      d2Direct(IDS.digestIneligible, 'Bad Direct'),
+      d2Direct(IDS.digestEligible, 'Good Direct'),
+      d2Topic('Question?', 'Reason', 'Context', [IDS.event]),
+    ],
+  };
+  const skipped: unknown[] = [];
+  const parsed = parseAndValidateDiscoveryD2Output(JSON.stringify(mixed), input, (lead) =>
+    skipped.push(lead),
+  );
+  assert.deepEqual(
+    parsed.leads.map((lead) => lead.leadId),
+    ['lead-02', 'lead-03'],
+  );
+  assert.deepEqual(skipped, [
+    { leadId: 'lead-01', sourceContentId: IDS.digestIneligible, reason: 'direct_not_eligible' },
+  ]);
+  for (const leads of [
+    [d2Direct(IDS.digestIneligible, '')],
+    [d2Direct(IDS.digestIneligible, 'One'), d2Direct(IDS.digestIneligible, 'Duplicate')],
+    [d2Direct(IDS.digestIneligible, 'One'), d2Direct(IDS.unknown, 'Unknown')],
+  ])
+    assert.throws(() => parseAndValidateDiscoveryD2Output(JSON.stringify({ leads }), input));
+
+  const db = new FakeDiscoveryPool(input, { [IDS.digestEligible]: 'https://example.test/good' });
+  let calls = 0;
+  const request = async () => {
+    calls++;
+    return llmResponse(mixed);
+  };
+  db.failSelectionOnce = true;
+  await assert.rejects(
+    () => runDiscoveryD2(db as unknown as Pool, RUN_ID, { input, request }),
+    /Mock selection persistence failure/,
+  );
+  assert(db.run.config_snapshot?.d2Response, 'Raw output must precede business persistence');
+  const usage = () =>
+    (
+      db.run.execution_state as Record<
+        string,
+        { usage: { requests: number; inputTokens: number }; status: string }
+      >
+    ).d2;
+  assert.equal(usage().usage.requests, 1);
+  const saved = structuredClone(db.run.config_snapshot!.d2Response);
+  const recovered = await runDiscoveryD2(db as unknown as Pool, RUN_ID, { input, request });
+  assert.equal(calls, 1, 'Matching response is revalidated without another model request');
+  assert.equal(recovered.requestElapsedMs, 0);
+  assert.equal(recovered.selection.leads.length, 2);
+  assert.equal(usage().usage.requests, 1);
+  assert.equal(usage().usage.inputTokens, 1, 'Reuse must not recount historical tokens');
+  assert(db.diagnostics.some((entry) => entry.reason === 'direct_not_eligible'));
+  assert.equal(db.checkpointWrites, 1);
+
+  // Existing response with current fields is independently revalidated on every retry.
+  for (const invalid of [
+    { leads: [d2Direct(IDS.digestIneligible, 'Ineligible')] },
+    { leads: [] },
+    { leads: [d2Direct(IDS.unknown, 'Unknown')] },
+  ]) {
+    const broken = new FakeDiscoveryPool(input, {});
+    let requests = 0;
+    const options = {
+      input,
+      request: async () => {
+        requests++;
+        return llmResponse(invalid);
+      },
+    };
+    await assert.rejects(() => runDiscoveryD2(broken as unknown as Pool, RUN_ID, options));
+    assert.equal(broken.run.selection_output, null);
+    assert.equal(
+      (broken.run.execution_state as Record<string, { status: string }>).d2.status,
+      'failed',
+    );
+    await assert.rejects(() => runDiscoveryD2(broken as unknown as Pool, RUN_ID, options));
+    assert.equal(requests, 1, 'Invalid matching output is retained; no silent paid regeneration');
+  }
+
+  // No snapshot/changed inputs or version identifiers cannot reuse an unrelated result.
+  for (const change of [
+    'input',
+    'eligibility',
+    'memory',
+    'prompt',
+    'fragment',
+    'provider',
+    'legacy',
+  ] as const) {
+    db.run.selection_output = null;
+    db.run.config_snapshot = { ...db.run.config_snapshot, d2Response: structuredClone(saved) };
+    const changed = structuredClone(input);
+    let provider: 'openai' | 'kimi' = 'openai';
+    db.memories = [];
+    if (change === 'input') changed.days[0].digests[0].title = 'Changed title';
+    if (change === 'eligibility') changed.days[0].digests[0].directEligible = false;
+    if (change === 'memory')
+      db.memories = [
+        {
+          id: 'm',
+          content: 'New preference',
+          type: 'topic',
+          priority: 0,
+          enabled: true,
+          createdAt: '2026-10-30T00:00:00Z',
+          updatedAt: '2026-10-30T00:00:00Z',
+        },
+      ];
+    if (change === 'prompt')
+      (db.run.config_snapshot.d2Response as { promptVersion: string }).promptVersion =
+        '00000000-0000-4000-8000-000000000777';
+    if (change === 'fragment')
+      db.run.config_snapshot.systemFragmentVersions = {
+        'xfield.identity': '00000000-0000-4000-8000-000000000778',
+      };
+    else delete db.run.config_snapshot.systemFragmentVersions;
+    if (change === 'provider') provider = 'kimi';
+    if (change === 'legacy') delete db.run.config_snapshot.d2Response;
+    const count: number = calls;
+    await runDiscoveryD2(db as unknown as Pool, RUN_ID, { input: changed, provider, request });
+    assert.equal(calls, count + 1, `${change} invalidates response reuse`);
+  }
+  const newRun = new FakeDiscoveryPool(input, {
+    [IDS.digestEligible]: 'https://example.test/good',
+  });
+  const newRunId = '00000000-0000-4000-8000-000000000555';
+  newRun.run.id = newRunId;
+  newRun.run.config_snapshot = { d2Response: structuredClone(saved) };
+  const previousCalls: number = calls;
+  await runDiscoveryD2(newRun as unknown as Pool, newRunId, { input, request });
+  assert.equal(calls, previousCalls + 1, 'A new Run never inherits another Run response');
+  const traceFailure = new FakeDiscoveryPool(input, {
+    [IDS.digestEligible]: 'https://example.test/good',
+  });
+  traceFailure.diagnosticError = true;
+  assert.equal(
+    (await runDiscoveryD2(traceFailure as unknown as Pool, RUN_ID, { input, request })).selection
+      .leads.length,
+    2,
+    'Diagnostic failure cannot discard valid leads',
+  );
+  const malformed = new FakeDiscoveryPool(input, {});
+  let malformedCalls = 0;
+  const malformedOptions = {
+    input,
+    request: async () => {
+      malformedCalls++;
+      return { ...llmResponse({}), output_text: '{invalid JSON' };
+    },
+  };
+  await assert.rejects(
+    () => runDiscoveryD2(malformed as unknown as Pool, RUN_ID, malformedOptions),
+    /not valid JSON/,
+  );
+  await assert.rejects(
+    () => runDiscoveryD2(malformed as unknown as Pool, RUN_ID, malformedOptions),
+    /not valid JSON/,
+  );
+  assert.equal(malformedCalls, 1);
+  malformed.run.config_snapshot!.d2Response = { broken: true };
+  await assert.rejects(() =>
+    runDiscoveryD2(malformed as unknown as Pool, RUN_ID, malformedOptions),
+  );
+  assert.equal(malformedCalls, 1, 'Corrupt checkpoint fails explicitly instead of paying silently');
+  db.run.selection_output = recovered.selection;
+  const completedCalls = calls;
+  await assert.rejects(
+    () => runDiscoveryD2(db as unknown as Pool, RUN_ID, { input, request }),
+    /already has a persisted selection/,
+  );
+  assert.equal(calls, completedCalls);
+  const failedWrite = new FakeDiscoveryPool(input, {});
+  failedWrite.checkpointError = true;
+  await assert.rejects(
+    () => runDiscoveryD2(failedWrite as unknown as Pool, RUN_ID, { input, request }),
+    /raw response persistence failure/,
+  );
+  assert.equal(failedWrite.run.selection_output, null);
+  assert.equal(failedWrite.run.config_snapshot?.d2Response, undefined);
+  assert.equal(
+    (failedWrite.run.execution_state as Record<string, { usage: { requests: number } }>).d2.usage
+      .requests,
+    1,
+  );
+  checks.push([
+    'D2 filters only ineligible Directs, rejects empty/invalid results, checkpoints before validation, reuses exact inputs/versions without recounting Usage, and propagates persistence failures',
+    true,
+  ]);
+}
+
 async function testD2Memories() {
   const input = discoveryWindowFixture();
   const db = new FakeDiscoveryPool(input, {});
@@ -357,16 +553,18 @@ async function testD2Memories() {
   assert.equal(buildDiscoveryD2UserPrompt(input, ''), buildDiscoveryD2UserPrompt(input));
   const schemas: string[] = [];
   const payloads: Array<{ contents: unknown; memory?: string }> = [];
-  const call = async () =>
-    executeD2(pool, RUN_ID, {
+  const call = async () => {
+    db.run.selection_output = null;
+    return executeD2(pool, RUN_ID, {
       provider: 'openai',
       input,
       request: async (request) => {
         schemas.push(JSON.stringify(request.text.format.schema));
         payloads.push(JSON.parse(request.input));
-        return llmResponse({ leads: [] });
+        return llmResponse({ leads: [d2Topic('Question?', 'Reason', 'Context', [IDS.event])] });
       },
     });
+  };
   await call();
   assert.equal(db.memoryReads, reads + 1, 'One Memory read per actual D2 execution');
   assert.deepEqual(payloads[0].contents, JSON.parse(buildDiscoveryD2UserPrompt(input)).contents);
@@ -1157,6 +1355,10 @@ class FakeDiscoveryPool {
   memories: Memory[] = [];
   memoryReads = 0;
   memoryError = false;
+  checkpointError = false;
+  checkpointWrites = 0;
+  failSelectionOnce = false;
+  diagnosticError = false;
   readonly candidates: FakeCandidate[] = [];
   readonly reviewCandidateIds = new Set<string>();
   readonly diagnostics: Array<Record<string, unknown>> = [];
@@ -1224,7 +1426,27 @@ class FakeDiscoveryPool {
       return { rows: [] };
     }
     if (text.includes('from discovery_runs where id')) return { rows: [this.run] };
+    if (text.includes("'{d2Response}'")) {
+      if (this.checkpointError) throw new Error('Mock raw response persistence failure');
+      if (this.run.selection_output || this.run.status !== 'running')
+        return { rows: [], rowCount: 0 };
+      assert.match(text, /execution_state = jsonb_set/);
+      this.checkpointWrites++;
+      this.run.config_snapshot = {
+        ...(this.run.config_snapshot ?? {}),
+        d2Response: JSON.parse(String(values[1])),
+      };
+      this.run.execution_state = {
+        ...((this.run.execution_state ?? {}) as object),
+        d2: JSON.parse(String(values[2])),
+      };
+      return { rows: [], rowCount: 1 };
+    }
     if (text.includes('set selection_output =')) {
+      if (this.failSelectionOnce) {
+        this.failSelectionOnce = false;
+        throw new Error('Mock selection persistence failure');
+      }
       this.run.selection_output = JSON.parse(String(values[1])) as DiscoverySelectionOutput;
       this.run.config_snapshot = {
         ...(this.run.config_snapshot ?? {}),
@@ -1252,6 +1474,7 @@ class FakeDiscoveryPool {
       };
     }
     if (text.includes('insert into discovery_trace_spans')) {
+      if (this.diagnosticError) throw new Error('Mock trace database failure');
       this.diagnostics.push(JSON.parse(String(values[7])) as Record<string, unknown>);
       return { rows: [], rowCount: 1 };
     }
@@ -1426,6 +1649,7 @@ testDiscoveryLlmConfig();
 testD2Validation();
 await testD2PersistenceAndUrlEnrichment();
 await testD2Memories();
+await testD2ResponseRecovery();
 testD4OutputValidation();
 await testD4PrechecksAndPersistence();
 await testD4SerialPerCandidateRequests();
