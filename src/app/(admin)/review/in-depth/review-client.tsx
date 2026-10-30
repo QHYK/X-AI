@@ -1,6 +1,11 @@
 'use client';
 
 import { IntroductionEditor } from './introduction-editor.js';
+import {
+  IN_DEPTH_CATEGORIES,
+  IN_DEPTH_CATEGORY_LABELS,
+  type InDepthCategory,
+} from '@/lib/in-depth-category.js';
 import { ManualCandidateForm, SavedArticleContent } from './manual-candidate-form.js';
 
 import { resolveDiscoveryPublication, discoveryEvidenceMetadata } from '@/lib/discovery-source.js';
@@ -54,7 +59,11 @@ export function InDepthReviewClient(props: {
     }
   }
 
-  async function save(action: 'review' | 'notes', reviewStatus = selected?.reviewStatus) {
+  async function save(
+    action: 'review' | 'notes' | 'category',
+    reviewStatus = selected?.reviewStatus,
+    category?: InDepthCategory | null,
+  ) {
     if (!selected || requestLock.current) return;
     requestLock.current = true;
     const id = selected.id;
@@ -68,7 +77,11 @@ export function InDepthReviewClient(props: {
         body: JSON.stringify({
           id: selected.id,
           action,
-          ...(action === 'notes' ? { editorialNotes: notes } : { reviewStatus }),
+          ...(action === 'category'
+            ? { category }
+            : action === 'notes'
+              ? { editorialNotes: notes }
+              : { reviewStatus }),
         }),
       });
       const payload = (await response.json()) as { item?: InDepthReviewItem; error?: string };
@@ -81,11 +94,13 @@ export function InDepthReviewClient(props: {
           : current.filter((item) => item.id !== payload.item?.id),
       );
       setMessage(
-        action === 'notes'
-          ? 'Notes saved.'
-          : reviewStatus === 'approved'
-            ? 'Approved and visible in In-depth Reads.'
-            : 'Review saved.',
+        action === 'category'
+          ? 'Category saved.'
+          : action === 'notes'
+            ? 'Notes saved.'
+            : reviewStatus === 'approved'
+              ? 'Approved and visible in In-depth Reads.'
+              : 'Review saved.',
       );
       router.refresh();
     } catch (reason) {
@@ -243,6 +258,31 @@ export function InDepthReviewClient(props: {
                     ) : (
                       selected.url
                     )}
+                  </dd>
+                  <dt>Category</dt>
+                  <dd>
+                    <select
+                      aria-label="Category"
+                      value={selected.category ?? ''}
+                      disabled={saving}
+                      onChange={(event) =>
+                        void save(
+                          'category',
+                          undefined,
+                          (event.target.value || null) as InDepthCategory | null,
+                        )
+                      }
+                    >
+                      <option value="">未分类</option>
+                      {IN_DEPTH_CATEGORIES.map((category) => (
+                        <option
+                          key={category}
+                          value={category}
+                        >
+                          {IN_DEPTH_CATEGORY_LABELS[category]}
+                        </option>
+                      ))}
+                    </select>
                   </dd>
                   <dt>Tags</dt>
                   <dd>

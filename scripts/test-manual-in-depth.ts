@@ -166,6 +166,9 @@ class ManualStore {
             r.whyWorthReading = String(values[3]);
             r.status = 'evaluated';
             r.evaluation = { ...r.evaluation, ...JSON.parse(String(values[4])) };
+            assert.match(sql, /evaluation @> '\{"categoryManuallySet":true\}'::jsonb/);
+            if (r.evaluation?.categoryManuallySet !== true)
+              r.category = (values[5] as Row['category']) ?? r.category ?? null;
             return { rows: [], rowCount: 1 };
           }
           if (sql.includes('select editorial_summary as summary'))
@@ -207,6 +210,14 @@ const request = async (input: { input: unknown; instructions?: string; text?: un
   assert.equal(normalizedFetchUrl(body.originalUrl), articleUrl);
   assert.match(input.instructions!, /不进行 qualified/);
   assert.doesNotMatch(JSON.stringify(input.text ?? {}), /\\\\p\{/);
+  // The concurrency fixture also calls this helper directly, without a provider request.
+  if (input.text) {
+    const schema = (
+      input.text as { format: { schema: { required: string[]; properties: { category: unknown } } } }
+    ).format.schema;
+    assert.ok(schema.required.includes('category'));
+    assert.ok(JSON.stringify(schema.properties.category).includes('null'));
+  }
   return {
     id: 'mock',
     output: [],
@@ -286,11 +297,61 @@ await createManualInDepthCandidate(
 await generateManualInDepthIntroduction(fetched.db, 'review-1', { request });
 assert.equal(fetches, 1);
 assert.equal(fetched.rows.get('review-1')!.titleZh, generated.title_zh);
-const priorCalls = modelCalls;
-await generateManualInDepthIntroduction(fetched.db, 'review-1', { request });
-assert.equal(modelCalls, priorCalls, 'Completed Generate is reused without charging again');
+for (const manualCategory of [undefined, 'history', null] as const) {
+  const row = fetched.rows.get('review-1')!;
+  row.category = manualCategory ?? null;
+  row.evaluation = { ...row.evaluation, categoryManuallySet: manualCategory !== undefined };
+  await generateManualInDepthIntroduction(fetched.db, 'review-1', {
+    regenerate: true,
+    request: async () => ({
+      id: 'category-test',
+      output: [],
+      api_mode: 'chat_completions',
+      output_text: JSON.stringify({ ...generated, category: 'technology' }),
+    }),
+  });
+  assert.equal(
+    fetched.rows.get('review-1')?.category,
+    manualCategory === undefined ? 'technology' : manualCategory,
+  );
+}
+const protectedRow = fetched.rows.get('review-1')!;
+protectedRow.category = 'business';
+protectedRow.evaluation = { ...protectedRow.evaluation, categoryManuallySet: false };
 await generateManualInDepthIntroduction(fetched.db, 'review-1', { request, regenerate: true });
-assert.equal(modelCalls, priorCalls + 1);
+assert.equal(
+  fetched.rows.get('review-1')?.category,
+  'business',
+  'Legacy output omission must not clear existing Category.',
+);
+await generateManualInDepthIntroduction(fetched.db, 'review-1', {
+  regenerate: true,
+  request: async () => {
+    const current = fetched.rows.get('review-1')!;
+    current.category = null;
+    current.evaluation = { ...current.evaluation, categoryManuallySet: true };
+    return {
+      id: 'concurrent-category',
+      output: [],
+      api_mode: 'chat_completions',
+      output_text: JSON.stringify({ ...generated, category: 'history' }),
+    };
+  },
+});
+assert.equal(
+  fetched.rows.get('review-1')?.category,
+  null,
+  'Human clear while LLM is running wins.',
+);
+const priorCallsAfterCategory = modelCalls;
+await generateManualInDepthIntroduction(fetched.db, 'review-1', { request });
+assert.equal(
+  modelCalls,
+  priorCallsAfterCategory,
+  'Completed Generate is reused without charging again',
+);
+await generateManualInDepthIntroduction(fetched.db, 'review-1', { request, regenerate: true });
+assert.equal(modelCalls, priorCallsAfterCategory + 1);
 
 await generateManualInDepthIntroduction(store.db, first.item.id, { request });
 assert.deepEqual(store.rows.get(first.item.id)?.evaluation?.tags, [

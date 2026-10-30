@@ -1138,6 +1138,7 @@ function throws(callback: () => unknown): boolean {
 }
 
 type FakeCandidate = {
+  category?: string | null;
   id: string;
   sourceLeadId: string;
   sourceContentId: string;
@@ -1300,7 +1301,8 @@ class FakeDiscoveryPool {
       Object.assign(candidate.evidence, JSON.parse(String(values[2])));
       if (values[3]) {
         candidate.status = String(values[3]);
-        candidate.evaluation = JSON.parse(String(values[4]));
+        assert.match(text, /coalesce\(evaluation, '\{\}'::jsonb\) \|\| \$5::jsonb/);
+        candidate.evaluation = { ...candidate.evaluation, ...JSON.parse(String(values[4])) };
       }
       return { rows: [], rowCount: 1 };
     }
@@ -1310,7 +1312,10 @@ class FakeDiscoveryPool {
         candidate.titleZh = values[5];
         candidate.summary = values[6];
         candidate.whyWorthReading = values[7];
-        candidate.evaluation = JSON.parse(String(values[1])) as Record<string, unknown>;
+        assert.match(text, /evaluation @> '\{"categoryManuallySet":true\}'::jsonb/);
+        if (candidate.evaluation?.categoryManuallySet !== true)
+          candidate.category = (values[8] as string | null) ?? candidate.category ?? null;
+        candidate.evaluation = { ...candidate.evaluation, ...JSON.parse(String(values[1])) };
         candidate.evidence = JSON.parse(String(values[2])) as Record<string, unknown>;
         candidate.status = String(values[4]);
       }
@@ -1356,6 +1361,67 @@ function toCandidateRow(candidate: FakeCandidate) {
   };
 }
 
+async function testD4Categories() {
+  for (const scenario of ['ai', 'legacy', 'manual', 'clear', 'concurrent', 'precheck'] as const) {
+    const db = new FakeDiscoveryPool(
+      discoveryWindowFixture(),
+      {},
+      {
+        leads: [directLead('lead-01', IDS.digestEligible, 'https://example.test/category')],
+      },
+    );
+    db.sources.set(IDS.digestEligible, sourceRow(IDS.digestEligible, 'word '.repeat(2000), null));
+    db.candidates.push({
+      id: 'existing-candidate',
+      sourceLeadId: 'lead-01',
+      sourceContentId: IDS.digestEligible,
+      normalizedUrl: 'https://example.test/category',
+      status: 'discovered',
+      evidence: {},
+      estimatedDurationMinutes: scenario === 'precheck' ? 31 : 10,
+      category: scenario === 'clear' ? null : 'history',
+      evaluation: { categoryManuallySet: ['manual', 'clear', 'precheck'].includes(scenario) },
+    });
+    const result = await runDiscoveryD4(db as unknown as Pool, RUN_ID, {
+      provider: 'openai',
+      request: async () => {
+        if (scenario === 'concurrent') {
+          db.candidates[0]!.category = null;
+          db.candidates[0]!.evaluation = { categoryManuallySet: true };
+        }
+        return llmResponse({
+          evaluations: [
+            {
+              ...evaluation('existing-candidate', 'qualified'),
+              ...(scenario === 'legacy' ? {} : { category: 'technology' }),
+            },
+          ],
+        });
+      },
+    });
+    assert.equal(result.failedRequestCount, 0, scenario);
+    const row = db.candidates[0]!;
+    assert.equal(
+      row.category,
+      scenario === 'ai'
+        ? 'technology'
+        : ['clear', 'concurrent'].includes(scenario)
+          ? null
+          : 'history',
+      scenario,
+    );
+    assert.equal(
+      row.evaluation?.categoryManuallySet,
+      ['manual', 'clear', 'concurrent', 'precheck'].includes(scenario),
+      scenario,
+    );
+  }
+  checks.push([
+    'D4 Category generation, legacy omission, retry/precheck and concurrent human classification protection',
+    true,
+  ]);
+}
+
 testDiscoveryLlmConfig();
 testD2Validation();
 await testD2PersistenceAndUrlEnrichment();
@@ -1366,6 +1432,7 @@ await testD4SerialPerCandidateRequests();
 await testD4FailureRecovery();
 await testD4MissingReaderFields();
 await testDirectDurations();
+await testD4Categories();
 
 const failures = checks.filter(([, passed]) => !passed);
 console.log(JSON.stringify({ success: failures.length === 0, checks }, null, 2));

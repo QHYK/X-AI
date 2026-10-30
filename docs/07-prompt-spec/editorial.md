@@ -90,11 +90,12 @@ Key：`in_depth.manual.generate`。实现与 Schema：`src/lib/manual-in-depth.t
 
 ### Output
 
-一次 Structured Output 返回五个 required 字段，禁止额外字段：
+一次 Structured Output 返回以下六个字段，禁止其他额外字段：
 
 - `title_zh`：忠实中文标题字符串。
 - `summary`、`whyWorthReading`、`extra_info`：三段中文 Markdown 字符串。
 - `tags`：最多三对 `{zh, en}` 双语标签。
+- `category`：根对象的单一分类，其他五个字段仍为 required。
 
 ### Guidelines
 

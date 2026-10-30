@@ -20,6 +20,14 @@ Transport Schema 与应用层语义校验分离：不把 Provider 不支持的 U
 
 以下 Input Schema 示例均为动态 Builder 实际返回的 JSON 结构（示例值仅作说明）。数据库 User Template 可包装这些业务输入；编辑标准由数据库 Prompt / Shared Fragment 提供，不是示例中的额外 JSON 字段。
 
+## In-depth Category 输出契约
+
+D3 / D5 在 `candidates[].category`、D4 在 `evaluations[].category` 返回单一主分类；Manual Generate 的根对象 `category` 也遵循本节。取值为单个枚举字符串或 JSON `null`，不接受数组、中文值、空字符串或其他分类。枚举和中文标签见 [Discovery Data Model](../05-data-model/discovery.md#discovery_candidates)，代码共用 `src/lib/in-depth-category.ts`。
+
+- **Provider Strict Schema**：`category` 为 required + nullable，必须返回该键，无分类时返回 `null`。D3 / D5 由 SDK 将 Zod 的 nullable optional 转为严格传输 Schema；D4 显式定义 JSON Schema；Manual 使用 required nullable 的传输 Schema。
+- **应用兼容解析**：允许旧输出缺少 `category`，或显式返回 `null`；非法非空分类仍使输出校验失败。兼容旧输出不表示新请求的 Provider Schema 可以省略该键。
+- 分类与现有阅读评价在同一次请求中生成，不增加模型调用，不修改 Tags 或入选判断。保存与人工覆盖规则见上述 Data Model；已完成阶段沿用既有 Resume 规则，不为补分类重新运行。
+
 ## D2. Topic Selection
 
 Key：`discovery.d2.topic_selection`；Shared Fragment：`shared.discovery.editorial_criteria`。入口及校验：`src/discovery/topic-selection.ts`；动态输入：`src/prompts/discovery-topic-selection.ts`。
@@ -152,6 +160,7 @@ Key：`discovery.d3.topic_discovery`；Shared Fragments：`shared.discovery.edit
       "whyWorthReading": "中文推荐理由",
       "evidence": "实际读到的关键论证/细节及对应来源",
       "tags": [{ "zh": "科学方法", "en": "Scientific Method" }],
+      "category": "technology",
       "limitations": "无法核查的内容或访问限制",
       "extra_info": "{}"
     }
@@ -161,7 +170,7 @@ Key：`discovery.d3.topic_discovery`；Shared Fragments：`shared.discovery.edit
 
 这是 `DiscoveryD3OutputSchema` 接收的传输 JSON 实例。根对象仅有 `candidates`，最多 3 项（允许空数组）；示例中 Candidate 的全部字段 required，禁止额外字段，D3 不输出 `publication`。
 
-`sourceLeadId`、`url`、`title`、`title_zh`、`summary`、`whyWorthReading`、`evidence` 为长度至少 1 的字符串；`author` / `limitations` / `extra_info` 为字符串，可为空。`contentType` 是 article / video / podcast 枚举；`publishedAt` 是字符串或 null，`estimatedDurationMinutes` 是正整数或 null；`tags` 遵循共享契约。
+`sourceLeadId`、`url`、`title`、`title_zh`、`summary`、`whyWorthReading`、`evidence` 为长度至少 1 的字符串；`author` / `limitations` / `extra_info` 为字符串，可为空。`contentType` 是 article / video / podcast 枚举；`publishedAt` 是字符串或 null，`estimatedDurationMinutes` 是正整数或 null；`tags` 遵循共享契约。 
 
 ### Guidelines
 
@@ -222,7 +231,7 @@ Code 检查 URL、正文可用性、历史重复和时长；不默认重新抓�
 
 ### Output Schema
 
-以下为严格传输 JSON 实例：根对象仅有 `evaluations`，示例中的全部 Evaluation 字段 required，禁止额外字段。传输 Schema 本身不限定数组恰为一项；当前调用一次传一篇，应用层检查一一对应。所有文本字段非 nullable，`evidence` / `limitations` 是字符串数组，`tags` 是双语数组。
+以下为严格传输 JSON 实例：根对象仅有 `evaluations`，示例中的全部 Evaluation 字段 required，禁止额外字段。传输 Schema 本身不限定数组恰为一项；当前调用一次传一篇，应用层检查一一对应。除 `category` 外的文本字段非 nullable，`evidence` / `limitations` 是字符串数组，`tags` 是双语数组。
 
 ```json
 {
@@ -235,6 +244,7 @@ Code 检查 URL、正文可用性、历史重复和时长；不默认重新抓�
       "summary": "面向读者的中文内容概要",
       "whyWorthReading": "面向读者的中文推荐理由",
       "tags": [{ "zh": "科学方法", "en": "Scientific Method" }],
+      "category": "technology",
       "evidence": ["正文中支持判断的具体论证或细节"],
       "limitations": ["无法核实的事项"],
       "extra_info": "{}"
@@ -297,6 +307,7 @@ Key：`discovery.d5.open_discovery`；Shared Fragments：`shared.discovery.edito
       "whyWorthReading": "中文推荐理由",
       "evidence": "实际阅读的具体论证、细节及其出处",
       "tags": [{ "zh": "科学方法", "en": "Scientific Method" }],
+      "category": "technology",
       "limitations": "访问限制或无法核实的事项",
       "extra_info": "{}"
     }

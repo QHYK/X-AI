@@ -119,6 +119,7 @@ CHECK (jsonb_typeof("execution_state") = 'object');
 | `source_content_id` | uuid | nullable；来源内容 ID；按 `source_content_type` 解释为 `events.id` 或 `processed_contents.id` |
 | `source_lead_id` | text | nullable；候选所来自的 D2 Lead；由应用代码生成并校验，不由 LLM 生成 |
 | `topic_context` | jsonb | nullable；知识探索问题、来源 Daily IDs、News Context 等 |
+| `category` | text | nullable；单一主分类；七类枚举与 CHECK 见下文，不在 `in_depth_candidates` 重复保存 |
 | `url` | text | NOT NULL；作品原始 URL |
 | `normalized_url` | text | nullable；去重用规范化 URL |
 | `title` | text | nullable；作品原始标题 |
@@ -155,6 +156,8 @@ CHECK (jsonb_typeof("execution_state") = 'object');
 - D3 / D4 / D5 的 `extra_info` 统一保存于 `extra_info` JSONB；缺失时规范化为 `{}`，只允许 JSON 对象，禁止数组、字符串等非对象值。应用层应限制序列化大小并过滤敏感、重复、无关内容；`extra_info` 不得替代固定字段、证据或业务校验。
 - `evidence` 保存实际获取的内容证据及其来源，不把 Agent 的自然语言声明当成已阅读证据。
 - `evaluation.tags` 保存最终内容评价生成的双语标签：`[{ "zh": "科学方法", "en": "Scientific Method" }]`，最多 3 对，每对中英文均非空；按任一语言名称去重，历史缺失按空数组读取。它是评价的固定键，不写入自由补充字段 `extra_info`。
+- `category` 允许 `technology`（技术）、`business`（商业与经济）、`math_physics`（数学与物理）、`life_chemistry`（生命科学与化学）、`earth_environment`（地球与环境）、`history`（历史）、`social_culture`（社会与文化）或 NULL，由 `discovery_candidates_category_check` 保证。Migration `0027` 仅增加 nullable 列和约束，历史数据保持 NULL。
+- `evaluation.categoryManuallySet` 为应用维护的 JSONB 布尔标记：人工设置或清空分类后为 `true`，AI 不得覆盖该分类。新记录缺失 / NULL 分类保存 NULL；已有记录仅应用非 NULL 的 AI 分类，缺失 / NULL 不清空原值。更新 `evaluation` 必须保留人工标记和其他无关键；这些是应用保证的数据不变量，不是额外的数据库 CHECK。独立修改及并发保护见 [Admin API](../04-technical-spec/admin-api.md#in-depth-category)。
 - Cover 复用 `evidence` JSONB：Direct 使用 `evidence.coverImage`，Topic / Open 使用实际 Fetch 摘要中的 `evidence.fetch.coverImage`，不重复保存。值为 `{ url, source, width, height }` 或 `null`；`source` 为 `og:image` / `twitter:image` / `article` / `raw_article`，尺寸为可获得的正整数，否则为 `null`。它只来自 Code 验证的抓取或已有来源元数据，不接受模型输出的图片。历史缺失按无图片读取。无独立 Tags / Cover 列，历史缺失保持兼容。
 - 若某篇作品由多个路径发现，可在 `topic_context` / `evidence` 中保留额外来源关联；首版不增加候选来源关系表。
 

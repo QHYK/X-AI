@@ -70,7 +70,7 @@ async function testSingleAgentRunValidationPersistenceAndResume(): Promise<void>
     return runtimeResult(
       {
         candidates: [
-          candidate('lead-01', 'https://example.test/good'),
+          { ...candidate('lead-01', 'https://example.test/good'), category: 'technology' },
           candidate('lead-02', 'https://example.test/duplicate'),
           candidate('lead-02', 'https://example.test/no-fetch'),
         ],
@@ -99,6 +99,7 @@ async function testSingleAgentRunValidationPersistenceAndResume(): Promise<void>
   assert.equal(db.run.execution_state.d3?.status, 'completed');
   const selected = db.candidates.find((row) => row.path === 'topic' && row.status === 'selected');
   assert.equal(selected?.publication, 'Verified Site');
+  assert.equal(selected?.category, 'technology');
   assert.deepEqual(selected?.evaluation?.tags, [{ zh: '科学方法', en: 'Scientific Method' }]);
   assert.equal(
     ((selected?.evidence?.fetch as Record<string, unknown>)?.coverImage as { source?: string })
@@ -106,8 +107,13 @@ async function testSingleAgentRunValidationPersistenceAndResume(): Promise<void>
     'og:image',
   );
 
+  assert.ok(selected);
+  selected.category = null;
+  selected.evaluation = { ...selected.evaluation, categoryManuallySet: true };
   const resumed = await runDiscoveryD3(db as unknown as Pool, RUN_ID, { runtime });
   assert.equal(resumed.skipped, true);
+  assert.equal(selected.category, null, 'Completed Resume preserves an explicit human clear.');
+  assert.equal(selected.evaluation.categoryManuallySet, true);
   assert.equal(calls, 1, 'completed D3 must not call the Agent again');
 }
 
@@ -117,6 +123,7 @@ async function testOpenSourcePersistence(): Promise<void> {
   const output = {
     ...candidate('lead-01', 'https://example.test/open'),
     publication: 'Model Publication',
+    category: 'history',
   };
   const openOutput = Object.fromEntries(
     Object.entries(output).filter(([key]) => key !== 'sourceLeadId'),
@@ -145,6 +152,7 @@ async function testOpenSourcePersistence(): Promise<void> {
     'D5 model publication must not override verified Fetch Metadata.',
   );
   assert.equal(db.candidates[0]?.status, 'selected');
+  assert.equal(db.candidates[0]?.category, 'history');
   assert.equal(db.reviewCandidateIds.size, 1);
 }
 
@@ -471,6 +479,7 @@ function runtimeResult(output: unknown, fetches: DiscoveryFetchResult[]) {
 }
 
 type FakeCandidate = {
+  category?: unknown;
   id: string;
   path: 'direct' | 'topic';
   normalizedUrl: string | null;
@@ -571,6 +580,7 @@ class FakeD3Pool {
         path: 'topic',
         normalizedUrl: values[6] === null ? null : String(values[6]),
         status: String(values[19]),
+        category: values[20],
         evidence: JSON.parse(String(values[17])) as Record<string, unknown>,
         publication: values[10],
         evaluation: JSON.parse(String(values[18])) as Record<string, unknown>,

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import { readFile } from 'node:fs/promises';
-import { createElement } from 'react';
+import { act, createElement } from 'react';
+import { IN_DEPTH_CATEGORIES, IN_DEPTH_CATEGORY_LABELS } from '../src/lib/in-depth-category.js';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { JSDOM } from 'jsdom';
 import type { InDepthReviewItem } from '../src/lib/in-depth-reads.js';
@@ -178,6 +179,79 @@ for (const [discoveryPath, stage] of [
   assert.equal(meta['Processing Stage'], stage);
   assert.equal(meta.Source, 'example.test');
   result.window.close();
+}
+// Exercise the real Review component: independent autosave, pending lock, NULL and retry.
+const interactive = new JSDOM('<div id="root"></div>', {
+  url: 'http://localhost:3000/ai/review/in-depth',
+});
+Object.assign(globalThis, {
+  window: interactive.window,
+  document: interactive.window.document,
+  HTMLElement: interactive.window.HTMLElement,
+  IS_REACT_ACT_ENVIRONMENT: true,
+});
+const { createRoot } = await import('react-dom/client');
+const root = createRoot(document.getElementById('root')!);
+const requests: Array<Record<string, unknown>> = [];
+let respond: (value: Response) => void = () => {};
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options) => {
+  assert.equal(url, '/ai/api/admin/review/in-depth');
+  assert.equal(options?.method, 'PATCH');
+  requests.push(JSON.parse(String(options?.body)));
+  return new Promise<Response>((resolve) => {
+    respond = resolve;
+  });
+};
+try {
+  await act(async () => {
+    root.render(
+      createElement(
+        AppRouterContext.Provider,
+        { value: { refresh() {} } as never },
+        createElement(InDepthReviewClient, { initialItems: [item], status: 'pending' }),
+      ),
+    );
+  });
+  const select = () => document.querySelector<HTMLSelectElement>('select[aria-label="Category"]')!;
+  assert.equal(select().options.length, 8);
+  assert.deepEqual(
+    Array.from(select().options).map((option) => option.value),
+    ['', ...IN_DEPTH_CATEGORIES],
+  );
+  assert.equal(select().value, '');
+  for (const category of [...IN_DEPTH_CATEGORIES, null]) {
+    await act(async () => {
+      select().value = category ?? '';
+      select().dispatchEvent(new interactive.window.Event('change', { bubbles: true }));
+    });
+    assert.deepEqual(requests.at(-1), { id: item.id, action: 'category', category });
+    assert.equal(select().disabled, true);
+    await act(async () => {
+      respond(Response.json({ item: { ...item, category } }));
+    });
+    assert.equal(select().disabled, false);
+    assert.equal(select().value, category ?? '');
+    if (category)
+      assert.equal(select().selectedOptions[0]?.textContent, IN_DEPTH_CATEGORY_LABELS[category]);
+    assert.match(document.body.textContent ?? '', /Category saved/);
+  }
+  await act(async () => {
+    select().value = 'history';
+    select().dispatchEvent(new interactive.window.Event('change', { bubbles: true }));
+  });
+  await act(async () => {
+    respond(Response.json({ error: 'Save failed' }, { status: 500 }));
+  });
+  assert.equal(select().value, '');
+  assert.equal(select().disabled, false);
+  assert.match(document.body.textContent ?? '', /Save failed/);
+} finally {
+  await act(async () => {
+    root.unmount();
+  });
+  interactive.window.close();
+  globalThis.fetch = originalFetch;
 }
 console.log(
   'In-depth full title, bilingual Tags, read-only metadata, image proportions and legacy empty state passed.',

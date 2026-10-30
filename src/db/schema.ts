@@ -459,6 +459,7 @@ export const discoveryCandidates = pgTable(
     sourceContentId: uuid('source_content_id'),
     sourceLeadId: text('source_lead_id'),
     topicContext: jsonb('topic_context').$type<Record<string, unknown>>(),
+    category: text('category'),
     url: text('url').notNull(),
     normalizedUrl: text('normalized_url'),
     title: text('title'),
@@ -478,6 +479,10 @@ export const discoveryCandidates = pgTable(
   },
   (table) => [
     index('discovery_candidates_run_path_idx').on(table.runId, table.discoveryPath),
+    check(
+      'discovery_candidates_category_check',
+      sql`${table.category} is null or ${table.category} in ('technology', 'business', 'math_physics', 'life_chemistry', 'earth_environment', 'history', 'social_culture')`,
+    ),
     index('discovery_candidates_run_lead_idx').on(table.runId, table.sourceLeadId),
     index('discovery_candidates_normalized_url_idx').on(table.normalizedUrl),
     check(

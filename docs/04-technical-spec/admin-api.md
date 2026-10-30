@@ -136,6 +136,12 @@ Analytics 的 Ignored Articles 提供 Put Back，调用 `POST /api/admin/dashboa
 
 In-depth Review 区分客观元数据、Agent 诊断与可编辑 Editorial；Discovery Path、处理阶段、Candidate ID 与 Run ID 不混用。Tags / Cover 缺失保持历史兼容，不影响审核。字段见 [Data Model](../05-data-model/discovery.md#discovery_candidates)，Source 规则见 [Discovery §5.1](discovery.md#51-candidate-source-归一化)；具体布局以页面实现为准。
 
+#### In-depth Category
+
+Review 通过现有 `PATCH /api/admin/review/in-depth` 独立提交 `{id, action: "category", category}`；`id` 是 Review Item ID，`category` 为合法枚举或 `null`。沿用 Admin Session、同源与请求校验；仅更新关联 Candidate 的分类、人工标记及更新时间，不修改审核状态、Notes、Tags 或 Editorial。公开 API 返回 `category` / `categoryLabel`，未分类为 null，Xfield 不展示其 Badge，Approved 发布边界不变。
+
+人工修改与标记在同一 SQL 中原子写入；D4 / Manual 的 AI UPDATE 在 SQL 层检查当前行标记，`evaluation` 使用合并 / 局部更新，避免模型调用期间的人工修改被覆盖。D3 / D5 仅插入新候选，不 Upsert 替换已有候选。字段及人工优先级的权威定义见 [discovery_candidates](../05-data-model/discovery.md#discovery_candidates)。
+
 #### Digest Put Back
 
 业务执行与失败恢复见 [Manual Operations §2](../06-workflow-spec/manual-operations.md#2-digest-put-back)。`src/lib/digest-put-back.ts` 与 Stage3 排名写入遵守以下技术约束：

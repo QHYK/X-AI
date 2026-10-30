@@ -7,6 +7,7 @@ import {
   logPromptError,
 } from './prompts/runtime.js';
 import { z } from 'zod';
+import { InDepthCategorySchema, parseAiCategory } from './in-depth-category.js';
 import type { Pool } from 'pg';
 import {
   getOrFetchArticle,
@@ -61,9 +62,10 @@ export const ManualCandidateInput = z
   })
   .strict();
 
-const ManualOutputSchema = EditorialIntroductionSchema.extend({
+export const ManualOutputSchema = EditorialIntroductionSchema.extend({
   title_zh: z.string().min(1).max(2000),
   tags: DiscoveryTagsTransportSchema,
+  category: InDepthCategorySchema.nullable().optional(),
 }).strict();
 
 type MetadataRow = {
@@ -373,7 +375,9 @@ export async function generateManualInDepthIntroduction(
           format: {
             type: 'json_schema',
             name: 'manual_in_depth',
-            schema: z.toJSONSchema(ManualOutputSchema),
+            schema: z.toJSONSchema(
+              ManualOutputSchema.extend({ category: InDepthCategorySchema.nullable() }),
+            ),
             strict: true,
           },
         },
@@ -417,9 +421,12 @@ export async function generateManualInDepthIntroduction(
     await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
       `manual-generate:${id}`,
     ]);
+    // Check the current row inside UPDATE: a human edit during the model request must win.
     const candidate = await client.query(
       `update discovery_candidates set title_zh = $2, summary = $3, why_worth_reading = $4,
-         status = 'evaluated', evaluation = coalesce(evaluation, '{}'::jsonb) || $5::jsonb, updated_at = now()
+         status = 'evaluated', evaluation = coalesce(evaluation, '{}'::jsonb) || $5::jsonb,
+         category = case when evaluation @> '{"categoryManuallySet":true}'::jsonb
+           then category else coalesce($6::text, category) end, updated_at = now()
         where id = $1::uuid`,
       [
         row.candidate_id,
@@ -427,6 +434,7 @@ export async function generateManualInDepthIntroduction(
         generated.summary,
         generated.whyWorthReading,
         JSON.stringify({ tags, manualGenerated: true }),
+        parseAiCategory(output.category),
       ],
     );
     if (candidate.rowCount !== 1) throw new Error('Candidate disappeared.');

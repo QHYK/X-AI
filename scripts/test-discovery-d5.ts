@@ -18,6 +18,7 @@ const candidate = {
   evidence: '正文中的具体论证',
   limitations: '',
   tags: [{ zh: '科学方法', en: 'Scientific Method' }],
+  category: 'earth_environment',
   extra_info: '{}',
 };
 
@@ -98,6 +99,7 @@ async function testD5Persistence() {
   const good = await run(db);
   assert.equal(good.selectedCount, 1);
   assert.equal(good.endReason, 'candidates_found');
+  assert.equal(db.candidates[0]?.category, 'earth_environment');
   assert.equal(db.run.execution_state.d5.endReason, good.endReason);
   const queued = await listInDepthReviewItems(db as unknown as import('pg').Pool);
   assert.equal(queued.length, 1);
@@ -105,6 +107,7 @@ async function testD5Persistence() {
   assert.equal(queued[0].reviewStatus, 'pending');
   const resumed = await run(db);
   assert.equal(resumed.skipped, true);
+  assert.equal(db.candidates[0]?.category, 'earth_environment');
   assert.equal(db.calls, 1);
   assert.equal(db.candidates.length, 1);
   assert.equal(db.review.size, 1);
@@ -160,6 +163,7 @@ async function testD5Persistence() {
 }
 
 type StoredCandidate = {
+  category: string | null;
   id: string;
   runId: string;
   url: string;
@@ -243,6 +247,7 @@ class D5Database {
         normalizedUrl: String(values[6]),
         publication: String(values[10]),
         status: String(values[19]),
+        category: (values[20] as string | null) ?? null,
       });
       return { rows: [], rowCount: 1 };
     }

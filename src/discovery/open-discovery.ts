@@ -1,5 +1,6 @@
 import { withPromptBindings, databasePromptBinder } from '../lib/prompts/runtime.js';
 import { productionPrompt } from '../lib/prompts/runtime.js';
+import { InDepthCategorySchema, parseAiCategory } from '../lib/in-depth-category.js';
 // D5 Open Discovery. It deliberately reuses D3's fetch, tracing and candidate
 // persistence boundary while keeping the no-Lead output contract explicit.
 import type { Pool } from 'pg';
@@ -62,6 +63,7 @@ const D5CandidateTransportSchema = z
     evidence: z.string().min(1),
     limitations: z.string(),
     tags: DiscoveryTagsTransportSchema,
+    category: InDepthCategorySchema.nullable().optional(),
     extra_info: z.string(),
   })
   .strict();
@@ -235,6 +237,7 @@ export function validateDiscoveryD5Output(output: unknown): DiscoveryAgentCandid
     evidence: candidate.evidence,
     limitations: candidate.limitations,
     tags: DiscoveryTagsSchema.parse(candidate.tags),
+    category: parseAiCategory(candidate.category),
     extraInfo: parseExtraInfo(candidate.extra_info),
   }));
 }

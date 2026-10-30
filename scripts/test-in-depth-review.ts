@@ -51,6 +51,14 @@ const db = {
     queries.push(sql);
     if (sql === 'select name, url from sources order by name')
       return { rows: [{ name: 'Example configured', url: 'https://example.com/rss' }] };
+    if (sql.startsWith('update discovery_candidates dc')) {
+      assert.match(sql, /categoryManuallySet/);
+      const row = rows.find((candidate) => candidate.id === params[0]);
+      if (!row) return { rows: [] };
+      row.category = params[1] as InDepthReviewItem['category'];
+      row.evaluation = { ...row.evaluation, categoryManuallySet: true };
+      return { rows: [{ id: row.candidateId }] };
+    }
     if (sql.startsWith('update in_depth_candidates')) {
       const row = rows.find((candidate) => candidate.id === params[0]);
       if (!row) return { rows: [] };
@@ -156,6 +164,16 @@ assert.equal(rows[0]!.reviewStatus, 'approved');
 const publicRow = (await listPublishedInDepthReads(db)).find((row) => row.id === firstId)!;
 assert.equal(displayInDepthFields(publicRow).summary, '更新的 Markdown');
 const publicPayload = toPublicInDepthRead(publicRow);
+const beforeCategory = structuredClone(rows[0]!);
+for (const category of ['technology', null] as const) {
+  const updated = await updateInDepthReviewItem(db, { id: firstId, action: 'category', category });
+  assert.equal(updated?.category, category);
+  assert.equal(updated?.evaluation?.categoryManuallySet, true);
+  assert.equal(updated?.reviewStatus, beforeCategory.reviewStatus);
+  assert.equal(updated?.editorialNotes, beforeCategory.editorialNotes);
+  assert.deepEqual(updated?.editorialOverrides, beforeCategory.editorialOverrides);
+  assert.deepEqual(updated?.evaluation?.tags, beforeCategory.evaluation?.tags);
+}
 assert.deepEqual(publicPayload.contentEvidence, ['A real argument']);
 assert.equal(publicPayload.summary, '更新的 Markdown');
 assert.equal(publicPayload.extra_info, '面向读者的具体评估');

@@ -138,6 +138,12 @@ Put Back 部署需通过 `npm run db:migrate` 应用 `0020_digest_put_back.sql` 
 
 原文 Cache 使用 `0017_discovery_fetch_cache.sql`，平铺 Editorial 字段使用 `0018_flatten_in_depth_editorial.sql`；部署前确认这些既有 Migration 已应用。Mock 回归入口见 [§6](#6-regression-tests)。
 
+#### In-depth Category 部署
+
+先核对数据库目标和待执行迁移并备份，使用 `npm run db:migrate` 应用 `0027_in_depth_category.sql`，再部署 / 重启 X-AI-field Web 和 Discovery Worker，最后部署 Xfield。
+
+兼容解析允许旧输出，不保证未维护指导的 Prompt 稳定给出有意义的分类。
+
 ### 2.5 Memory 管理部署
 
 先核对数据库连接目标与待执行迁移，使用现有 `npm run db:migrate` 应用 `0023_memories.sql`，再部署并按既有方式重启 Web。只新增独立管理表，无回填、Seed、Prompt 导入或 Pipeline 操作；接入 Memory Runtime 的代码部署后需按既有方式重启 Discovery Worker；本次 Runtime 无额外 Migration。不要为回滚界面自动删表。管理入口与行为见 [Technical Spec](04-technical-spec/admin-api.md#75-memory-管理)，字段见 [Data Model](05-data-model/memory.md#memories)。
@@ -433,6 +439,7 @@ npm run test:manual-in-depth-ui
 npm run test:in-depth-introduction
 npm run test:in-depth-introduction-ui
 npm run test:in-depth-review
+npm run test:in-depth-category
 npm run test:digest-put-back
 npm run test:digest-put-back-ui
 npm run test:ignored-review

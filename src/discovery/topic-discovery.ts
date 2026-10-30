@@ -1,5 +1,10 @@
 import { withPromptBindings, databasePromptBinder } from '../lib/prompts/runtime.js';
 import { productionPrompt } from '../lib/prompts/runtime.js';
+import {
+  InDepthCategorySchema,
+  parseAiCategory,
+  type InDepthCategory,
+} from '../lib/in-depth-category.js';
 import { resolveDiscoveryPublication } from '../lib/discovery-source.js';
 import { loadDiscoverySources } from '../lib/discovery-source-list.js';
 // D3
@@ -64,6 +69,7 @@ const D3CandidateTransportSchema = z
     evidence: z.string().min(1),
     limitations: z.string(),
     tags: DiscoveryTagsTransportSchema,
+    category: InDepthCategorySchema.nullable().optional(),
     extra_info: z.string(),
   })
   .strict();
@@ -87,6 +93,7 @@ export type DiscoveryD3Candidate = {
   evidence: string;
   limitations: string;
   tags: DiscoveryTag[];
+  category?: InDepthCategory | null;
   extraInfo: Record<string, unknown>;
 };
 
@@ -311,6 +318,7 @@ export function validateDiscoveryD3Output(
       evidence: candidate.evidence,
       limitations: candidate.limitations,
       tags: DiscoveryTagsSchema.parse(candidate.tags),
+      category: parseAiCategory(candidate.category),
       extraInfo: parseExtraInfo(candidate.extra_info),
     };
   });
@@ -515,12 +523,12 @@ export async function validateAndPersistDiscoveryAgentCandidates(
             id, run_id, discovery_path, source_content_type, source_content_id,
             source_lead_id, topic_context, url, normalized_url, title, title_zh,
             author, publication, content_type, published_at, estimated_duration_minutes,
-            summary, why_worth_reading, extra_info, evidence, evaluation, status
+            summary, why_worth_reading, extra_info, evidence, evaluation, status, category
           ) values (
             $1::uuid, $2::uuid, $3, null, null,
             $4, $5::jsonb, $6, $7, $8, $9,
             $10, $11, $12, $13::timestamptz, $14,
-            $15, $16, $17::jsonb, $18::jsonb, $19::jsonb, $20
+            $15, $16, $17::jsonb, $18::jsonb, $19::jsonb, $20, $21
           )`,
         [
           row.id,
@@ -558,6 +566,7 @@ export async function validateAndPersistDiscoveryAgentCandidates(
           }),
           JSON.stringify({ decision: row.decision.reason, tags: row.candidate.tags }),
           row.decision.status,
+          row.candidate.category ?? null,
         ],
       );
       if (row.decision.status === 'selected') {

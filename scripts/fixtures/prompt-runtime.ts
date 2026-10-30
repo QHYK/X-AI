@@ -77,7 +77,7 @@ export class PromptMemory {
       sql.startsWith('update') &&
       (sql.includes('to_jsonb($2::text)') ||
         (sql.includes('$3::jsonb') && Array.isArray(v[1])) ||
-        sql.includes('|| $2::jsonb'))
+        (sql.includes('|| $2::jsonb') && v.length === 2))
     ) {
       if (this.failWrite) throw new Error('Mock binding persistence failed');
       const value = structuredClone(this.owners.get(owner) ?? {});

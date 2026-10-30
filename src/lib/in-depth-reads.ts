@@ -19,11 +19,23 @@ import {
   encodeInDepthCursor,
 } from './in-depth-pagination.js';
 import { z } from 'zod';
+import {
+  InDepthCategorySchema,
+  type InDepthCategory,
+  IN_DEPTH_CATEGORY_LABELS,
+} from './in-depth-category.js';
 
 export const InDepthReviewStatusSchema = z.enum(['pending', 'approved', 'rejected']);
 export type InDepthReviewStatus = z.infer<typeof InDepthReviewStatusSchema>;
 
 const ReviewUpdateSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      id: z.uuid(),
+      action: z.literal('category'),
+      category: InDepthCategorySchema.nullable(),
+    })
+    .strict(),
   z
     .object({ id: z.uuid(), action: z.literal('review'), reviewStatus: InDepthReviewStatusSchema })
     .strict(),
@@ -51,6 +63,7 @@ export function parseInDepthReviewUpdate(value: unknown): InDepthReviewUpdate {
 }
 
 export type InDepthReviewItem = {
+  category?: InDepthCategory | null;
   id: string;
   candidateId: string;
   runId: string | null;
@@ -91,6 +104,7 @@ export type PublishedInDepthRead = Pick<
   | 'originalTitle'
   | 'titleZh'
   | 'author'
+  | 'category'
   | 'publishedAt'
   | 'publication'
   | 'contentType'
@@ -122,7 +136,7 @@ const REVIEW_COLUMNS = `
   idc.created_at::text as "createdAt", dc.created_at::text as "candidateCreatedAt",
   dc.discovery_path as "discoveryPath", dc.url,
   dc.title as "originalTitle", dc.title_zh as "titleZh", dc.author, dc.published_at::text as "publishedAt",
-  dc.publication, dc.content_type as "contentType",
+  dc.category, dc.publication, dc.content_type as "contentType",
   dc.estimated_duration_minutes as "estimatedDurationMinutes",
   dc.summary, dc.why_worth_reading as "whyWorthReading",
   dc.evidence, dc.evaluation, dc.extra_info as "extraInfo",
@@ -173,7 +187,7 @@ export async function listPublishedInDepthReads(
             to_char(idc.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "cursorCreatedAt",
             idc.reviewed_at::text as "reviewedAt", dc.url,
             dc.discovery_path as "discoveryPath", dc.title as "originalTitle",
-            dc.title_zh as "titleZh", dc.author, dc.publication,
+            dc.title_zh as "titleZh", dc.author, dc.publication, dc.category,
             dc.published_at::text as "publishedAt",
             dc.content_type as "contentType",
             dc.estimated_duration_minutes as "estimatedDurationMinutes",
@@ -249,6 +263,18 @@ export async function updateInDepthReviewItem(
   value: InDepthReviewUpdate,
 ): Promise<InDepthReviewItem | null> {
   const input = parseInDepthReviewUpdate(value);
+  if (input.action === 'category') {
+    const updated = await db.query<{ id: string }>(
+      `update discovery_candidates dc
+         set category = $2::text,
+             evaluation = coalesce(dc.evaluation, '{}'::jsonb) || '{"categoryManuallySet":true}'::jsonb,
+             updated_at = now()
+        from in_depth_candidates idc
+        where idc.id = $1::uuid and dc.id = idc.discovery_candidate_id returning dc.id`,
+      [input.id, input.category],
+    );
+    return updated.rows[0] ? getInDepthReviewItem(db, input.id) : null;
+  }
   if (input.action === 'editorial') {
     return (await saveInDepthEditorial(db, input.id, input, input.baseline))
       ? getInDepthReviewItem(db, input.id)
@@ -350,6 +376,8 @@ export function toPublicInDepthRead(item: PublishedInDepthRead) {
     author: display.author,
     publication: item.publication,
     contentType: item.contentType,
+    category: item.category ?? null,
+    categoryLabel: item.category ? IN_DEPTH_CATEGORY_LABELS[item.category] : null,
     estimatedDurationMinutes: item.estimatedDurationMinutes,
     publishedAt: item.publishedAt ?? null,
     tags: item.tags ?? [],

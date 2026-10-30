@@ -1,5 +1,10 @@
 import { withPromptBindings, databasePromptBinder } from '../lib/prompts/runtime.js';
 import { productionPrompt } from '../lib/prompts/runtime.js';
+import {
+  IN_DEPTH_CATEGORIES,
+  parseAiCategory,
+  type InDepthCategory,
+} from '../lib/in-depth-category.js';
 import { loadDiscoverySources } from '../lib/discovery-source-list.js';
 import { publicationFromMetadata, resolveDiscoveryPublication } from '../lib/discovery-source.js';
 // D4
@@ -56,6 +61,7 @@ export type DiscoveryD4Evaluation = {
   evidence: string[];
   limitations: string[];
   tags: DiscoveryTag[];
+  category?: InDepthCategory | null;
   extraInfo: Record<string, unknown>;
 };
 
@@ -164,6 +170,7 @@ export const discoveryD4OutputJsonSchema = {
           'evidence',
           'limitations',
           'tags',
+          'category',
           'extra_info',
         ],
         properties: {
@@ -179,6 +186,7 @@ export const discoveryD4OutputJsonSchema = {
           evidence: { type: 'array', items: { type: 'string' } },
           limitations: { type: 'array', items: { type: 'string' } },
           tags: discoveryTagsJsonSchema,
+          category: { type: ['string', 'null'], enum: [...IN_DEPTH_CATEGORIES, null] },
           extra_info: {
             type: 'string',
             description: 'A JSON-serialized object. Use "{}" when no extra information applies.',
@@ -376,7 +384,7 @@ async function executeDiscoveryD4(
                  then estimated_duration_minutes else $2 end,
                evidence = coalesce(evidence, '{}'::jsonb) || $3::jsonb,
                status = coalesce($4::text, status),
-               evaluation = case when $4::text is null then evaluation else $5::jsonb end,
+               evaluation = case when $4::text is null then evaluation else coalesce(evaluation, '{}'::jsonb) || $5::jsonb end,
                updated_at = now()
          where id = $1::uuid and status = 'discovered'`,
         [
@@ -572,6 +580,7 @@ export function parseAndValidateDiscoveryD4Output(
         'evidence',
         'limitations',
         'tags',
+        'category',
         'extra_info',
         'title_zh',
         'summary',
@@ -620,6 +629,7 @@ export function parseAndValidateDiscoveryD4Output(
       evidence: requireStringArray(evaluation.evidence, 'evidence'),
       limitations: requireStringArray(evaluation.limitations, 'limitations'),
       tags: DiscoveryTagsSchema.parse(evaluation.tags),
+      category: parseAiCategory(evaluation.category),
       extraInfo: normalizeExtraInfo(evaluation.extra_info),
     };
   });
@@ -910,10 +920,13 @@ async function persistD4Evaluations(
       };
       const status = evaluation.decision === 'qualified' ? 'evaluated' : evaluation.decision;
       await client.query(
+        // Merge evaluation to retain human flags; Category protection is atomic with the write.
         `update discovery_candidates
-          set evaluation = $2::jsonb, evidence = $3::jsonb,
+          set evaluation = coalesce(evaluation, '{}'::jsonb) || $2::jsonb, evidence = $3::jsonb,
               extra_info = $4::jsonb, status = $5,
-              title_zh = $6, summary = $7, why_worth_reading = $8, updated_at = now()
+              title_zh = $6, summary = $7, why_worth_reading = $8,
+              category = case when evaluation @> '{"categoryManuallySet":true}'::jsonb
+                then category else coalesce($9::text, category) end, updated_at = now()
           where id = $1::uuid and status = 'discovered'`,
         [
           evaluation.candidateId,
@@ -928,6 +941,7 @@ async function persistD4Evaluations(
           evaluation.titleZh || null,
           evaluation.summary || null,
           evaluation.whyWorthReading || null,
+          evaluation.category ?? null,
         ],
       );
     }
