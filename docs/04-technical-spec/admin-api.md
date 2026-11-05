@@ -49,6 +49,8 @@ Dashboard 的 Prompt 版本展示按各阶段已保存的精确 UUID 批量关�
 
 Dashboard 是只读观察入口和显式管理操作入口，不是业务 Source of Truth；状态、Usage 或 Job Report 缺失时保持未知，不能从当前内容反推出历史执行成功。Evaluation 与正式结果隔离；Editorial、审核状态和 Notes 各自保存，不借一个 action 隐式修改其他控制对象。
 
+Digest 公开条目附带 `imageUrl: string | null`，由 `processed_contents.raw_article_id` 关联的 `raw_articles.image_url` 提供；仅接受绝对 HTTP(S) URL（不含凭据），缺失或非法返回 null。Xfield 使用固定 4:3 缩略图区域，缺图或加载失败显示中性占位；不补抓图片，不改变 Digest 成员、分类及排序，Event / Long-form 结构不变。
+
 ## 6. API 与展示边界
 
 下列定义跨项目 API 和重要错误 / 一致性边界；完整字段校验由实际 Route 与服务维护，不复制全部 Endpoint Schema。

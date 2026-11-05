@@ -4,27 +4,35 @@ import type { Pool } from 'pg';
 import { getDailyBriefForDailyDate } from '../src/lib/daily-brief.js';
 
 const queries: string[] = [];
+const images = [
+  'https://images.example.test/photo.jpg',
+  null,
+  '',
+  'javascript:alert(1)',
+  '/relative.jpg',
+  'https://user:secret@example.test/a.jpg',
+  'http://example.test/a.jpg',
+];
 const pool = {
   query: async (text: string) => {
     queries.push(text);
     if (text.includes("pc.routing = 'digest'"))
       return {
-        rows: [
-          {
-            id: 'digest-1',
-            rank: 1,
-            title: 'Digest',
-            title_zh: null,
-            summary: null,
-            summary_zh: null,
-            category: 'Technology',
-            source: 'Source',
-            url: null,
-            published_at: null,
-            created_at: '2026-10-10T00:00:00.000Z',
-            hasFullContent: true,
-          },
-        ],
+        rows: images.map((image_url, index) => ({
+          image_url,
+          id: `digest-${index + 1}`,
+          rank: 1,
+          title: 'Digest',
+          title_zh: null,
+          summary: null,
+          summary_zh: null,
+          category: 'Technology',
+          source: 'Source',
+          url: null,
+          published_at: null,
+          created_at: '2026-10-10T00:00:00.000Z',
+          hasFullContent: true,
+        })),
       };
     if (text.includes("pc.routing = 'long_form'"))
       return {
@@ -50,6 +58,19 @@ const pool = {
 } as Pool;
 
 const brief = await getDailyBriefForDailyDate(pool, '2026-10-10');
+assert.deepEqual(
+  brief.digests.Technology.map((item) => item.imageUrl),
+  [images[0], null, null, null, null, null, images[6]],
+);
+assert.deepEqual(
+  brief.digests.Technology.map((item) => item.id),
+  images.map((_, i) => `digest-${i + 1}`),
+);
+assert.ok(!('imageUrl' in brief.long_form[0]), 'Long-form structure remains unchanged');
+const digestQuery = queries.filter((q) => q.includes("pc.routing = 'digest'"));
+assert.equal(digestQuery.length, 1, 'Images must not cause per-article queries');
+assert.ok(digestQuery[0].includes('ra.image_url'));
+assert.ok(digestQuery[0].includes('ra.id = pc.raw_article_id'));
 const contentQueries = queries.filter((query) => query.includes('content_read_more'));
 const passed =
   brief.digests.Technology?.[0]?.has_full_content === true &&

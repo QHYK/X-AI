@@ -58,6 +58,10 @@ export type BriefContentItem = {
   has_full_content: boolean;
 };
 
+export type BriefDigestItem = BriefContentItem & {
+  imageUrl: string | null;
+};
+
 export type BriefInspirationItem = Omit<BriefContentItem, 'rank' | 'has_full_content'> & {
   image_url: string | null;
 };
@@ -67,7 +71,7 @@ export type DailyBriefResponse = {
   /** Published is authoritative; partial is a draft-only fallback, never a mixed set. */
   events_status: 'published' | 'partial' | 'empty';
   events: BriefEvent[];
-  digests: Record<string, BriefContentItem[]>;
+  digests: Record<string, BriefDigestItem[]>;
   long_form: BriefContentItem[];
   inspiration: BriefInspirationItem[];
   meta: {
@@ -316,8 +320,8 @@ async function loadEventSources(
 async function loadDigestItems(
   pool: DailyBriefQueryable,
   range: ShanghaiDayRange,
-): Promise<Record<string, BriefContentItem[]>> {
-  const result = await pool.query<ContentRow>(
+): Promise<Record<string, BriefDigestItem[]>> {
+  const result = await pool.query<ContentRow & { image_url: string | null }>(
     `
       select
         pc.id,
@@ -329,6 +333,7 @@ async function loadDigestItems(
         pc.category,
         s.name as source,
         ra.url,
+        ra.image_url,
         ra.published_at,
         pc.created_at,
         ${readMoreAvailabilitySql()} as "hasFullContent"
@@ -347,7 +352,10 @@ async function loadDigestItems(
   const digests = createEmptyDigests();
   for (const row of result.rows) {
     digests[row.category] ??= [];
-    digests[row.category].push(toBriefContentItem(row));
+    digests[row.category].push({
+      ...toBriefContentItem(row),
+      imageUrl: normalizeDigestImageUrl(row.image_url),
+    });
   }
 
   return digests;
@@ -429,7 +437,7 @@ async function loadInspirationItems(
   }));
 }
 
-function createEmptyDigests(): Record<string, BriefContentItem[]> {
+function createEmptyDigests(): Record<string, BriefDigestItem[]> {
   return Object.fromEntries(DIGEST_CATEGORY_KEYS.map((category) => [category, []]));
 }
 
@@ -467,4 +475,22 @@ function toIsoString(value: Date | string | null): string | null {
   }
 
   return new Date(value).toISOString();
+}
+
+/** Only absolute HTTP(S) image URLs are exposed to the public Digest. */
+function normalizeDigestImageUrl(value: string | null | undefined): string | null {
+  if (!value?.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      !url.hostname ||
+      url.username ||
+      url.password
+    )
+      return null;
+    return url.href;
+  } catch {
+    return null;
+  }
 }
