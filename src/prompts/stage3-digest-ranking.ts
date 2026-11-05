@@ -11,6 +11,9 @@ export type Stage3DigestRankingInput = {
   candidates: Stage3DigestRankingCandidate[];
 };
 export const STAGE3_DIGEST_RANKING_PROMPT_VERSION = 'v3';
-export function buildStage3DigestRankingUserPrompt(input: Stage3DigestRankingInput): string {
-  return JSON.stringify(input, null, 2);
+export function buildStage3DigestRankingUserPrompt(
+  input: Stage3DigestRankingInput,
+  memoryContext?: string,
+): string {
+  return JSON.stringify({ ...input, ...(memoryContext ? { memory: memoryContext } : {}) }, null, 2);
 }

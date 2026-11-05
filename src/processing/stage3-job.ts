@@ -1,3 +1,4 @@
+import { getActiveMemories, formatMemories } from '../lib/memories.js';
 import { productionPrompt } from '../lib/prompts/runtime.js';
 import { readSystemFragmentFile } from '../lib/prompts/run-file.js';
 import {
@@ -279,9 +280,7 @@ export async function processStage3(
   } catch (error) {
     console.error('Failed to observe Runtime directory.', error);
   }
-  return withFilePrompts(pool, path, () =>
-    processStage3Bound(pool, options, startedAt),
-  );
+  return withFilePrompts(pool, path, () => processStage3Bound(pool, options, startedAt));
 }
 async function processStage3Bound(
   pool: Pool,
@@ -341,6 +340,7 @@ async function processStage3Bound(
   try {
     if (!options.pipelineRunId)
       throw new Error('Stage3 requires a durable pipeline_runs ID before ranking.');
+    const memoryContext = formatMemories(await getActiveMemories(pool, { types: ['content'] }));
     categoryCorrections = await correctInvalidDigestCategories(pool, dailyDate);
     warningCount += categoryCorrections.length;
     if (categoryCorrections.length) {
@@ -374,7 +374,7 @@ async function processStage3Bound(
         : null;
     const eventRanking =
       reusableEvent ??
-      (await (options.rankers?.events ?? rankEvents)(eventBundle.input, { model }));
+      (await (options.rankers?.events ?? rankEvents)(eventBundle.input, { model, memoryContext }));
     if (reusableEvent) {
       rankingStatuses.event = 'skipped';
       eventReviewRunId = resume!.eventReviewRunId;
@@ -597,7 +597,10 @@ async function processStage3Bound(
           progress.output_tokens = 0;
           if (artifact) progress.source_run_id = artifact.source_run_id;
         } else {
-          const result = await (options.rankers?.digest ?? rankDigest)(input, { model });
+          const result = await (options.rankers?.digest ?? rankDigest)(input, {
+            model,
+            memoryContext,
+          });
           ({
             warningCount,
             duplicateRankingCount,
@@ -756,7 +759,7 @@ async function processStage3Bound(
         : null;
     const longFormRanking =
       reusableLongForm ??
-      (await (options.rankers?.longForm ?? rankLongForm)(longFormInput, { model }));
+      (await (options.rankers?.longForm ?? rankLongForm)(longFormInput, { model, memoryContext }));
     if (reusableLongForm) {
       rankingStatuses.long_form = 'skipped';
     } else {
@@ -1248,7 +1251,7 @@ function buildLongFormRecords(rows: RankingCandidateRow[]): LongFormRecord[] {
 
 async function rankEvents(
   input: Stage3EventRankingInput,
-  options: { model: string },
+  options: { model: string; memoryContext?: string },
 ): Promise<{
   output: Stage3EventRankedOutput;
   calls: number;
@@ -1306,7 +1309,7 @@ async function rankEvents(
 
 async function rankDigest(
   input: Stage3DigestRankingInput,
-  options: { model: string },
+  options: { model: string; memoryContext?: string },
 ): Promise<{
   output: Stage3RankingOutput;
   calls: number;
@@ -1480,7 +1483,7 @@ async function rankDigest(
 
 async function rankLongForm(
   input: Stage3LongFormRankingInput,
-  options: { model: string },
+  options: { model: string; memoryContext?: string },
 ): Promise<{
   output: Stage3RankingOutput;
   calls: number;

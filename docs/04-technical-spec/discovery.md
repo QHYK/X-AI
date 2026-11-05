@@ -45,9 +45,9 @@ D2–D5 按 Request Key 在首次实际执行前绑定 Published Version，存�
 
 `src/lib/memories.ts` 的 `getActiveMemories(db, { types })` 复用管理端的数据访问与类型，仅读取指定 Type 且 `enabled = true` 的记录，按 `priority DESC, created_at DESC, id DESC` 排序；空 Type 列表返回空结果，不隐式添加 Type。`formatMemories()` 将记录格式化为纯文本数据上下文，空结果返回空字符串。不缓存，读取失败向上抛出，不静默忽略。
 
-当前只有 D2 在每次实际执行、发出模型请求前读取 `general + topic`，通过动态输入 Builder 的独立 `memory` 字段进入最终请求；无记录时完全省略该字段。Memory 是可影响关注方向的编辑偏好，不是强制选题命令，不能覆盖系统规则、Structured Output 或内容质量、来源真实性与原创性标准。它不写入 Published Prompt，不改变 Registry 版本绑定。
+D2 在每次实际执行、发出模型请求前读取 `general + topic`，通过动态输入 Builder 的独立 `memory` 字段进入最终请求；无记录时完全省略该字段。Memory 是可影响关注方向的编辑偏好，不是强制选题命令，不能覆盖系统规则、Structured Output 或内容质量、来源真实性与原创性标准。它不写入 Published Prompt，不改变 Registry 版本绑定。
 
-同次 D2 调用固定使用已读取内容；D2 失败重试可读取最新 Memory，成功后的下游 Resume 直接复用已保存 Selection，不重新读取或执行 D2。没有 Memory Snapshot，不承诺历史 Replay。尚未将此 Runtime 接入 D3/D4/D5 或 Daily；Agent 原有显式 `memory` 输入不等于读取 `memories` 表。
+同次 D2 调用固定使用已读取内容；D2 失败重试可读取最新 Memory，成功后的下游 Resume 直接复用已保存 Selection，不重新读取或执行 D2。没有 Memory Snapshot，不承诺历史 Replay。尚未将此 Runtime 接入 D3/D4/D5；Agent 原有显式 `memory` 输入不等于读取 `memories` 表。
 
 ## 4. AI 调用与 Agent Runtime
 

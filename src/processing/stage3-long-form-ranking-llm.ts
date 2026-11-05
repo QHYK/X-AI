@@ -36,6 +36,7 @@ export type Stage3LongFormRankingLlmOptions = {
   model?: string;
   timeoutMs?: number;
   maxRetries?: number;
+  memoryContext?: string;
 };
 
 export type Stage3LongFormRankingTokenUsage = LlmTokenUsage;
@@ -85,7 +86,7 @@ export async function runStage3LongFormRankingLlm(
   const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
   const prompt = await productionPrompt(
     'daily.stage3.long_form_ranking',
-    buildStage3LongFormRankingUserPrompt(input),
+    buildStage3LongFormRankingUserPrompt(input, options.memoryContext),
   );
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();

@@ -12,9 +12,7 @@ import {
   type Stage1BatchInput,
   type Stage1BatchOutput,
 } from './stage1-contract.js';
-import {
-  buildStage1UserPrompt,
-} from '../prompts/stage1-content-understanding.js';
+import { buildStage1UserPrompt } from '../prompts/stage1-content-understanding.js';
 import {
   createLlmClient,
   resolveLlmModel,
@@ -36,6 +34,7 @@ export type Stage1LlmOptions = {
   model?: string;
   timeoutMs?: number;
   maxRetries?: number;
+  memoryContext?: string;
   onAttempt?: (event: {
     attempt: number;
     provider: LlmProvider;
@@ -78,6 +77,43 @@ export type Stage1TokenUsage = LlmTokenUsage;
 const HTTP_503_RETRY_DELAY_MS = 10_000;
 const MAX_OUTPUT_TOKENS_PER_ARTICLE = 1_200;
 
+/** Shared preparation for production and read-only Prompt previews; no model call. */
+export async function prepareStage1Request(
+  input: Stage1BatchInput,
+  model: string,
+  memoryContext?: string,
+) {
+  const businessInput = buildStage1UserPrompt(input, memoryContext);
+  const prompt = await productionPrompt('daily.stage1.content_understanding', businessInput);
+  const request: Parameters<ReturnType<typeof createLlmClient>['structured']['create']>[0] = {
+    model,
+    ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
+    input: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: prompt.input,
+          },
+        ],
+      },
+    ],
+    max_output_tokens: MAX_OUTPUT_TOKENS_PER_ARTICLE * input.articles.length,
+    store: false,
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'stage1_content_understanding_batch',
+        description: 'Independent Stage 1 results for a batch of articles.',
+        schema: stage1BatchOutputJsonSchema,
+        strict: true,
+      },
+    },
+  };
+  return { request, prompt, businessInput };
+}
+
 /**
  * 处理一个 Stage 1 micro-batch，累计 token 与尝试次数后返回可持久化的验证结果。
  * 明确的 HTTP 503 使用更长等待，但仍受既有 maxRetries 上限约束。
@@ -118,10 +154,7 @@ export async function runStage1BatchLlmForInput(
   let rawOutputText: string | null = null;
   let lastError = 'Unknown Stage 1 LLM failure.';
   let attemptsUsed = 0;
-  const prompt = await productionPrompt(
-    'daily.stage1.content_understanding',
-    buildStage1UserPrompt(input),
-  );
+  const { request, prompt } = await prepareStage1Request(input, model, options.memoryContext);
   let client: ReturnType<typeof createLlmClient>;
   try {
     client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
@@ -152,37 +185,9 @@ export async function runStage1BatchLlmForInput(
     attemptsUsed = attempt;
     const attemptStartedAt = Date.now();
     try {
-      const response = await client.structured.create(
-        {
-          model,
-          ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
-          input: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'input_text',
-                  text: prompt.input,
-                },
-              ],
-            },
-          ],
-          max_output_tokens: MAX_OUTPUT_TOKENS_PER_ARTICLE * input.articles.length,
-          store: false,
-          text: {
-            format: {
-              type: 'json_schema',
-              name: 'stage1_content_understanding_batch',
-              description: 'Independent Stage 1 results for a batch of articles.',
-              schema: stage1BatchOutputJsonSchema,
-              strict: true,
-            },
-          },
-        },
-        {
-          timeout: timeoutMs,
-        },
-      );
+      const response = await client.structured.create(request, {
+        timeout: timeoutMs,
+      });
 
       tokenUsage = mergeLlmTokenUsage(tokenUsage, usageFromProvider(response.usage));
       rawOutputText = response.output_text;

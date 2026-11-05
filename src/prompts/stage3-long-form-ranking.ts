@@ -9,6 +9,9 @@ export type Stage3LongFormRankingInput = {
   candidates: Stage3LongFormRankingCandidate[];
 };
 export const STAGE3_LONG_FORM_RANKING_PROMPT_VERSION = 'v1';
-export function buildStage3LongFormRankingUserPrompt(input: Stage3LongFormRankingInput): string {
-  return JSON.stringify(input, null, 2);
+export function buildStage3LongFormRankingUserPrompt(
+  input: Stage3LongFormRankingInput,
+  memoryContext?: string,
+): string {
+  return JSON.stringify({ ...input, ...(memoryContext ? { memory: memoryContext } : {}) }, null, 2);
 }

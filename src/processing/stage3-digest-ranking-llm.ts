@@ -31,6 +31,7 @@ export type Stage3DigestRankingLlmOptions = {
   model?: string;
   timeoutMs?: number;
   maxRetries?: number;
+  memoryContext?: string;
 };
 
 export type Stage3DigestLlmUsage = {
@@ -131,7 +132,7 @@ export async function runStage3DigestRankingLlm(
   const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
   const prompt = await productionPrompt(
     'daily.stage3.digest_ranking',
-    buildStage3DigestRankingUserPrompt(input),
+    buildStage3DigestRankingUserPrompt(input, options.memoryContext),
     { category: input.category },
   );
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });

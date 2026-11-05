@@ -1,6 +1,19 @@
 <!-- 这里记录一些重要的逻辑和错误处理方式, 以及一些bug修正过程中发现的需要被人类记住的信息 -->
 # Key information
 
+#### 测试 prompt
+``` Bash
+npm run test:prompt -- D2 --dates=2026-11-03,2026-11-04
+npm run test:prompt -- stage1 --date=2026-11-05
+npm run test:prompt -- stage3:event --date=2026-11-05
+```
+
+#### Memory 接入情况
+步骤	简化字段	Memory
+D2	contents: {}	general + topic
+stage1	articles: []	content
+stage3:event	events: []	content
+
 #### stage 3 什么时候失败？
 Ranking	| Invented ID | 重复 ID | 缺失 ID
 Event	|  直接剔除    | 去重	 | 不补齐

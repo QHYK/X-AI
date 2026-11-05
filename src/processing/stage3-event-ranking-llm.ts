@@ -21,9 +21,7 @@ import {
   type Stage3EventRankingIntegrity,
   type Stage3EventRankingOutput,
 } from './stage3-contract.js';
-import {
-  buildStage3EventRankingUserPrompt,
-} from '../prompts/stage3-event-ranking.js';
+import { buildStage3EventRankingUserPrompt } from '../prompts/stage3-event-ranking.js';
 import { resolveStageLlmRuntimeConfig } from './stage-llm-runtime-config.js';
 import {
   emptyLlmTokenUsage,
@@ -38,6 +36,7 @@ export type Stage3EventRankingLlmOptions = {
   model?: string;
   timeoutMs?: number;
   maxRetries?: number;
+  memoryContext?: string;
 };
 
 export type Stage3EventRankingTokenUsage = LlmTokenUsage;
@@ -73,6 +72,43 @@ export type Stage3EventRankingFailure = {
 
 export type Stage3EventRankingResult = Stage3EventRankingSuccess | Stage3EventRankingFailure;
 
+/** Shared preparation for production and read-only Prompt previews; no model call. */
+export async function prepareStage3EventRequest(
+  input: Stage3EventRankingInput,
+  model: string,
+  memoryContext?: string,
+) {
+  const businessInput = buildStage3EventRankingUserPrompt(input, memoryContext);
+  const prompt = await productionPrompt('daily.stage3.event_ranking', businessInput);
+  const request: Parameters<ReturnType<typeof createLlmClient>['structured']['create']>[0] = {
+    model,
+    ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
+    input: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: prompt.input,
+          },
+        ],
+      },
+    ],
+    max_output_tokens: 8_000,
+    store: false,
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'stage3_event_ranking',
+        description: 'Up to 50 most important Stage 3 Event IDs in ranked order.',
+        schema: stage3EventRankingOutputJsonSchema,
+        strict: true,
+      },
+    },
+  };
+  return { request, prompt, businessInput };
+}
+
 /** 调用模型返回最多 50 个 Event Group 的排序，并保留 token 与重试观测。 */
 export async function runStage3EventRankingLlm(
   input: Stage3EventRankingInput,
@@ -85,10 +121,7 @@ export async function runStage3EventRankingLlm(
   const runtimeConfig = resolveStageLlmRuntimeConfig('stage3');
   const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
   const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
-  const prompt = await productionPrompt(
-    'daily.stage3.event_ranking',
-    buildStage3EventRankingUserPrompt(input),
-  );
+  const { request, prompt } = await prepareStage3EventRequest(input, model, options.memoryContext);
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
   const expectedIds = input.events.map((event) => event.id);
@@ -103,37 +136,9 @@ export async function runStage3EventRankingLlm(
     for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
       attemptsUsed = attempt;
       try {
-        const response = await client.structured.create(
-          {
-            model,
-            ...(prompt.instructions ? { instructions: prompt.instructions } : {}),
-            input: [
-              {
-                role: 'user',
-                content: [
-                  {
-                    type: 'input_text',
-                    text: prompt.input,
-                  },
-                ],
-              },
-            ],
-            max_output_tokens: 8_000,
-            store: false,
-            text: {
-              format: {
-                type: 'json_schema',
-                name: 'stage3_event_ranking',
-                description: 'Up to 50 most important Stage 3 Event IDs in ranked order.',
-                schema: stage3EventRankingOutputJsonSchema,
-                strict: true,
-              },
-            },
-          },
-          {
-            timeout: timeoutMs,
-          },
-        );
+        const response = await client.structured.create(request, {
+          timeout: timeoutMs,
+        });
 
         tokenUsage = mergeLlmTokenUsage(tokenUsage, usageFromProvider(response.usage));
         rawOutputText = response.output_text;

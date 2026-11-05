@@ -1,5 +1,5 @@
 import { buildChatCompletionRequest } from '../src/processing/llm-client.js';
-import { displayD2Request } from './preview-d2-input.js';
+import { displayPromptRequest } from './preview-prompt.js';
 import { withPromptBindings } from '../src/lib/prompts/runtime.js';
 import assert from 'node:assert/strict';
 import { getActiveMemories, formatMemories } from '../src/lib/memories.js';
@@ -615,7 +615,7 @@ async function testD2Memories() {
     () => prepareDiscoveryD2Request(pool, input, 'preview-model'),
     { binding: 'active' },
   );
-  const displayed = displayD2Request(prepared, 'openai');
+  const displayed = displayPromptRequest(prepared, 'openai', 'contents');
   const actual = buildChatCompletionRequest('openai', prepared.request);
   const displayedUser = displayed.messages.find((m) => m.role === 'user')!.content as string;
   assert.equal(
@@ -639,14 +639,16 @@ async function testD2Memories() {
     request: { ...prepared.request, input: `Prefix\n${prepared.request.input}\nSuffix` },
   };
   assert.equal(
-    displayD2Request(wrapped, 'openai').messages.find((m) => m.role === 'user')!.content,
+    displayPromptRequest(wrapped, 'openai', 'contents').messages.find((m) => m.role === 'user')!
+      .content,
     `Prefix\n${displayedUser}\nSuffix`,
   );
   assert.throws(
     () =>
-      displayD2Request(
+      displayPromptRequest(
         { ...prepared, request: { ...prepared.request, input: 'not present' } },
         'openai',
+        'contents',
       ),
     /Cannot safely locate/,
   );

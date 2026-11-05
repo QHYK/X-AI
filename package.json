@@ -65,7 +65,7 @@
     "test:dashboard-runtime-ui": "tsx scripts/test-dashboard-runtime-ui.ts",
     "test:pipeline-run-log": "tsx scripts/test-pipeline-run-log.ts",
     "test:discovery-phase1": "tsx scripts/test-discovery-phase1.ts",
-    "test:d2-input": "tsx scripts/preview-d2-input.ts",
+    "test:prompt": "tsx scripts/preview-prompt.ts",
     "test:discovery-phase2": "tsx scripts/test-discovery-phase2.ts",
     "test:discovery-phase3": "tsx scripts/test-discovery-phase3.ts",
     "test:discovery-provider": "tsx scripts/test-discovery-provider.ts",

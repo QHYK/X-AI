@@ -1,3 +1,4 @@
+import { getActiveMemories, formatMemories } from '../lib/memories.js';
 /**
  * Stage 1 Workflow job：加载可重试原始文章、分批调用模型并写入处理结果。
  * 通过 raw_articles 状态与 processed_contents 的唯一约束保证重复运行安全。
@@ -121,12 +122,16 @@ export async function processStage1Batch(
   const batches = createStage1MicroBatches(articles, batchConfig);
   await options.onInitialBatches?.(batches);
 
+  // One read for all micro-batches, splits and provider/internal retries in this execution.
+  const memoryContext = batches.length
+    ? formatMemories(await getActiveMemories(pool, { types: ['content'] }))
+    : '';
   const defaultProvider = options.provider ?? resolveStageLlmProvider('stage1');
   const batchResults = await runWithConcurrency(batches, concurrency, async (batch, index) =>
     processStage1MicroBatch(
       pool,
       batch,
-      { ...options, dailyDate },
+      { ...options, dailyDate, memoryContext },
       0,
       `batch-${String(index + 1).padStart(3, '0')}`,
       null,

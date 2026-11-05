@@ -40,7 +40,7 @@ export async function getActiveMemories(
 /** Plain-text data context; never a replacement for the request's system rules. */
 export function formatMemories(memories: readonly Pick<Memory, 'type' | 'content'>[]): string {
   if (memories.length === 0) return '';
-  return `以下是长期编辑偏好，供当前任务参考：${memories
+  return `以下是编辑偏好，供当前任务参考：${memories
     .map(({ content }) => content)
     .join('；')}`;
 }

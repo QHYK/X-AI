@@ -60,6 +60,10 @@ class Store {
   eventId = randomUUID();
   snapshot: unknown = null;
   released = 0;
+  memoryReads = 0;
+  memoryContent: string | null = 'content preference';
+  memoryReadFails = false;
+  memoryContexts: (string | undefined)[] = [];
   constructor() {
     this.rows.push({
       processedContentId: randomUUID(),
@@ -77,6 +81,29 @@ class Store {
   }
   query = async (sql: string, args: unknown[] = []) => {
     const text = sql.replace(/\s+/g, ' ').trim();
+    if (text.includes('from memories')) {
+      this.memoryReads++;
+      assert.deepEqual(args, [['content']]);
+      assert.ok(text.includes('enabled = true'));
+      assert.ok(text.includes('order by priority desc, created_at desc, id desc'));
+      if (this.memoryReadFails) throw new Error('Mock Memory read failure');
+      return {
+        rows:
+          this.memoryContent === null
+            ? []
+            : [
+                {
+                  id: 'memory',
+                  content: this.memoryContent,
+                  type: 'content',
+                  enabled: true,
+                  priority: 0,
+                  createdAt: '2026-10-20',
+                  updatedAt: '2026-10-20',
+                },
+              ],
+      };
+    }
     if (text === 'begin') {
       this.snapshot = structuredClone({
         rows: this.rows,
@@ -235,7 +262,8 @@ class Store {
     },
   };
   rankers = {
-    events: async (input: { events: { id: string }[] }) => {
+    events: async (input: { events: { id: string }[] }, options: { memoryContext?: string }) => {
+      this.memoryContexts.push(options.memoryContext);
       this.eventCalls++;
       return {
         ...this.metrics,
@@ -249,7 +277,11 @@ class Store {
         },
       };
     },
-    digest: async (input: { category: string; candidates: { id: string }[] }) => {
+    digest: async (
+      input: { category: string; candidates: { id: string }[] },
+      options: { memoryContext?: string },
+    ) => {
+      this.memoryContexts.push(options.memoryContext);
       this.calls.push(input.category);
       assert.ok(categories.includes(input.category), 'Correction before model');
       if (input.category === 'General' && this.generalFails)
@@ -279,7 +311,11 @@ class Store {
         },
       };
     },
-    longForm: async (input: { candidates: { id: string }[] }) => {
+    longForm: async (
+      input: { candidates: { id: string }[] },
+      options: { memoryContext?: string },
+    ) => {
+      this.memoryContexts.push(options.memoryContext);
       this.longCalls++;
       return {
         ...this.metrics,
@@ -339,6 +375,13 @@ try {
     1,
     'Runtime observation failure is logged, not propagated',
   );
+  assert.equal(store.memoryReads, 1);
+  assert.equal(store.memoryContexts.length, 8, 'Event, six Digest categories and Long-form');
+  assert.ok(
+    store.memoryContexts.every(
+      (m) => m === '以下是长期编辑偏好，供当前任务参考：content preference',
+    ),
+  );
   assert.equal(first.status, 'partial');
   assert.equal(first.categoryCorrections.length, 1);
   assert.equal(invalid.category, 'General');
@@ -365,7 +408,15 @@ try {
   store.prompts.active.set(activated.key, activated.id);
   const before = store.calls.length;
   store.generalFails = false;
+  store.memoryContent = 'updated content preference';
+  const beforeContexts = store.memoryContexts.length;
   const second = await store.run(root);
+  assert.equal(store.memoryReads, 2);
+  assert.deepEqual(
+    store.memoryContexts.slice(beforeContexts),
+    ['以下是长期编辑偏好，供当前任务参考：updated content preference'],
+    'Only failed General reexecutes, with fresh Memory',
+  );
   assert.equal(second.status, 'success');
   const secondFile = JSON.parse(await readFile(join(second.runDir, 'run.json'), 'utf8'));
   assert.equal(
@@ -611,6 +662,16 @@ try {
     { status: 'partial', mergeMetrics: true },
   );
   assert.match(finishSql, /metrics=metrics \|\| \$6/);
+  const emptyMemory = new Store();
+  emptyMemory.memoryContent = null;
+  assert.equal((await emptyMemory.run(join(root, 'empty-memory'))).status, 'success');
+  assert.ok(emptyMemory.memoryContexts.every((context) => context === ''));
+  const failedMemory = new Store();
+  failedMemory.memoryReadFails = true;
+  const memoryFailure = await failedMemory.run(join(root, 'failed-memory'));
+  assert.equal(memoryFailure.status, 'failed');
+  assert.match(memoryFailure.error!, /Mock Memory read failure/);
+  assert.equal(failedMemory.memoryContexts.length, 0, 'No ranking on Memory DB failure');
   console.log(
     'PASS Stage3 category recovery: scoped correction, partial independent commits, precise Retry/hash invalidation, durable atomic markers, strict ranks, Event/Long-form reuse and human rank protection',
   );

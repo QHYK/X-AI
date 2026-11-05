@@ -476,7 +476,7 @@ npm run test:fragment-key-references
 
 | 命令 | 参数 / 前提 | 实际用途 |
 |---|---|---|
-| `npm run test:d2-input -- [--dates=YYYY-MM-DD,YYYY-MM-DD]` | 当前数据库；默认取最近两期成功 Daily；只读事务 | 用正式 D2 请求准备与 SDK 参数构造逻辑加载 Active Published Prompt、精确 Fragment 与启用的 general/topic Memory，完整打印 `chat.completions.create` 参数对象和 requestOptions；终端仅将 Daily contents 隐藏为 `{}`，Prompt/Memory 全量可见。无模型调用、Run 创建或数据库写入；请勿将包含编辑偏好的输出随意公开 |
+| `npm run test:prompt -- D2 / stage1 / stage3:event [--dates=YYYY-MM-DD,YYYY-MM-DD]` | 当前数据库，只读事务 | 统一打印 `chat.completions.create parameters` 和 `requestOptions`，读取当前 Active Published Request / Fragment 及该步骤适用的 Memory。仅打印时将 D2 `contents` 清空为 `{}`，Stage1 `articles`、Stage3 `events` 清空为 `[]`，其余参数不变。D2 默认最近两期成功 Daily，可用 `--dates=YYYY-MM-DD,YYYY-MM-DD`；Daily 默认最近已结束 Scope，可用 `--date=YYYY-MM-DD`。Stage1 读取该 Scope 全部 Raw（包括已处理）并预览第一个 micro-batch，沿用其 Provider 分配；不代表历史 Run 回放。无模型调用、Run / Trace 创建或数据库写入。输出包含完整 Prompt/Memory，请勿随意公开；后续步骤统一维护 `scripts/preview-prompt.ts` |
 | `npm run test:discovery-phase1` | 仅使用独立测试数据库；脚本会加载 `.env.local` / `.env` 的 `DATABASE_URL` | Mock 适配器 / Run 生命周期，并在有连接配置时创建隔离 Schema、执行 Migration 和写入测试数据，最终回滚；无 URL 时数据库部分跳过，不算通过 |
 | `npm run test:stage4-persistence` | 必须是独立测试数据库，包含所需表及 Event 输入记录；脚本会加载 `.env` / `.env.local`，后者可覆盖 Shell 配置 | 对真实表执行 Event 持久化、替换与跨日保护检查，事务最终回滚；不能因回滚就使用生产数据库 |
 | `npm run test:prompt-registry` | 显式设置独立测试库 `PROMPT_REGISTRY_TEST_DATABASE_URL`；无此变量仅跑 §6 的 Mock 部分 | 在隔离 Schema 验证 PostgreSQL 约束、事务及导入幂等性，结束回滚；未提供 URL 的 skip 不算真实验收通过 |

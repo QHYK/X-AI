@@ -15,6 +15,12 @@
 
 业务编排在 `src/processing/*-job.ts` 与 Daily CLI，HTTP / Review 复用业务服务；不在 UI 维护第二套 Pipeline。Prompt 通过数据库 Published Version 加载，Schema、模型参数与工具由代码管理，通用边界见 [Architecture §5](architecture.md#5-llm-integration)。
 
+### Content Memory
+
+Stage1 / Stage3 复用 [Memory Runtime](discovery.md#memory-runtime)，仅查询启用的 `content` Type。每次 Stage 执行读取、格式化一次，以独立 `memory` 字段加入动态 User Input。每次模型调用的自动重试复用已构造请求，不重复追加 Memory；空结果不增加字段，读取失败明确失败且不调用模型。
+
+Memory 不写入 Published Prompt，也不保存历史 Snapshot。重新执行时允许读取当前 Memory。Evaluation 复用调用层时不自动查询 Memory。
+
 ## 2. Event Group、Review 与最终 Event
 
 ```text
