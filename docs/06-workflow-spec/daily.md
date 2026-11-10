@@ -156,7 +156,7 @@ raw_articles
 
 不同 Collector 最终必须输出统一 Raw Article 结构。
 
-当前正式实现以 RSS Collector 为主。
+当前正式实现以 RSS/Gmail Collector 为主。
 
 ### 3.2 Source Selection
 
@@ -185,12 +185,14 @@ source_id + source_item_origin_id
 ```text
 RSS GUID
 Atom ID
-Gmail Message ID
+Email module identity
 ```
 
 没有稳定 item ID 时，再使用 URL 等稳定字段。
 
 确定为同一 Source Item 的内容不再次插入 `raw_articles`。
+
+Newsletter 以人工验收的 Source-guided Selection 为唯一切分规则；人工标注不参与解析。同一邮件的各模块分别入库，模块身份见 [Raw Article](../05-data-model/daily.md#source_item_origin_id)。Email 写入入口在同一事务中锁定已有 Source 行、检查模块身份并插入，不按 URL 合并模块；该串行化要求并发写入者均通过此入口，数据库没有对应 UNIQUE 约束。解析规则或原文改变可能改变模块 ID，不自动覆盖既有记录。当前仅提供显式写入边界与离线验证，未接入 Gmail 定时采集。
 
 ---
 
@@ -234,6 +236,8 @@ FT: Fed ...
 
 这些必须全部保留，交给 Stage 2 判断是否属于同一 Event。
 
+Newsletter `non_content` 不参与候选或历史参考去重；`standalone_content` 按模块身份处理，不因标题或引用 URL 与 RSS 相同而合并。`external_reference` 继续使用既有 URL / title exact dedup，不另建 URL 解析或重定向去重系统。
+
 ---
 
 ## 5. Content Completion
@@ -263,6 +267,8 @@ content sufficient?
 ### 5.2 Eligibility
 
 只有正文不足且具有可抓取 URL 的 Raw Article 才需要进入正文补全。
+
+所有持久化 Source 的 `collection_method = Email`（忽略大小写及首尾空白）均跳过 Content Completion；不抓取邮件中的外部链接、不覆盖邮件正文。非 Email 的 `non_content` 同样不补全，其余来源行为不变。
 
 典型情况：
 
@@ -346,6 +352,8 @@ raw_articles.stage1_status IN ("pending", "failed")
 ```
 
 并满足当前执行的时间范围。
+
+在查询、LIMIT 和分批之前排除持久化 `metadata.newsletter.content_type = non_content`；Evaluation 输入读取同样排除。`standalone_content` 与 `external_reference` 保留进入 Stage 1 的资格，允许 URL 为 NULL，业务 routing 仍由 Stage 1 判断。结构分类的存储契约见 [Raw Article metadata](../05-data-model/daily.md#metadata)。
 
 两种执行方式：
 
@@ -579,11 +587,9 @@ Event Global Ranking
     ↓
 persist Event Top 50 Review Snapshot
     ↓
-Code selects Top N Events
+Code selects Top 15 Events
     ↓
-Cross-channel Exact Dedup
-    ↓
-Digest Global Exact Dedup
+Event–Digest Semantic Consolidation (per Category, excluding Science)
     ↓
 Science Publication Enrichment
     ↓
@@ -620,15 +626,17 @@ Stage 3 只持久化本次候选集合中的唯一 ID。模型返回的 unknown 
 - Digest 与 Long-form 将遗漏的合法候选按稳定输入顺序追加到末尾，形成覆盖全部候选的连续排名。
 - 若候选非空且模型没有返回任何合法 ID，该子 Ranking 失败；不会把未知 ID 写入业务数据。
 
-每次执行的 `run.json` 汇总 unknown / duplicate / deterministic fallback 计数；各 Ranking 的 `ranking-diagnostics.json` 保存具体 ID 和计数。即使子 Ranking 最终失败，已发生的 LLM attempts、retry、duration 与可用 token usage 也会保留在 `run.json` / `pipeline_runs.metrics`，失败详情写入 `ranking-failure-diagnostics.json`。
+`pipeline_runs.details` 保存各子步骤状态、验证计数和失败原因，`metrics` 保存聚合调用与消耗；runtime 为辅助诊断。每次执行的 `run.json` 汇总 unknown / duplicate / deterministic fallback 计数；各 Ranking 的 `ranking-diagnostics.json` 保存具体 ID 和计数。即使子 Ranking 最终失败，已发生的 LLM attempts、retry、duration 与可用 token usage 也会保留在 `run.json` / `pipeline_runs.metrics`，失败详情写入 `ranking-failure-diagnostics.json`。
 
-### 8.4 Cross-channel Exact Dedup
+### 8.4 Event–Digest Semantic Consolidation
 
-Selected Events 确定后，Digest / Long-form 中与其属于**同一原文**的内容被排除。
+<!-- 保留 §4 的 Pre-Stage1 Exact Dedup；Stage3 不再执行 Cross-channel 或 Digest Global Exact Dedup。 -->
 
-这里只做 exact dedup，例如 normalized URL；不执行语义去重。
+按 Event Ranking 的 Top 15、逐个 Digest Category 判断同一具体事件的报道；Science 不参与。独立分析、趋势研究及同一主体的不同事件保留 Digest。输入输出及严格 ID 校验见 [Consolidation Contract](../07-prompt-spec/daily.md#eventdigest-consolidation)。
 
-随后 Digest 自身还进行一次全局 exact dedup，避免同一原文通过多个 feed 重复进入 Digest Ranking。
+每类验证成功后，立即在同一事务中将匹配文章的 routing 从 digest 改为 event、加入原 Event Group、写 routing_error Feedback 和成功检查点；不创建 Group、不改 Event 排名或已保存的 Review Items。未匹配文章保留 Digest。
+
+模型失败继续其他分类；事务失败则整类回滚并使本次执行 failed。Resume 对未完成或失败分类重新调用模型；成功分类须结合检查点、输入、版本及实际成员关系验证后复用。后续 Digest / Long-form 失败不回滚已提交的 Consolidation。Digest Ranking 重新读取当前 routing=digest 集合。
 
 ### 8.5 Science Publication Enrichment
 
@@ -643,7 +651,7 @@ Digest    → 按 Category 独立排序
 Long-form → 全局排序
 ```
 
-Event Review snapshot、每个 Digest Category、Long-form 是独立持久化单元。Category 通过 parse、validation、确定性 normalization 后立即原子提交；某类模型失败继续其他 Category 和 Long-form，不回滚成功分类。所有有效 Ranking 完成为 `success`（可带 Warning）；部分产物成功、部分失败为 `partial`；关键数据库写入失败仍为 `failed`。Stage4 只依赖有效 Event Review snapshot。
+Event Review snapshot、每个 Consolidation Category、每个 Digest Ranking Category、Long-form 是独立持久化单元。Category 通过 parse、validation、确定性 normalization 后立即原子提交；某类模型失败继续其他 Category 和 Long-form，不回滚成功分类。所有有效 Ranking 完成为 `success`（可带 Warning）；部分产物成功、部分失败为 `partial`；关键数据库写入失败仍为 `failed`。Stage4 只依赖有效 Event Review snapshot。
 
 Retry 对各 Category 分别核对输入 Hash、同一 Digest Request 的 Published UUID / Fragment 快照、成功记录及当前完整排名；其他分类变化不使本类失效。Hash 覆盖 Category、候选的实际模型字段、输入顺序与内容 UUID 映射。不能只凭 ai_rank 非空复用，也不能把遗漏 ID 再补齐后宣称旧产物完整。成功结果复用不计本次 LLM calls，失败或输入变化的分类才重新调用。
 
@@ -821,7 +829,7 @@ Daily Brief 对同一 `daily_date` 只读取一个一致的 Stage 4 generation s
 
 - Ranking rerun 可以重新计算 `ai_rank`；
 - 不覆盖已人工调整的 `display_rank`；
-- Event Ranking 每次成功创建新的 Review snapshot。
+- 新 Event Ranking 成功后创建 Review snapshot；Resume 验证输入、版本与数据库结果后复用既有成功 Snapshot，不重复调用模型。
 
 ### Stage 4
 
@@ -875,7 +883,7 @@ Stage 4
 
 ### 12.1 Prompt 绑定与原子运行记录（B3.2）
 
-Request Type 第一次真正发出请求前选择 Active 并持久化精确 Version ID；同一 Stage 内后续批次、分类、自动重试和 Provider fallback 固定该版本。Stage3 的 Event / Digest / Long-form 各自懒绑定；Digest 任一分类匹配先前输入时继承该 Run 的 Digest 绑定，所有分类（含变化分类）固定同一 Request 版本；不存在匹配证据时选择当前 Active。Event / Long-form 沿用原 Resume 输入快照规则，复用不改写旧 Run。尚未执行的类型不提前绑定。Stage1/2 的重新启动本来就是新 Stage 执行，并不新增 Resume 模式。
+Request Type 第一次真正发出请求前选择 Active 并持久化精确 Version ID；同一 Stage 内后续批次、分类、自动重试和 Provider fallback 固定该版本。Stage3 的 Event / Consolidation / Digest / Long-form 各自懒绑定；Digest 任一分类匹配先前输入时继承该 Run 的 Digest 绑定，所有分类（含变化分类）固定同一 Request 版本；不存在匹配证据时选择当前 Active。Event / Long-form 沿用原 Resume 输入快照规则，复用不改写旧 Run。尚未执行的类型不提前绑定。Stage1/2 的重新启动本来就是新 Stage 执行，并不新增 Resume 模式。
 
 Stage4 先按 Review snapshot 获取唯一 Run，再锁该数据库行首次绑定 Decision / Enrichment；数据库提交后才发请求。CLI Retry 与后台 Event Review 均复用相同 Run；全新 Run 不复制其他 Run 的版本。文件镜像失败明确报错，不以镜像取代数据库权威。字段位置见 [版本绑定载体](../05-data-model/prompt-registry.md#版本绑定载体)。
 

@@ -87,7 +87,7 @@ npm run test:prompt-requests
 npm run test:prompt-management
 ```
 
-Dry-run 只读当前 Git / 冻结 Seed 数据，输出基础 Seed key、拟导入的 `vN` 编号、来源和 Hash，不连接数据库。测试默认使用 Mock；若显式提供 `PROMPT_REGISTRY_TEST_DATABASE_URL`（独立测试数据库），同一测试还会创建隔离 Schema 并在事务结束时回滚全部 DDL / 数据，用于验证真实 PostgreSQL 约束。不要填生产连接。正式导入使用现有环境加载顺序与 DATABASE_URL，单事务导入 3 个 Fragment 和 16 个 Request；已有任意版本的 Registry 全部跳过，不覆盖人工 Draft / Published / Active。正式导入要求 `production-seeds.ts` 和 `seed-baseline.json` 已提交且无未提交修改，否则拒绝标注不真实的来源 Commit；未提交时 dry-run 允许预览，但会明确警告，不能作为已提交来源验收。无新环境变量、依赖或付费调用。
+Dry-run 只读当前 Git / 冻结 Seed 数据，输出基础 Seed key、拟导入的 `vN` 编号、来源和 Hash，不连接数据库。测试默认使用 Mock；若显式提供 `PROMPT_REGISTRY_TEST_DATABASE_URL`（独立测试数据库），同一测试还会创建隔离 Schema 并在事务结束时回滚全部 DDL / 数据，用于验证真实 PostgreSQL 约束。不要填生产连接。正式导入使用现有环境加载顺序与 DATABASE_URL，单事务导入注册的基础 Fragment 和 Request；已有任意版本的 Registry 全部跳过，不覆盖人工 Draft / Published / Active。正式导入要求 `production-seeds.ts` 和 `seed-baseline.json` 已提交且无未提交修改，否则拒绝标注不真实的来源 Commit；未提交时 dry-run 允许预览，但会明确警告，不能作为已提交来源验收。无新环境变量、依赖或付费调用。
 
 新环境按 Migration → 幂等导入 → 启动调用方部署；已有版本的 Registry 不会被导入覆盖，启用前核对有效 Active 和精确 Fragment。回滚保留表、Stage4 映射列和历史版本，不自动删表或重置 Active。运行时契约见 `07-prompt-spec/registry.md`。
 
@@ -96,6 +96,28 @@ Mock / 请求一致性测试不连接生产或调用模型；B3.1 **真实 Postg
 已有环境升级 Prompt Management / 静态清理不需额外 Migration 或重导入。直接 Fragment Key 引用需先执行新增 `0025_fragment_key_references.sql`（通过既有 `npm run db:migrate`）；它仅替换 Guard Function，不改写 Prompt 数据或 Active。部署后从旧 Request 创建 Draft 时仅转换本地编辑副本，保存、Publish 和 Activate 均须人工操作。登录 `/ai/prompts` 管理版本；手动保存 / Activate 会写 Web 当前连接的数据库，验收须使用测试环境。`test:prompt-registry` 检查 Service 和生产依赖边界；`test:prompt-runtime` 检查绑定；`test:prompt-requests` 检查实际请求一致性；`test:prompt-management` 检查 UI。认证 / 导航回归为 `test:admin-auth`、`test:admin-navigation`。均不调用模型；真实 Stage1 冒烟 `test:stage1:chat` 需另行授权。
 
 Manual / Put Back 进程硬退出可能遗留 `promptAttempt.status=running`：先确认原请求进程已结束、无模型请求仍在进行，并检查是否已有成功结果，再由运维针对该文章 / Candidate 将标记恢复为 failed；不要自动超时接管或批量清除。Put Back 保留原绑定 UUID，Manual 下一次主动点击重新选择 Active。此流程不提供未经确认的自动修复脚本。
+
+### Stage3 Consolidation 部署与诊断
+
+先提交并部署已验收代码与 Seed，再通过 `npm run db:migrate` 应用增量 `0028_pipeline_run_details.sql`；新 Stage3 依赖 details 列，不需回填历史 Run。只初始化新增 Request，保留人工 Active：
+
+```bash
+npm run prompts:import -- --only=daily.stage3.event_digest_consolidation --no-activate --dry-run
+npm run prompts:import -- --only=daily.stage3.event_digest_consolidation --no-activate
+```
+
+正式导入要求 Seed 已提交。已有版本幂等跳过；新导入为 Published v1、Active 为空，须在 `/ai/prompts` 核对 System Instructions、`{{input}}` 及 Schema 后人工 Activate。该初始 Request 不自动添加共享 Fragment，不修改其他 Published Request。未配置有效 Active 时执行明确失败，不使用静态 fallback。部署操作会写目标数据库，不能作为只读诊断执行。
+
+诊断先按目标日期查询所有 Attempt 的 details，再查看必要 runtime 文件：
+
+```sql
+SELECT id, started_at, status, error_summary, details, metrics
+FROM pipeline_runs
+WHERE daily_date = DATE '2026-10-29' AND step = 'stage3'
+ORDER BY started_at DESC, id DESC;
+```
+
+success / skipped 的子步骤须结合当前业务状态验证后才可复用；父 Run partial 不代表全部步骤需重跑。Consolidation 事务失败后该分类会重新调用模型。统计只计本次真实调用，复用消耗为零；完整恢复契约见 [Stage3](06-workflow-spec/daily.md#8-stage-3--channel-ranking)。Mock 事务测试不替代真实 PostgreSQL 回滚及并发验收。
 
 ### Stage4 Dedup 部署
 
@@ -176,7 +198,7 @@ DAILY_DATE=2026-09-14 npm run daily
 
 `dedupe:stage1` 的 published scope 通常由 `daily` 或 Dashboard Retry 注入。若手工执行，必须同时提供成对的 `DAILY_PUBLISHED_SCOPE_START_AT`、`DAILY_PUBLISHED_SCOPE_END_AT`（旧 alias 见 §5.2）。不要把 runtime pointer/lineage 变量作为正常人工输入。
 
-Dashboard Stage3 Retry；不要为恢复分类重跑 Stage1/2。保留原机器 `runtime/stage3` 目录，以便验证旧付费输出；同日旧 Run 的 Prompt / Fragment UUID 必须可读取，Active 切换不会升级已绑定版本。先检查 `run.json` 的 `digest_categories` / `category_corrections`、各类 `*-status.json`，再核对数据库排名；不要把 reused 计入新 LLM calls。旧输出缺失或验证不通过会重新调用；进程中断遗留 `pipeline_runs.status=running` 时，Dashboard 仍按既有运行检查拦截，需先核对执行进程与遗留状态，不要连续点击提交。
+Dashboard Stage3 Retry；不要为恢复分类重跑 Stage1/2。新 Run 优先验证数据库 details 检查点；兼容旧付费输出时需保留原机器 `runtime/stage3` 目录；同日旧 Run 的 Prompt / Fragment UUID 必须可读取，Active 切换不会升级已绑定版本。先检查 `run.json` 的 `digest_categories` / `category_corrections`、各类 `*-status.json`，再核对数据库排名；不要把 reused 计入新 LLM calls。旧输出缺失或验证不通过会重新调用；进程中断遗留 `pipeline_runs.status=running` 时，Dashboard 仍按既有运行检查拦截，需先核对执行进程与遗留状态，不要连续点击提交。
 
 ### 3.3 Discovery D2–D5 Workflow
 
@@ -343,6 +365,8 @@ Scope 的时间含义和 current/historical 行为在 [Workflow Overview](02-wor
 | `CONTENT_COMPLETION_FIRECRAWL_TIMEOUT_MS` | `30000` ms | 单次 Firecrawl timeout |
 | `CONTENT_COMPLETION_FIRECRAWL_MAX_RETRIES` | `2` | 单次 Firecrawl 最大重试数 |
 
+`npm run collect:rss` 完成 Feed 插入和去重后，会对 TechCrunch、CNBC: World Top News & Analysis、MIT Technology Review 本次 Feed 涉及且仍无图的 Raw Article 尝试网页 `<head>` 图片补全。单页 12 秒、最多读取 1 MiB，并发总量最多 3、同域名最多 1；失败仅写统计日志，不使已成功的 RSS 采集失败。只读抽样诊断可运行 `npm run audit:rss-images -- --per-source=1`（每 Source 允许 1–5）；它读取最近七天的无图文章并请求网页，不写库，也不执行 RSS Collector。
+
 ### 5.4 Stage 执行与 LLM 调用
 
 | 变量 | 默认值 | 用于 |
@@ -362,9 +386,9 @@ Scope 的时间含义和 current/historical 行为在 [Workflow Overview](02-wor
 | `STAGE2_LLM_MAX_OUTPUT_TOKENS` | `64000` | Stage2 最大输出 token |
 
 Stage2 关闭 SDK 自动重试，使用自己的 retry loop；`STAGE2_LLM_MAX_RETRIES` 是单次 Stage2 execution 中额外 LLM request 的最大次数。每次 attempt 的脱敏诊断写入 `runtime/stage2/<run-id>/run.json` 的 `llm_attempts`；Dashboard 的 Retries 表示实际 LLM retry 数，不包含整个 Stage2 的再次运行。
-| `STAGE3_LLM_TIMEOUT_MS` | `240000` ms | Stage3 Event/Digest/Long-form 单 request timeout |
-| `STAGE3_LLM_MAX_RETRIES` | `2` | Stage3 Event/Digest/Long-form 最大重试数 |
-| `STAGE3_LLM_RETRY_DELAY_MS` | `1000` ms | Stage3 Event/Digest/Long-form retry delay |
+| `STAGE3_LLM_TIMEOUT_MS` | `240000` ms | Stage3 Event/Consolidation/Digest/Long-form 单 request timeout |
+| `STAGE3_LLM_MAX_RETRIES` | `2` | Stage3 Event/Consolidation/Digest/Long-form 最大重试数 |
+| `STAGE3_LLM_RETRY_DELAY_MS` | `1000` ms | Stage3 Event/Consolidation/Digest/Long-form retry delay |
 
 Stage 1 的逻辑 Batch 1–15 使用已有 Codex 配置；Codex retry 耗尽后回退当前 `STAGE1_LLM_PROVIDER`（未设置时使用项目默认）。每个 Batch 的实际 provider、retry、fallback 与脱敏错误见 `runtime/stage1/<run-id>/attempts.jsonl`。
 | `STAGE4_LLM_TIMEOUT_MS` | `240000` ms | Stage4 单 request timeout |
@@ -392,15 +416,25 @@ Stage 1 的逻辑 Batch 1–15 使用已有 Codex 配置；Codex retry 耗尽后
 ```bash
 npm run test:daily-scope
 npm run test:pre-stage1-duplicates
+npm run test:rss-image-enrichment
 npm run test:content-completion-runtime
 npm run test:content-completion-pools
 npm run test:stage1-codex-rollout
 npm run test:stage2-retry
 npm run test:stage3-persistence
 npm run test:stage3-category-recovery
+npm run test:stage3-consolidation
 npm run test:stage4-event-date
 npm run test:stage4-dedup
 npm run test:daily-llm-usage
+```
+
+本地 Newsletter 接入边界可用以下离线测试验证；它需要现有七封固定邮件样本位于 `runtime/spikes/gmail/parsed/`（样本不随 Git 分发），使用事务 Pool Mock 验证模块入库、并发幂等、Email 跳过 Completion 和 Stage 1 输入过滤。不读取数据库连接配置、不调用 Gmail / Firecrawl / LLM；不代表真实 PostgreSQL 锁与事务已验收。
+
+```bash
+npm run test:gmail-pipeline
+npm run test:gmail-selections
+npm run test:gmail-review-ui
 ```
 
 ### Discovery

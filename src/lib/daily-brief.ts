@@ -56,13 +56,17 @@ export type BriefContentItem = {
   published_at: string | null;
   created_at: string;
   has_full_content: boolean;
+  contentLength: number;
 };
 
 export type BriefDigestItem = BriefContentItem & {
   imageUrl: string | null;
 };
 
-export type BriefInspirationItem = Omit<BriefContentItem, 'rank' | 'has_full_content'> & {
+export type BriefInspirationItem = Omit<
+  BriefContentItem,
+  'rank' | 'has_full_content' | 'contentLength'
+> & {
   image_url: string | null;
 };
 
@@ -123,9 +127,10 @@ type ContentRow = {
   published_at: Date | string | null;
   created_at: Date | string;
   hasFullContent: boolean;
+  contentLength: number;
 };
 
-type InspirationRow = Omit<ContentRow, 'rank' | 'category' | 'hasFullContent'> & {
+type InspirationRow = Omit<ContentRow, 'rank' | 'category' | 'hasFullContent' | 'contentLength'> & {
   image_url: string | null;
 };
 
@@ -336,6 +341,7 @@ async function loadDigestItems(
         ra.image_url,
         ra.published_at,
         pc.created_at,
+        char_length(coalesce(nullif(ra.full_content_text, ''), nullif(ra.content_text, ''), '')) as "contentLength",
         ${readMoreAvailabilitySql()} as "hasFullContent"
       from processed_contents pc
       join raw_articles ra on ra.id = pc.raw_article_id
@@ -379,6 +385,7 @@ async function loadLongFormItems(
         ra.url,
         ra.published_at,
         pc.created_at,
+        char_length(coalesce(nullif(ra.full_content_text, ''), nullif(ra.content_text, ''), '')) as "contentLength",
         ${readMoreAvailabilitySql()} as "hasFullContent"
       from processed_contents pc
       join raw_articles ra on ra.id = pc.raw_article_id
@@ -454,6 +461,7 @@ function toBriefContentItem(row: ContentRow): BriefContentItem {
     published_at: toIsoString(row.published_at),
     created_at: toIsoString(row.created_at) ?? '',
     has_full_content: row.hasFullContent,
+    contentLength: row.contentLength,
   };
 }
 

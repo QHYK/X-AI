@@ -1,4 +1,20 @@
+import { reusableEventCheckpoint, reusableLongFormCheckpoint } from './stage3-ranking-recovery.js';
 import { getActiveMemories, formatMemories } from '../lib/memories.js';
+import {
+  stage3Checkpoints,
+  writeStage3Step,
+  restoreStage3Prompt,
+  stage3Hash,
+  stage3Error,
+  type Stage3Step,
+  type Stage3Section,
+} from './stage3-progress.js';
+import {
+  consolidateDigestCategory,
+  ConsolidationPersistenceError,
+} from './stage3-consolidation.js';
+import { runStage3Consolidation } from './stage3-consolidation-llm.js';
+import { resolveStageLlmProvider } from './llm-client.js';
 import { productionPrompt } from '../lib/prompts/runtime.js';
 import { readSystemFragmentFile } from '../lib/prompts/run-file.js';
 import {
@@ -18,7 +34,7 @@ import {
   writeRunFile,
 } from '../lib/prompts/run-file.js';
 /**
- * Stage 3 Workflow job：消费 Stage 2 runtime，完成 Event、Digest 与 Long-form 排名及去重。
+ * Stage 3 Workflow job：消费 Stage 2 DB snapshot，完成排名与 Event–Digest Consolidation。
  * 该阶段把可复现的输入/诊断写入 runtime；每个独立 Ranking 在自身事务中持久化。
  */
 import { createHash, randomUUID } from 'node:crypto';
@@ -74,7 +90,6 @@ import {
 } from './stage3-contract.js';
 import { inferSciencePublication } from './science-publication.js';
 import { resolveStageLlmModel } from './llm-client.js';
-import { normalizeArticleUrl } from './url-normalization.js';
 import type { PublishedAtScope } from '../lib/daily-scope.js';
 import { resolveDailyScope } from '../lib/daily-scope.js';
 import { DEFAULT_STAGE4_EVENT_LIMIT } from './stage4-config.js';
@@ -114,7 +129,6 @@ type RankingRecord<TCandidate> = {
   processedContentId: string;
   sourcePriority: string;
   url: string | null;
-  normalizedUrl: string | null;
   originalIndex: number;
 };
 
@@ -127,31 +141,6 @@ type ContentCandidate = {
 
 type DigestRecord = RankingRecord<Stage3DigestRankingCandidate>;
 type LongFormRecord = RankingRecord<ContentCandidate>;
-
-type RemovedByCrossChannel = {
-  channel: 'digest' | 'long_form';
-  category: string | null;
-  id: string;
-  title: string;
-  processed_content_id: string;
-  matched_event_id: string;
-  normalized_url: string;
-  duplicate_reason: string;
-};
-
-type DigestDuplicateGroup = {
-  normalized_url: string;
-  kept: DuplicateItem;
-  removed: Array<DuplicateItem & { reason: string }>;
-  winner_reason: string;
-};
-
-type DuplicateItem = {
-  id: string;
-  title: string;
-  category: string;
-  source: string;
-};
 
 type Stage3IdMap = {
   events: Record<string, string[]>;
@@ -202,6 +191,7 @@ export type Stage3JobOptions = {
     events?: typeof rankEvents;
     digest?: typeof rankDigest;
     longForm?: typeof rankLongForm;
+    consolidation?: typeof runStage3Consolidation;
   };
 };
 
@@ -212,9 +202,8 @@ export type Stage3JobResult = {
   error: string | null;
   eventGroupCount: number;
   eventSelectedCount: number;
-  crossChannelRemovedCount: number;
-  digestBeforeDedup: number;
-  digestAfterDedup: number;
+  digestInputCount: number;
+  digestAfterConsolidation: number;
   digestCategoryCounts: Record<string, number>;
   longFormCount: number;
   llmCallCount: number;
@@ -262,7 +251,6 @@ const CATEGORY_ORDER = [
   'Science',
   'Technology',
 ];
-const CROSS_CHANNEL_DUPLICATE_REASON = 'normalized_url matches a selected Top N Event article URL';
 
 /**
  * 执行 Stage 3，并优先使用 Daily 传入的 Stage 2 run 与其关联的 Stage 1 lineage。
@@ -291,7 +279,6 @@ async function processStage3Bound(
   const runId = toRunTimestamp(startedAt);
   const runDir = join(rootDir, 'runtime/stage3', runId);
   const eventsDir = join(runDir, 'events');
-  const dedupDir = join(runDir, 'dedup');
   const digestDir = join(runDir, 'digest');
   const longFormDir = join(runDir, 'long-form');
   const model = resolveStageLlmModel('stage3', options.model);
@@ -299,7 +286,6 @@ async function processStage3Bound(
   const dailyDate = options.dailyDate ?? resolveDailyScope(undefined, startedAt).dailyDate;
 
   await mkdir(eventsDir, { recursive: true });
-  await mkdir(dedupDir, { recursive: true });
   await mkdir(digestDir, { recursive: true });
   await mkdir(longFormDir, { recursive: true });
 
@@ -309,9 +295,8 @@ async function processStage3Bound(
   const stage1FinishedAt = '';
   let eventGroupCount = 0;
   let eventSelectedCount = 0;
-  let crossChannelRemovedCount = 0;
-  let digestBeforeDedup = 0;
-  let digestAfterDedup = 0;
+  let digestInputCount = 0;
+  let digestAfterConsolidation = 0;
   let digestCategoryCounts: Record<string, number> = {};
   let longFormCount = 0;
   let llmCallCount = 0;
@@ -336,6 +321,36 @@ async function processStage3Bound(
   let missingRankingCount = 0;
   let invalidRankingCount = 0;
   let deterministicFallbackCount = 0;
+  let activeStep: { section: Stage3Section; category: string | null; state: Stage3Step } | null =
+    null;
+  const stepState = (
+    status: Stage3Step['status'],
+    result: {
+      calls: number;
+      retries: number;
+      durationMs: number;
+      tokenUsage: Stage3TokenUsage | null;
+      warnings?: Stage3RankingWarnings;
+    },
+  ): Stage3Step => ({
+    status,
+    model,
+    provider: resolveStageLlmProvider('stage3'),
+    llm_calls: result.calls,
+    retries: result.retries,
+    duration_ms: result.durationMs,
+    token_usage: result.tokenUsage,
+    ...(result.warnings
+      ? {
+          validation: {
+            duplicate_count: result.warnings.duplicateIds.length,
+            missing_count: result.warnings.missingIds.length,
+            invalid_count: result.warnings.inventedIds.length,
+            fallback_count: result.warnings.fallbackIdCount,
+          },
+        }
+      : {}),
+  });
 
   try {
     if (!options.pipelineRunId)
@@ -355,21 +370,59 @@ async function processStage3Bound(
 
     const digestRows = await loadStage3RankingRows(pool, 'digest', dailyDate);
     const longFormRows = await loadStage3RankingRows(pool, 'long_form', dailyDate);
-    const digestRecords = buildDigestRecords(digestRows);
     const longFormRecords = buildLongFormRecords(longFormRows);
-    digestBeforeDedup = digestRecords.length;
+    digestInputCount = digestRows.length;
 
     const eventHash = snapshotHash(eventBundle.input);
-    const resume = await findStage3ResumeArtifact(rootDir, dailyDate, eventHash);
-    if (resume)
+    const databaseEvent = await reusableEventCheckpoint(
+      pool,
+      dailyDate,
+      eventHash,
+      eventBundle.input,
+      eventBundle.idMap,
+    );
+    let resume = await findStage3ResumeArtifact(rootDir, dailyDate, eventHash);
+    if (databaseEvent && resume?.eventReviewRunId !== databaseEvent.reviewRunId) resume = null;
+    if (databaseEvent)
+      await restoreStage3Prompt(
+        pool,
+        join(runDir, 'run.json'),
+        'daily.stage3.event_ranking',
+        databaseEvent.detail,
+      );
+    else if (resume)
       await inheritRunPrompt(
         join(runDir, 'run.json'),
         join(resume.runDir, 'run.json'),
         'daily.stage3.event_ranking',
         pool,
       );
-    const reusableEvent =
-      resume && canReuseStage3Ranking(eventHash, resume.hashes.event, resume.statuses.event)
+    const eventPrompt = eventBundle.input.events.length
+      ? await productionPrompt('daily.stage3.event_ranking', JSON.stringify(eventBundle.input))
+      : null;
+    const eventState: Stage3Step = {
+      status: 'running',
+      input_hash: eventHash,
+      id_map_hash: stage3Hash(eventBundle.idMap),
+      prompt_version_id: eventPrompt?.versionId ?? null,
+      system_fragment_versions: (await readSystemFragmentFile(join(runDir, 'run.json'))) ?? null,
+      candidate_count: eventBundle.input.events.length,
+      model,
+      provider: resolveStageLlmProvider('stage3'),
+    };
+    activeStep = { section: 'event_ranking', category: null, state: eventState };
+    await writeStage3Step(pool, options.pipelineRunId, 'event_ranking', null, eventState);
+    const reusableEvent = databaseEvent
+      ? {
+          output: databaseEvent.output,
+          calls: 0,
+          retries: 0,
+          durationMs: 0,
+          tokenUsage: null,
+          diagnostics: { reused: 'database' },
+          warnings: emptyRankingWarnings(),
+        }
+      : resume && canReuseStage3Ranking(eventHash, resume.hashes.event, resume.statuses.event)
         ? await loadReusableEventRanking(pool, resume, eventBundle.input)
         : null;
     const eventRanking =
@@ -377,7 +430,7 @@ async function processStage3Bound(
       (await (options.rankers?.events ?? rankEvents)(eventBundle.input, { model, memoryContext }));
     if (reusableEvent) {
       rankingStatuses.event = 'skipped';
-      eventReviewRunId = resume!.eventReviewRunId;
+      eventReviewRunId = databaseEvent?.reviewRunId ?? resume!.eventReviewRunId;
     } else {
       ({
         warningCount,
@@ -403,20 +456,37 @@ async function processStage3Bound(
     await writeJson(join(eventsDir, 'ranking-output.json'), eventRanking.output);
     await writeJson(join(eventsDir, 'ranking-diagnostics.json'), eventRanking.diagnostics);
 
-    if (!reusableEvent) {
-      eventReviewRunId = randomUUID();
-      await persistEventReviewSnapshot(
-        pool,
-        buildEventReviewSnapshotItems({
-          reviewRunId: eventReviewRunId,
-          dailyDate,
-          rankingOutput: eventRanking.output,
-          eventInput: eventBundle.input,
-          eventIdMap: eventBundle.idMap,
-        }),
+    if (!reusableEvent) eventReviewRunId = randomUUID();
+    const committedEventState: Stage3Step = {
+      ...eventState,
+      ...stepState(reusableEvent ? 'skipped' : 'success', eventRanking),
+      review_run_id: eventReviewRunId,
+      ordered_ids: eventRanking.output.rankings.map((r) => r.id),
+      ...(databaseEvent ? { source_run_id: databaseEvent.id } : {}),
+    };
+    const snapshotItems = buildEventReviewSnapshotItems({
+      reviewRunId: eventReviewRunId!,
+      dailyDate,
+      rankingOutput: eventRanking.output,
+      eventInput: eventBundle.input,
+      eventIdMap: eventBundle.idMap,
+    });
+    if (!reusableEvent && snapshotItems.length) {
+      persistenceStatus = 'failed';
+      await persistEventReviewSnapshot(pool, snapshotItems, (client) =>
+        writeStage3Step(client, options.pipelineRunId!, 'event_ranking', null, committedEventState),
       );
-      rankingStatuses.event = 'success';
-    }
+      persistenceStatus = 'success';
+    } else
+      await writeStage3Step(
+        pool,
+        options.pipelineRunId,
+        'event_ranking',
+        null,
+        committedEventState,
+      );
+    rankingStatuses.event = reusableEvent ? 'skipped' : 'success';
+    activeStep = null;
 
     const selectedEvents = selectTopEvents({
       rankingOutput: eventRanking.output,
@@ -427,40 +497,47 @@ async function processStage3Bound(
     eventSelectedCount = selectedEvents.events.length;
     await writeJson(join(eventsDir, 'selected.json'), selectedEvents);
 
-    const selectedArticleKeys = await buildSelectedEventArticleKeys(pool, selectedEvents.idMap);
-    const crossDeduped = applyCrossChannelDedup({
-      digestRecords,
-      longFormRecords,
-      selectedKeyToEventId: selectedArticleKeys.keyToEventId,
-    });
-    crossChannelRemovedCount = crossDeduped.removed.length;
-    await writeJson(join(dedupDir, 'cross-channel.json'), {
-      selected_event_article_keys: selectedArticleKeys.artifact,
-      removed_items: crossDeduped.removed,
-      digest_before: digestRecords.length,
-      digest_after: crossDeduped.digestRecords.length,
-      long_form_before: longFormRecords.length,
-      long_form_after: crossDeduped.longFormRecords.length,
-    });
-
-    const digestDeduped = dedupDigestRecords(crossDeduped.digestRecords);
-    digestAfterDedup = digestDeduped.keptRecords.length;
-    digestCategoryCounts = countByCategory(digestDeduped.keptRecords);
-    longFormCount = crossDeduped.longFormRecords.length;
-    await writeJson(join(dedupDir, 'digest.json'), {
-      duplicate_groups: digestDeduped.duplicateGroups,
-      digest_before: crossDeduped.digestRecords.length,
-      duplicate_items_removed: digestDeduped.removedRecords.length,
-      digest_after: digestDeduped.keptRecords.length,
-      categories: buildCategorySummary(
-        crossDeduped.digestRecords,
-        digestDeduped.removedRecords,
-        digestDeduped.keptRecords,
-      ),
-    });
-
-    const digestInputs = buildDigestInputs(digestDeduped.keptRecords);
-    const longFormInput = buildLongFormInput(crossDeduped.longFormRecords);
+    const consolidationErrors: string[] = [];
+    for (const category of CATEGORY_ORDER) {
+      activeStep = {
+        section: 'consolidation',
+        category,
+        state: { status: 'running', model, provider: resolveStageLlmProvider('stage3') },
+      };
+      const result = await consolidateDigestCategory(pool, {
+        runId: options.pipelineRunId,
+        dailyDate,
+        reviewRunId: eventReviewRunId!,
+        path: join(runDir, 'run.json'),
+        model,
+        input: {
+          category,
+          events: selectedEvents.events.map((e) => ({ event_group_id: e.id, hint: e.event_hint })),
+          candidates: digestRows
+            .filter((r) => r.category === category)
+            .map((r) => ({
+              id: r.processedContentId,
+              title: r.title,
+              summary: r.summary ?? '',
+              source: r.source,
+            })),
+        },
+        invoke: options.rankers?.consolidation,
+      });
+      llmCallCount += result.metrics.calls;
+      retryCount += result.metrics.retries;
+      llmDurationMs += result.metrics.durationMs;
+      tokenUsage = addStage3TokenUsage(tokenUsage, result.metrics.tokenUsage);
+      if (!result.success) consolidationErrors.push(`${category}: ${result.error}`);
+      activeStep = null;
+    }
+    const remainingDigestRows = await loadStage3RankingRows(pool, 'digest', dailyDate);
+    const digestRecords = buildDigestRecords(remainingDigestRows);
+    digestAfterConsolidation = digestRecords.length;
+    digestCategoryCounts = countByCategory(digestRecords);
+    longFormCount = longFormRecords.length;
+    const digestInputs = buildDigestInputs(digestRecords);
+    const longFormInput = buildLongFormInput(longFormRecords);
     inputSnapshotHashes = {
       event: eventHash,
       digest: snapshotHash(digestInputs),
@@ -468,8 +545,8 @@ async function processStage3Bound(
     };
     const idMap: Stage3IdMap = {
       events: selectedEvents.idMap,
-      digest: buildDigestIdMap(digestDeduped.keptRecords),
-      long_form: buildLongFormIdMap(crossDeduped.longFormRecords),
+      digest: buildDigestIdMap(digestRecords),
+      long_form: buildLongFormIdMap(longFormRecords),
     };
 
     await writeJson(join(runDir, 'id-map.json'), idMap);
@@ -498,9 +575,27 @@ async function processStage3Bound(
       category_corrections: categoryCorrections,
     });
 
+    let restoredDigest = false;
+    for (const category of Object.keys(digestInputs)) {
+      const hash = stableDigestHash(digestInputs[category], idMap.digest[category] ?? {});
+      const previous = (await stage3Checkpoints(pool, dailyDate, 'digest_ranking', category)).find(
+        (r) => r.detail.input_hash === hash && typeof r.detail.prompt_version_id === 'string',
+      );
+      if (previous) {
+        await restoreStage3Prompt(
+          pool,
+          join(runDir, 'run.json'),
+          'daily.stage3.digest_ranking',
+          previous.detail,
+        );
+        restoredDigest = true;
+        break;
+      }
+    }
     // Fix one Request version for every category, including categories whose inputs changed.
     // A matching prior category is sufficient evidence to retain that Run's Digest binding.
     if (
+      !restoredDigest &&
       resume &&
       (resume.hashes.digest === inputSnapshotHashes.digest ||
         (await hasMatchingDigestCategory(resume.runDir, digestInputs, idMap.digest)))
@@ -513,9 +608,7 @@ async function processStage3Bound(
       );
     const digestRankings: Record<string, Stage3RankingOutput> = {};
     const snapshot = await readSystemFragmentFile(join(runDir, 'run.json'));
-    const digestCategoriesToProcess = [
-      ...new Set([...Object.keys(digestInputs), ...digestRecords.map((r) => r.category)]),
-    ].sort(compareCategoryNames);
+    const digestCategoriesToProcess = CATEGORY_ORDER;
     for (const category of digestCategoriesToProcess) {
       const input = digestInputs[category] ?? { category, candidates: [] };
       const inputHash = stableDigestHash(input, idMap.digest[category] ?? {});
@@ -529,10 +622,31 @@ async function processStage3Bound(
         output_tokens: null,
         warning_count: 0,
         error: null,
+        model,
+        provider: resolveStageLlmProvider('stage3'),
+        retries: 0,
+        duration_ms: 0,
       };
       digestCategories[category] = progress;
+      activeStep = {
+        section: 'digest_ranking',
+        category,
+        state: {
+          ...progress,
+          status: 'running',
+          model,
+          provider: resolveStageLlmProvider('stage3'),
+        },
+      };
+      await writeStage3Step(
+        pool,
+        options.pipelineRunId,
+        'digest_ranking',
+        category,
+        activeStep.state,
+      );
       if (!input.candidates.length) {
-        // All members were deduplicated away. Clear only this category's stale ranks, with no Prompt or LLM.
+        // No Digest members remain in this category. Clear only this category's stale ranks, with no Prompt or LLM.
         persistenceStatus = 'failed';
         const committed = await persistDigestCategory(
           pool,
@@ -545,7 +659,7 @@ async function processStage3Bound(
             prompt_version_id: null,
             system_fragment_versions: snapshot ?? null,
             ranked_ids: [],
-            execution: { ...progress, status: 'success' },
+            execution: { ...progress, status: 'skipped' },
           },
           {
             ranked: [],
@@ -556,7 +670,8 @@ async function processStage3Bound(
         );
         persistence = combineStage3Persistence(persistence, committed);
         persistenceStatus = 'success';
-        progress.status = 'success';
+        progress.status = 'skipped';
+        activeStep = null;
         await writeJson(join(digestDir, `${toSlug(category)}-status.json`), progress);
         continue;
       }
@@ -564,6 +679,18 @@ async function processStage3Bound(
       const prompt = await productionPrompt('daily.stage3.digest_ranking', JSON.stringify(input), {
         category,
       });
+      activeStep.state = {
+        ...activeStep.state,
+        prompt_version_id: prompt.versionId,
+        system_fragment_versions: snapshot ?? null,
+      };
+      await writeStage3Step(
+        pool,
+        options.pipelineRunId,
+        'digest_ranking',
+        category,
+        activeStep.state,
+      );
       const beforeLookup: 'not_started' | 'success' | 'failed' = persistenceStatus;
       persistenceStatus = 'failed';
       const reused = await reusableDigestCheckpoint(
@@ -596,6 +723,7 @@ async function processStage3Bound(
           progress.input_tokens = 0;
           progress.output_tokens = 0;
           if (artifact) progress.source_run_id = artifact.source_run_id;
+          else if (reused?.source_run_id) progress.source_run_id = reused.source_run_id;
         } else {
           const result = await (options.rankers?.digest ?? rankDigest)(input, {
             model,
@@ -622,6 +750,9 @@ async function processStage3Bound(
           llmDurationMs += result.durationMs;
           tokenUsage = addStage3TokenUsage(tokenUsage, result.tokenUsage);
           progress.llm_calls = result.calls;
+          progress.retries = result.retries;
+          progress.duration_ms = result.durationMs;
+          progress.token_usage = result.tokenUsage;
           progress.input_tokens = result.tokenUsage?.inputTokens ?? null;
           progress.output_tokens = result.tokenUsage?.outputTokens ?? null;
           progress.warning_count =
@@ -660,6 +791,9 @@ async function processStage3Bound(
             warnings,
           ));
           progress.llm_calls = metrics.calls;
+          progress.retries = metrics.retries;
+          progress.duration_ms = metrics.durationMs;
+          progress.token_usage = metrics.tokenUsage;
           progress.input_tokens = metrics.tokenUsage?.inputTokens ?? null;
           progress.output_tokens = metrics.tokenUsage?.outputTokens ?? null;
           progress.warning_count =
@@ -674,6 +808,12 @@ async function processStage3Bound(
         }
         progress.error = caught instanceof Error ? caught.message : String(caught);
         digestErrors.push(`${category}: ${progress.error}`);
+        await writeStage3Step(pool, options.pipelineRunId, 'digest_ranking', category, {
+          ...activeStep!.state,
+          ...progress,
+          status: 'failed',
+        });
+        activeStep = null;
         await writeJson(join(digestDir, `${toSlug(category)}-status.json`), progress);
         continue;
       }
@@ -691,7 +831,7 @@ async function processStage3Bound(
           reused: progress.reused,
         });
       {
-        // Reapply only this category, including stale/deduplicated members, even when the ranking is reused.
+        // Reapply only this category, including stale members, even when the ranking is reused.
         persistenceStatus = 'failed';
         const committed = await persistDigestCategory(
           pool,
@@ -719,6 +859,7 @@ async function processStage3Bound(
         persistenceStatus = 'success';
       }
       progress.status = progress.reused ? 'skipped' : 'success';
+      activeStep = null;
       await writeJson(join(digestDir, `${toSlug(category)}-status.json`), progress);
       // Helpful on crash, but the database checkpoint is the authoritative committed marker.
       await writeJson(join(runDir, 'run.json'), {
@@ -741,22 +882,56 @@ async function processStage3Bound(
         ? 'skipped'
         : 'success';
 
-    if (resume && resume.hashes.longForm === inputSnapshotHashes.longForm)
+    const databaseLongForm = await reusableLongFormCheckpoint(
+      pool,
+      dailyDate,
+      inputSnapshotHashes.longForm,
+      idMap.long_form,
+    );
+    if (databaseLongForm)
+      await restoreStage3Prompt(
+        pool,
+        join(runDir, 'run.json'),
+        'daily.stage3.long_form_ranking',
+        databaseLongForm.detail,
+      );
+    if (!databaseLongForm && resume && resume.hashes.longForm === inputSnapshotHashes.longForm)
       await inheritRunPrompt(
         join(runDir, 'run.json'),
         join(resume.runDir, 'run.json'),
         'daily.stage3.long_form_ranking',
         pool,
       );
-    const reusableLongForm =
-      resume &&
-      canReuseStage3Ranking(
-        inputSnapshotHashes.longForm,
-        resume.hashes.longForm,
-        resume.statuses.long_form,
-      )
+    const reusableLongForm = databaseLongForm
+      ? {
+          output: databaseLongForm.output,
+          calls: 0,
+          retries: 0,
+          durationMs: 0,
+          tokenUsage: null,
+          warnings: emptyRankingWarnings(),
+        }
+      : resume &&
+          canReuseStage3Ranking(
+            inputSnapshotHashes.longForm,
+            resume.hashes.longForm,
+            resume.statuses.long_form,
+          )
         ? await loadReusableLongFormRanking(resume, longFormInput)
         : null;
+    const longPrompt = longFormInput.candidates.length
+      ? await productionPrompt('daily.stage3.long_form_ranking', JSON.stringify(longFormInput))
+      : null;
+    const longState: Stage3Step = {
+      status: 'running',
+      input_hash: inputSnapshotHashes.longForm,
+      id_map_hash: stage3Hash(idMap.long_form),
+      prompt_version_id: longPrompt?.versionId ?? null,
+      system_fragment_versions: (await readSystemFragmentFile(join(runDir, 'run.json'))) ?? null,
+      candidate_count: longFormInput.candidates.length,
+    };
+    activeStep = { section: 'long_form_ranking', category: null, state: longState };
+    await writeStage3Step(pool, options.pipelineRunId, 'long_form_ranking', null, longState);
     const longFormRanking =
       reusableLongForm ??
       (await (options.rankers?.longForm ?? rankLongForm)(longFormInput, { model, memoryContext }));
@@ -807,14 +982,30 @@ async function processStage3Bound(
 
     if (!reusableLongForm) {
       persistenceStatus = 'failed';
-      const longFormPersistence = await persistStage3Plan(pool, persistencePlan);
+      const longFormPersistence = await persistStage3Plan(pool, persistencePlan, (client) =>
+        writeStage3Step(client, options.pipelineRunId!, 'long_form_ranking', null, {
+          ...longState,
+          ...stepState('success', longFormRanking),
+          ranked_ids: longFormRanking.output.rankings.map((r) => idMap.long_form[r.id]),
+        }),
+      );
       persistenceStatus = 'success';
       persistence = combineStage3Persistence(persistence, longFormPersistence);
       rankingStatuses.long_form = 'success';
     }
 
-    if (digestErrors.length)
-      throw new Error(`Digest categories failed: ${digestErrors.join('; ')}`);
+    if (reusableLongForm)
+      await writeStage3Step(pool, options.pipelineRunId, 'long_form_ranking', null, {
+        ...longState,
+        ...stepState('skipped', longFormRanking),
+        ranked_ids: longFormRanking.output.rankings.map((r) => idMap.long_form[r.id]),
+        source_run_id: databaseLongForm?.id ?? null,
+      });
+    activeStep = null;
+    if (digestErrors.length || consolidationErrors.length)
+      throw new Error(
+        [...consolidationErrors.map((e) => `Consolidation ${e}`), ...digestErrors].join('; '),
+      );
 
     await writeRunJson(join(runDir, 'run.json'), {
       runId,
@@ -831,9 +1022,8 @@ async function processStage3Bound(
       publishedWithinHours,
       eventGroupCount,
       eventSelectedCount,
-      crossChannelRemovedCount,
-      digestBeforeDedup,
-      digestAfterDedup,
+      digestInputCount,
+      digestAfterConsolidation,
       digestCategoryCounts,
       longFormCount,
       llmCallCount,
@@ -861,9 +1051,8 @@ async function processStage3Bound(
       error: null,
       eventGroupCount,
       eventSelectedCount,
-      crossChannelRemovedCount,
-      digestBeforeDedup,
-      digestAfterDedup,
+      digestInputCount,
+      digestAfterConsolidation,
       digestCategoryCounts,
       longFormCount,
       llmCallCount,
@@ -883,7 +1072,39 @@ async function processStage3Bound(
       categoryCorrections,
     };
   } catch (caught) {
-    error = caught instanceof Error ? caught.message : String(caught);
+    error = stage3Error(caught);
+    if (activeStep?.section === 'consolidation') persistenceStatus = 'failed';
+    if (caught instanceof ConsolidationPersistenceError) {
+      persistenceStatus = 'failed';
+      llmCallCount += caught.metrics.calls;
+      retryCount += caught.metrics.retries;
+      llmDurationMs += caught.metrics.durationMs;
+      tokenUsage = addStage3TokenUsage(tokenUsage, caught.metrics.tokenUsage);
+      if (activeStep) activeStep.state = caught.step;
+    }
+    if (activeStep) {
+      const failed =
+        caught instanceof Stage3RankingFailureError
+          ? stage3RankingFailureMetrics(caught.result)
+          : null;
+      try {
+        await writeStage3Step(
+          pool,
+          options.pipelineRunId!,
+          activeStep.section,
+          activeStep.category,
+          {
+            ...activeStep.state,
+            ...(failed ? stepState('failed', failed) : {}),
+            status: 'failed',
+            error,
+          },
+        );
+      } catch (diagnosticError) {
+        persistenceStatus = 'failed';
+        console.error('Stage3 failure details could not be saved', diagnosticError);
+      }
+    }
     const interruptedCategory = Object.values(digestCategories).find(
       (item) => item.status === 'failed' && item.error === null,
     );
@@ -948,9 +1169,8 @@ async function processStage3Bound(
       publishedWithinHours,
       eventGroupCount,
       eventSelectedCount,
-      crossChannelRemovedCount,
-      digestBeforeDedup,
-      digestAfterDedup,
+      digestInputCount,
+      digestAfterConsolidation,
       digestCategoryCounts,
       longFormCount,
       llmCallCount,
@@ -978,9 +1198,8 @@ async function processStage3Bound(
       error,
       eventGroupCount,
       eventSelectedCount,
-      crossChannelRemovedCount,
-      digestBeforeDedup,
-      digestAfterDedup,
+      digestInputCount,
+      digestAfterConsolidation,
       digestCategoryCounts,
       longFormCount,
       llmCallCount,
@@ -1226,7 +1445,6 @@ function buildDigestRecords(rows: RankingCandidateRow[]): DigestRecord[] {
       processedContentId: row.processedContentId,
       sourcePriority: row.sourcePriority,
       url: row.url,
-      normalizedUrl: normalizeArticleUrl(row.url),
       originalIndex,
     };
   });
@@ -1244,7 +1462,6 @@ function buildLongFormRecords(rows: RankingCandidateRow[]): LongFormRecord[] {
     processedContentId: row.processedContentId,
     sourcePriority: row.sourcePriority,
     url: row.url,
-    normalizedUrl: normalizeArticleUrl(row.url),
     originalIndex: index,
   }));
 }
@@ -1705,240 +1922,6 @@ export function selectTopEvents(options: {
   };
 }
 
-async function buildSelectedEventArticleKeys(
-  queryable: Queryable,
-  selectedEventIdMap: Record<string, string[]>,
-): Promise<{
-  artifact: {
-    selected_event_count: number;
-    selected_event_source_item_count: number;
-    unique_selected_article_key_count: number;
-    articles: Array<{
-      event_id: string;
-      processed_content_id: string;
-      url: string | null;
-      normalized_url: string | null;
-    }>;
-    unique_keys: string[];
-  };
-  keyToEventId: Map<string, string>;
-}> {
-  const processedContentIds = Object.values(selectedEventIdMap).flat();
-  const articleUrls = await loadArticleUrls(queryable, processedContentIds);
-  const keyToEventId = new Map<string, string>();
-  const articles: Array<{
-    event_id: string;
-    processed_content_id: string;
-    url: string | null;
-    normalized_url: string | null;
-  }> = [];
-
-  for (const [eventId, ids] of Object.entries(selectedEventIdMap)) {
-    for (const processedContentId of ids) {
-      const url = articleUrls.get(processedContentId) ?? null;
-      const normalizedUrl = normalizeArticleUrl(url);
-      if (normalizedUrl && !keyToEventId.has(normalizedUrl)) {
-        keyToEventId.set(normalizedUrl, eventId);
-      }
-
-      articles.push({
-        event_id: eventId,
-        processed_content_id: processedContentId,
-        url,
-        normalized_url: normalizedUrl,
-      });
-    }
-  }
-
-  return {
-    artifact: {
-      selected_event_count: Object.keys(selectedEventIdMap).length,
-      selected_event_source_item_count: articles.length,
-      unique_selected_article_key_count: keyToEventId.size,
-      articles,
-      unique_keys: [...keyToEventId.keys()].sort(),
-    },
-    keyToEventId,
-  };
-}
-
-async function loadArticleUrls(
-  queryable: Queryable,
-  processedContentIds: string[],
-): Promise<Map<string, string | null>> {
-  if (processedContentIds.length === 0) {
-    return new Map();
-  }
-
-  const result = await queryable.query<{
-    processedContentId: string;
-    url: string | null;
-  }>(
-    `
-      select
-        pc.id as "processedContentId",
-        ra.url
-      from processed_contents pc
-      join raw_articles ra on ra.id = pc.raw_article_id
-      where pc.id = any($1::uuid[])
-    `,
-    [processedContentIds],
-  );
-
-  return new Map(result.rows.map((row) => [row.processedContentId, row.url]));
-}
-
-/**
- * 移除与已选 Top Event 指向同一规范化 URL 的 Digest/Long-form。
- * 这样最终 Brief 不会在多个频道重复呈现同一篇原始报道。
- */
-export function applyCrossChannelDedup(options: {
-  digestRecords: DigestRecord[];
-  longFormRecords: LongFormRecord[];
-  selectedKeyToEventId: Map<string, string>;
-}): {
-  digestRecords: DigestRecord[];
-  longFormRecords: LongFormRecord[];
-  removed: RemovedByCrossChannel[];
-} {
-  const removed: RemovedByCrossChannel[] = [];
-  const digestRecords = options.digestRecords.filter((record) => {
-    const matchedEventId = record.normalizedUrl
-      ? options.selectedKeyToEventId.get(record.normalizedUrl)
-      : undefined;
-    if (!record.normalizedUrl || !matchedEventId) {
-      return true;
-    }
-
-    removed.push(toCrossChannelRemovedItem('digest', record, matchedEventId));
-    return false;
-  });
-  const longFormRecords = options.longFormRecords.filter((record) => {
-    const matchedEventId = record.normalizedUrl
-      ? options.selectedKeyToEventId.get(record.normalizedUrl)
-      : undefined;
-    if (!record.normalizedUrl || !matchedEventId) {
-      return true;
-    }
-
-    removed.push(toCrossChannelRemovedItem('long_form', record, matchedEventId));
-    return false;
-  });
-
-  return {
-    digestRecords,
-    longFormRecords,
-    removed,
-  };
-}
-
-function toCrossChannelRemovedItem(
-  channel: 'digest' | 'long_form',
-  record: DigestRecord | LongFormRecord,
-  matchedEventId: string,
-): RemovedByCrossChannel {
-  return {
-    channel,
-    category: channel === 'digest' ? record.category : null,
-    id: record.candidate.id,
-    title: record.candidate.title,
-    processed_content_id: record.processedContentId,
-    matched_event_id: matchedEventId,
-    normalized_url: record.normalizedUrl ?? '',
-    duplicate_reason: CROSS_CHANNEL_DUPLICATE_REASON,
-  };
-}
-
-function dedupDigestRecords(records: DigestRecord[]): {
-  keptRecords: DigestRecord[];
-  removedRecords: DigestRecord[];
-  duplicateGroups: DigestDuplicateGroup[];
-} {
-  const recordsByUrl = new Map<string, DigestRecord[]>();
-  for (const record of records) {
-    if (!record.normalizedUrl) {
-      continue;
-    }
-
-    const group = recordsByUrl.get(record.normalizedUrl) ?? [];
-    group.push(record);
-    recordsByUrl.set(record.normalizedUrl, group);
-  }
-
-  const removedProcessedContentIds = new Set<string>();
-  const duplicateGroups: DigestDuplicateGroup[] = [];
-
-  for (const [normalizedUrl, group] of recordsByUrl.entries()) {
-    if (group.length <= 1) {
-      continue;
-    }
-
-    const winner = chooseDigestWinner(group);
-    const removed = group.filter((record) => record !== winner);
-    for (const record of removed) {
-      removedProcessedContentIds.add(record.processedContentId);
-    }
-
-    duplicateGroups.push({
-      normalized_url: normalizedUrl,
-      kept: toDuplicateItem(winner),
-      removed: removed.map((record) => ({
-        ...toDuplicateItem(record),
-        reason: buildDigestRemovedReason(record, winner),
-      })),
-      winner_reason: buildDigestWinnerReason(winner, group),
-    });
-  }
-
-  duplicateGroups.sort((left, right) => left.normalized_url.localeCompare(right.normalized_url));
-
-  return {
-    keptRecords: records.filter(
-      (record) => !removedProcessedContentIds.has(record.processedContentId),
-    ),
-    removedRecords: records.filter((record) =>
-      removedProcessedContentIds.has(record.processedContentId),
-    ),
-    duplicateGroups,
-  };
-}
-
-function chooseDigestWinner(group: DigestRecord[]): DigestRecord {
-  return [...group].sort(compareDigestCandidates)[0];
-}
-
-function compareDigestCandidates(left: DigestRecord, right: DigestRecord): number {
-  const categoryCompare = categoryRank(left.category) - categoryRank(right.category);
-  if (categoryCompare !== 0) {
-    return categoryCompare;
-  }
-
-  const priorityCompare =
-    sourcePriorityRank(left.sourcePriority) - sourcePriorityRank(right.sourcePriority);
-  if (priorityCompare !== 0) {
-    return priorityCompare;
-  }
-
-  return left.originalIndex - right.originalIndex;
-}
-
-function categoryRank(category: string): number {
-  return category === 'General' ? 1 : 0;
-}
-
-function sourcePriorityRank(priority: string): number {
-  switch (priority.trim().toLowerCase()) {
-    case 'high':
-      return 0;
-    case 'medium':
-      return 1;
-    case 'low':
-      return 2;
-    default:
-      return 3;
-  }
-}
-
 function buildDigestInputs(records: DigestRecord[]): Record<string, Stage3DigestRankingInput> {
   const inputs: Record<string, Stage3DigestRankingInput> = {};
   const categories = [...new Set(records.map((record) => record.category))].sort(
@@ -2030,11 +2013,18 @@ function buildPersistencePlan(options: {
 async function persistStage3Plan(
   pool: Pool,
   plan: ReturnType<typeof buildPersistencePlan>,
+  onPersisted?: (client: PoolClient) => Promise<void>,
 ): Promise<Stage3PersistenceResult> {
   const client = await pool.connect();
   try {
     await client.query('begin');
     const result = await persistStage3Ranks(client, plan);
+    if (
+      result.rankedUpdated !== plan.ranked.length ||
+      result.staleCleared !== plan.staleProcessedContentIds.length
+    )
+      throw new Error('Stage3 ranking rows changed during persistence.');
+    await onPersisted?.(client);
     await client.query('commit');
     return result;
   } catch (error) {
@@ -2066,65 +2056,6 @@ function countByCategory(records: DigestRecord[]): Record<string, number> {
   );
 }
 
-function buildCategorySummary(
-  beforeRecords: DigestRecord[],
-  removedRecords: DigestRecord[],
-  afterRecords: DigestRecord[],
-): Record<string, { before: number; removed: number; after: number }> {
-  const categories = new Set([
-    ...beforeRecords.map((record) => record.category),
-    ...removedRecords.map((record) => record.category),
-    ...afterRecords.map((record) => record.category),
-  ]);
-  return Object.fromEntries(
-    [...categories].sort(compareCategoryNames).map((category) => [
-      category,
-      {
-        before: beforeRecords.filter((record) => record.category === category).length,
-        removed: removedRecords.filter((record) => record.category === category).length,
-        after: afterRecords.filter((record) => record.category === category).length,
-      },
-    ]),
-  );
-}
-
-function toDuplicateItem(record: DigestRecord): DuplicateItem {
-  return {
-    id: record.candidate.id,
-    title: record.candidate.title,
-    category: record.category,
-    source: record.candidate.source,
-  };
-}
-
-function buildDigestWinnerReason(winner: DigestRecord, group: DigestRecord[]): string {
-  const hasGeneral = group.some((record) => record.category === 'General');
-  const hasSpecific = group.some((record) => record.category !== 'General');
-  if (hasGeneral && hasSpecific && winner.category !== 'General') {
-    return 'kept more specific category over General';
-  }
-
-  const bestPriorityRank = Math.min(
-    ...group.map((record) => sourcePriorityRank(record.sourcePriority)),
-  );
-  if (sourcePriorityRank(winner.sourcePriority) === bestPriorityRank) {
-    const priorities = new Set(group.map((record) => sourcePriorityRank(record.sourcePriority)));
-    if (priorities.size > 1) {
-      return `kept higher source priority (${winner.sourcePriority})`;
-    }
-  }
-
-  return 'kept earliest stable candidate order';
-}
-
-function buildDigestRemovedReason(removed: DigestRecord, winner: DigestRecord): string {
-  return [
-    'same normalized article URL as kept candidate',
-    `kept ${winner.category}/${winner.candidate.source}`,
-    `removed ${removed.category}/${removed.candidate.source}`,
-  ].join('; ');
-}
-
 async function writeRunJson(
   path: string,
   value: {
@@ -2142,9 +2073,8 @@ async function writeRunJson(
     publishedWithinHours: number;
     eventGroupCount: number;
     eventSelectedCount: number;
-    crossChannelRemovedCount: number;
-    digestBeforeDedup: number;
-    digestAfterDedup: number;
+    digestInputCount: number;
+    digestAfterConsolidation: number;
     digestCategoryCounts: Record<string, number>;
     longFormCount: number;
     llmCallCount: number;
@@ -2186,9 +2116,8 @@ async function writeRunJson(
     published_within_hours: value.publishedWithinHours,
     event_group_count: value.eventGroupCount,
     event_selected_count: value.eventSelectedCount,
-    cross_channel_removed_count: value.crossChannelRemovedCount,
-    digest_before_dedup: value.digestBeforeDedup,
-    digest_after_dedup: value.digestAfterDedup,
+    digest_input_count: value.digestInputCount,
+    digest_after_consolidation: value.digestAfterConsolidation,
     digest_count_by_category: value.digestCategoryCounts,
     long_form_count: value.longFormCount,
     llm_call_count: value.llmCallCount,

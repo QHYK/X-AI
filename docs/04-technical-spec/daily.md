@@ -91,8 +91,12 @@ Review 保存事务校验 enrichment 对应集合仍与当前排序一致，随�
 
 本文件只说明上述限制对技术行为的影响，不定义新的修复方案或操作入口。运行与恢复仍以 [Daily Workflow](../06-workflow-spec/daily.md) 为准。
 
-### Stage3 Digest 恢复一致性
+### Stage3 检查点与恢复一致性
 
-`src/processing/stage3-digest-recovery.ts` 使用已有 `pipeline_runs.metrics` 保存 Category 成功标记，和该分类的 `processed_contents` 排名在同一短事务提交；CLI 完成日志以 merge 保留标记。Stage3 开始前必须创建 durable Run，不能在日志创建失败时继续付费生成。
+Stage3 付费执行前必须创建 durable `pipeline_runs`。`details` 保存当次 Event Ranking、Consolidation / Digest 各分类和 Long-form 状态；结构见 [Data Model](../05-data-model/daily.md#pipeline_runs)。写入使用 SQL `jsonb_set` 与分类级合并，不在应用层读改写整个 JSONB；CLI 结束记录不替换 details。
 
-分类提交在共享排名锁内重新校验日期 / routing / category 成员，只更新该分类的排名并清除其去重后过期项；不清理其他 Category。复用时同时核对标记、精确 Prompt/Fragment 版本、输入 Hash、完整 ID 集合以及当前 ai_rank 的唯一连续性。状态文件丢失不改变已经提交的数据库成功标记；旧文件只能作为经严格校验的付费输出缓存，不能替代当前数据库业务输入；Run ID 必须与目录身份一致，恢复诊断以 `source_run_id` 记录来源。同一分类整份恢复，不拼接不同 Run 的 ID；按最新完整有效产物优先，旧产物回退也须通过相同校验。恢复分类本次 LLM calls 和 input/output tokens 均为 0。Runtime 记录 Category 的状态、复用来源、调用数、usage、Warning 和错误。
+Event Review Snapshot、Consolidation routing / membership / Feedback、各分类排名及 Long-form 排名分别与自己的成功标记在同一短事务提交。Consolidation 与 Digest Ranking 使用既有排名锁，事务内重新校验成员，不跨模型调用持有事务。人工 display_rank 的保护规则不变。
+
+恢复查询同日期的各次 Stage3 Attempt，逐项验证输入 Hash、UUID 映射、Request / Fragment 版本和实际业务结果，不能只读取 Latest Attempt 或依据父 Run 状态判断。Event 恢复沿用原 Review UUID；仅通过 Consolidation 新增且有 Feedback 证据的成员不反向改变 Event Ranking 输入，Stage4 仍从完整 event_group_items 读取来源。Consolidation 校验剩余 Digest 输入及已转入 Event 的成员关系。
+
+新检查点不依赖 runtime 文件。历史 `metrics.stage3_digest_checkpoints` 继续只读兼容；旧 Digest 文件只作为严格验证后的付费输出缓存，不能替代当前数据库输入。同类结果不拼接不同历史 Run；复用记录 source_run_id，本次调用与 tokens 为零。恢复流程见 [Daily Workflow](../06-workflow-spec/daily.md#8-stage-3--channel-ranking)。

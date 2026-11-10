@@ -143,7 +143,7 @@ Event Candidates
 ## 4. Stage 3 — Channel Ranking
 
 **Responsibility**
-根据不同 Channel 的产品目标，对候选内容进行相对排序。Event、Digest 和 Long-form 使用不同的 Ranking 语义，不进行跨 Channel 排名。
+根据不同 Channel 的产品目标，对候选内容进行相对排序，并在 Event Top 15 确定后纠正误入 Digest 的事件报道。Event、Digest 和 Long-form 使用不同的 Ranking 语义，不进行跨 Channel 排名。
 
 ### 4.1 Event Ranking
 
@@ -170,7 +170,40 @@ Breaking-news urgency 不等于 importance。
 - 排序能够稳定体现 Event 的相对重要性；
 - 系统性风险、重大影响和重要变化优先于单纯热度、标题强度或重复报道数量。
 
-### 4.2 Digest Ranking
+### 4.2 Event–Digest Semantic Consolidation
+
+**Responsibility**
+
+在 Event Ranking 选出 Top 15 Event Groups 后，识别 Digest 中被 Stage 1 错误 Routing、实际上属于这些 Event Groups 的事件报道，修正其 Channel 归属，并丰富 Event 的来源内容。
+
+**Input**
+
+- Selected Top 15 Event Groups：`event_group_id`、`hint`
+- Digest Candidates：按 Category 分别提供内容信息，Science 除外
+
+**AI Decision**
+
+- 判断 Digest 是否报道了某个已选 Event Group 所代表的同一具体事件或 active event thread。
+- 仅在事件身份明确一致时匹配，不因 shared company、topic、entity 或 category 相同而合并。
+- 事件公告、决策、数据发布等直接报道可以匹配。
+- 具有独立分析、解释、研究或长期阅读价值的内容，应保留原 Digest Routing。
+- 匹配不确定时保留 Digest，不强制归属。
+- 不创建新 Event Group，不改变 Event Ranking。
+
+**Output**
+
+- 需要修正 Routing 的 Digest 与目标 Event Group 的匹配关系。
+- 未匹配内容不输出，继续作为 Digest Candidates。
+
+**Definition of Done**
+
+- Stage 1 错误归入 Digest 的事件报道得到合理纠正。
+- 已选 Event Groups 获得更多相关来源内容。
+- 独立分析和研究内容不会因为主题相关而被错误吸收。
+- 每篇 Digest 最多匹配一个 Event Group。
+- 不改变既有 Event 排名和 Top 15 选择结果。
+
+### 4.3 Digest Ranking
 
 **Input**  
 Digest Candidates grouped by Category
@@ -202,7 +235,7 @@ Digest Candidates grouped by Category
 **Definition of Done**
 - 每个 Category 的排序能够优先呈现真正具有信息增量、专业价值或学习价值的内容，而不是单纯热门或重复的信息。
 
-### 4.3 Long-form Ranking
+### 4.4 Long-form Ranking
 
 **Input**  
 Long-form Candidates

@@ -327,6 +327,7 @@ export const pipelineRuns = pgTable(
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
     metrics: jsonb('metrics').$type<Record<string, unknown>>().notNull().default({}),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
     errorSummary: text('error_summary'),
     ...timestamps,
   },

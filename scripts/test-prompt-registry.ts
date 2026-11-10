@@ -60,7 +60,7 @@ import { DIGEST_PUT_BACK_PROMPT } from './fixtures/legacy-prompts.js';
 import { buildReadMoreInstructions, buildReadMoreUserPrompt } from './fixtures/legacy-prompts.js';
 
 const seeds = await buildProductionPromptSeeds('a'.repeat(40));
-assert.equal(seeds.length, 19);
+assert.equal(seeds.length, 20);
 assert.deepEqual(
   seeds
     .filter((s) => s.kind === 'request')
@@ -446,9 +446,9 @@ assert.equal(
   'Idempotent import never silently activates an existing Registry',
 );
 assert.equal(dedupSeed.body.userTemplate, '{{input}}');
-assert.equal((await importPromptSeeds(store.db, seeds)).imported.length, 19);
-assert.equal((await importPromptSeeds(store.db, seeds)).skipped.length, 19);
-assert.equal(store.versions.size, 19);
+assert.equal((await importPromptSeeds(store.db, seeds)).imported.length, 20);
+assert.equal((await importPromptSeeds(store.db, seeds)).skipped.length, 20);
+assert.equal(store.versions.size, 20);
 for (const seed of seeds) {
   const imported = await getActivePrompt(store.db, seed.key);
   assert.equal(imported.id, seed.id);
@@ -466,7 +466,7 @@ const priorImport = new Store();
 await importPromptSeeds(priorImport.db, seeds);
 for (const [id, version] of priorImport.versions)
   priorImport.versions.set(id, { ...version, version: 1 });
-assert.equal((await importPromptSeeds(priorImport.db, seeds)).skipped.length, 19);
+assert.equal((await importPromptSeeds(priorImport.db, seeds)).skipped.length, 20);
 assert.ok([...priorImport.versions.values()].every((version) => version.version === 1));
 
 const newBody = {
@@ -561,7 +561,7 @@ await assert.rejects(getPromptVersion(store.db, base.id), /hash mismatch/);
 store.versions.set(base.id, originalStored);
 
 // Management lifecycle: listing, optimistic concurrency, immutable history and independent activation.
-assert.equal((await listPromptRegistries(store.db)).length, 19);
+assert.equal((await listPromptRegistries(store.db)).length, 20);
 assert.equal((await listPromptRegistries(store.db, '', 'fragment')).length, 3);
 assert.equal((await listPromptRegistries(store.db, 'DAILY.STAGE1')).length, 1);
 const currentList = await listPromptRegistries(store.db);
@@ -664,7 +664,7 @@ await assert.rejects(
   }),
 );
 console.log(
-  'PASS management: 18 registries, history, Draft CAS, Publish/Activate/rollback, pinned fragments, Stage4 variants',
+  'PASS management: registries, history, Draft CAS, Publish/Activate/rollback, pinned fragments, Stage4 variants',
 );
 
 // Architectural regression: production dependency graphs cannot reach Seed or legacy Fixture text.
@@ -773,11 +773,11 @@ const edited = await createPromptDraft(layers.db, active.key, {
 await publishPromptVersion(layers.db, active.key, edited.id);
 await activatePromptVersion(layers.db, active.key, edited.id);
 const originalVersions = structuredClone(layers.versions);
-assert.equal((await installSystemPromptLayers(layers.db, undefined, true)).length, 17);
+assert.equal((await installSystemPromptLayers(layers.db, undefined, true)).length, 18);
 assert.deepEqual(layers.versions, originalVersions, 'dry run rolls back every change');
 const changes = await installSystemPromptLayers(layers.db);
-assert.equal(changes.length, 17);
-assert.equal(layers.registries.size, 22);
+assert.equal(changes.length, 18);
+assert.equal(layers.registries.size, 23);
 for (const key of ACTIVE_FRAGMENT_KEYS) {
   const fragment = await getActivePrompt(layers.db, key);
   assert.equal(fragment.version, 1);
@@ -791,10 +791,10 @@ assert.equal(layered.version, edited.version + 1);
 assert.deepEqual(layered.body.userTemplate, edited.body.userTemplate);
 assert.equal(layered.body.fragments.filter((f) => f.activeKey).length, 2);
 const dynamicUsage = await listPromptRegistries(layers.db);
-assert.equal(dynamicUsage.find((r) => r.key === 'xfield.identity')!.usedByRequests.length, 14);
+assert.equal(dynamicUsage.find((r) => r.key === 'xfield.identity')!.usedByRequests.length, 15);
 assert.equal(
   dynamicUsage.find((r) => r.key === 'daily_brief.editorial')!.usedByRequests.length,
-  10,
+  11,
 );
 assert.equal(dynamicUsage.find((r) => r.key === 'discover.editorial')!.usedByRequests.length, 4);
 assert.deepEqual(await installSystemPromptLayers(layers.db), [], 'initialization is idempotent');
@@ -870,7 +870,7 @@ if (process.env.PROMPT_REGISTRY_TEST_DATABASE_URL) {
       }),
     } as unknown as Pool;
     await importPromptSeeds(db, seeds);
-    assert.equal((await importPromptSeeds(db, seeds)).skipped.length, 19);
+    assert.equal((await importPromptSeeds(db, seeds)).skipped.length, 20);
     async function rejected(sql: string, args: unknown[]) {
       await client.query('savepoint invalid_write');
       await assert.rejects(client.query(sql, args));

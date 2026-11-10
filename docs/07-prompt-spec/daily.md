@@ -111,12 +111,33 @@ Each article is evaluated independently, and every input `temp_id` must appear e
 
 **Goal:** Rank candidates by relative importance or value within each Daily Brief Channel.
 
-### Execution
-1. Rank Event Groups globally.
-2. Code selects Top N Events.
-3. Code removes exact duplicates already represented by Selected Events.
-4. Rank remaining Digest items separately by Category.
-5. Rank remaining Long-form items globally.
+执行编排与恢复见 [Stage3 Workflow](../06-workflow-spec/daily.md#8-stage-3--channel-ranking)。以下仅定义各类模型请求契约。
+
+### Event–Digest Consolidation
+
+Prompt Key：`daily.stage3.event_digest_consolidation`。识别同一具体事件的报道，优先准确性；独立分析、趋势研究、同一主体的不同事件不合并。
+
+**Input Schema**（实际 JSON，使用持久化 UUID，不使用 Ranking 临时 ID）：
+
+```json
+{
+  "events": [{ "event_group_id": "uuid", "hint": "Stage2 event hint" }],
+  "category": "Company",
+  "candidates": [{ "id": "uuid", "title": "Article title", "summary": "Summary", "source": "Source" }]
+}
+```
+
+Events 为当前 Top 15；Candidates 仅属于当次 Digest Category。Science 不发起该请求。
+
+**Output Schema**（Provider Strict Object，所有字段 required、禁止额外字段）：
+
+```json
+{
+  "matches": [{ "event_group_id": "uuid", "digest_content_ids": ["uuid"] }]
+}
+```
+
+无匹配返回 `matches: []`。每个匹配至少包含一篇 Digest；Event UUID 必须属于输入 Events，Digest UUID 必须属于输入 Candidates，任一 Digest 不得重复出现或分配到多个 Groups。结构或 ID 校验失败不得持久化。代码不自行推断语义匹配。
 
 ### Structured Output
 

@@ -115,6 +115,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 <th>Digest</th>
                 <th>Long-form</th>
                 <th>Inspiration</th>
+                <th>Routing Corrections</th>
                 <th>Stage2 Groups</th>
                 <th>Stage3 Events</th>
                 <th>Published Events</th>
@@ -149,6 +150,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   <td>{formatNumber(day.processed.digest)}</td>
                   <td>{formatNumber(day.processed.long_form)}</td>
                   <td>{formatNumber(day.processed.inspiration)}</td>
+                  <td>{formatNumber(day.routingCorrections)}</td>
                   <td>{formatMetric(day.runtime.stages.stage2?.groupCount)}</td>
                   <td>{formatMetric(day.runtime.stages.stage3?.selectedEventCount)}</td>
                   <td>{formatNumber(day.events.published)}</td>
@@ -936,8 +938,8 @@ function stageSpecificMetrics(
       return [
         ['Event inputs', metrics.groupCount],
         ['Selected events', metrics.selectedEventCount],
-        ['Digest before dedup', metrics.digestBeforeDedup],
-        ['Digest after dedup', metrics.digestAfterDedup],
+        ['Digest inputs', metrics.digestInputCount],
+        ['Digest after consolidation', metrics.digestAfterConsolidation],
         ['Long-form', metrics.longFormCount],
         [
           'Warnings',

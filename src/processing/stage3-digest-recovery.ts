@@ -1,4 +1,6 @@
-/** Digest-only recovery records live in pipeline_runs.metrics and commit with business ranks. */
+/** Digest recovery records live in pipeline_runs.details and commit with business ranks. */
+import { writeStage3Step } from './stage3-progress.js';
+import type { LlmTokenUsage } from './llm-token-usage.js';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
@@ -41,6 +43,11 @@ export type DigestCategoryProgress = {
   output_tokens: number | null;
   warning_count: number;
   error: string | null;
+  model?: string;
+  provider?: string;
+  retries?: number;
+  duration_ms?: number;
+  token_usage?: LlmTokenUsage | null;
 };
 export function stableDigestHash(input: Stage3DigestRankingInput, idMap: Record<string, string>) {
   // Serialize only effective model fields and the candidate identity mapping, in input order.
@@ -138,14 +145,12 @@ export async function persistDigestCategory(
     )
       throw new Error('Digest category rows changed during persistence.');
     // Business ranks and the durable success marker are one commit, even if the process dies before run.json.
-    const saved = await client.query(
-      `update pipeline_runs set metrics=jsonb_set(metrics,'{stage3_digest_checkpoints}',
-      coalesce(metrics->'stage3_digest_checkpoints','{}'::jsonb)||jsonb_build_object($2::text,$3::jsonb)),updated_at=now()
-      where id=$1::uuid and step='stage3' and daily_date=$4::date and status='running'`,
-      [runId, checkpoint.category, JSON.stringify(checkpoint), dailyDate],
-    );
-    if (saved.rowCount !== 1)
-      throw new Error('Stage3 durable category checkpoint could not be saved.');
+    const { execution, ...identity } = checkpoint;
+    await writeStage3Step(client, runId, 'digest_ranking', checkpoint.category, {
+      ...identity,
+      ...execution,
+      status: execution?.status ?? 'success',
+    });
     await client.query('commit');
     return result;
   } catch (error) {
@@ -163,18 +168,18 @@ export async function reusableDigestCheckpoint(
   inputHash: string,
   promptVersionId: string,
   snapshot: SystemFragmentSnapshot | undefined,
-): Promise<Stage3RankingOutput | null> {
-  const found = await pool.query<{ checkpoint: DigestCheckpoint }>(
-    `select metrics->'stage3_digest_checkpoints'->$2::text as checkpoint from pipeline_runs
-    where daily_date=$1::date and step='stage3' and metrics->'stage3_digest_checkpoints' ? $2::text
+): Promise<(Stage3RankingOutput & { source_run_id?: string }) | null> {
+  const found = await pool.query<{ checkpoint: DigestCheckpoint; source_run_id: string }>(
+    `select id as source_run_id, coalesce(details->'digest_ranking'->$2::text,metrics->'stage3_digest_checkpoints'->$2::text) as checkpoint from pipeline_runs
+    where daily_date=$1::date and step='stage3' and (details->'digest_ranking' ? $2::text or metrics->'stage3_digest_checkpoints' ? $2::text)
     order by started_at desc,id desc`,
     [dailyDate, input.category],
   );
   const byPcId = new Map(Object.entries(idMap).map(([id, pc]) => [pc, id]));
-  for (const { checkpoint: c } of found.rows) {
+  for (const { checkpoint: c, source_run_id } of found.rows) {
     if (
       !c ||
-      c.status !== 'success' ||
+      !['success', 'skipped'].includes(c.status) ||
       c.category !== input.category ||
       c.input_hash !== inputHash ||
       c.prompt_version_id !== promptVersionId ||
@@ -208,7 +213,7 @@ export async function reusableDigestCheckpoint(
         rows.rows.length === c.ranked_ids.length &&
         c.ranked_ids.every((pc, i) => actual.get(pc) === i + 1);
       await client.query('commit');
-      if (valid) return output;
+      if (valid) return { ...output, source_run_id };
     } catch (error) {
       await client.query('rollback');
       throw error;

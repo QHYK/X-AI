@@ -62,8 +62,7 @@ flowchart TD
     WS["[Tool] Optional Web Search"]
     EDB["[DB] Events"]
 
-    XD["[Code] Cross-channel Exact Dedup"]
-    DD["[Code] Digest Exact Dedup"]
+    CONS["[AI] Stage 3<br/>Event–Digest Consolidation"]
     SE["[Code] Science Publication Enrichment"]
     DR["[AI] Stage 3<br/>Digest Ranking"]
     LR["[AI] Stage 3<br/>Long-form Ranking"]
@@ -78,12 +77,10 @@ flowchart TD
     S4 -. "需要时" .-> WS
     WS -.-> S4
 
-    RS --> XD
-    D --> XD
-    L --> XD
-
-    XD --> DD --> SE --> DR --> PDB
-    XD --> LR --> PDB
+    RS --> CONS
+    D --> CONS
+    CONS --> SE --> DR --> PDB
+    L --> LR --> PDB
     I --> PDB
 
     EDB --> API

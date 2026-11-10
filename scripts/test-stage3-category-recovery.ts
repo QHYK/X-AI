@@ -1,4 +1,6 @@
+import type { Stage3Step } from '../src/processing/stage3-progress.js';
 import assert from 'node:assert/strict';
+import { formatMemories } from '../src/lib/memories.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, writeFile, rm, cp, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -13,6 +15,11 @@ import {
   type DigestCheckpoint,
 } from '../src/processing/stage3-digest-recovery.js';
 import { nextDisplayRankForAiRankUpdate } from '../src/processing/stage3-persistence.js';
+import {
+  ConsolidationCallError,
+  type ConsolidationInput,
+} from '../src/processing/stage3-consolidation-llm.js';
+import { loadLatestStage4Selection } from '../src/processing/stage4-persistence.js';
 import { finishPipelineRun } from '../src/processing/pipeline-run-log.js';
 
 const date = '2026-10-29';
@@ -49,6 +56,17 @@ class Store {
   );
   checkpoints: Record<string, Record<string, DigestCheckpoint>> = {};
   review = new Map<string, number>();
+  details: Record<string, Record<string, Stage3Step | Record<string, Stage3Step>>> = {};
+  reviewRows: Record<
+    string,
+    { event_group_id: unknown; ai_rank: unknown; member_content_ids: unknown }[]
+  > = {};
+  memberships: string[] = [];
+  feedbackRows: unknown[] = [];
+  consolidationCalls: string[] = [];
+  consolidateMatches = false;
+  consolidationFails: string | null = null;
+  consolidationCommitFails = false;
   calls: string[] = [];
   eventCalls = 0;
   longCalls = 0;
@@ -108,6 +126,10 @@ class Store {
       this.snapshot = structuredClone({
         rows: this.rows,
         checkpoints: this.checkpoints,
+        details: this.details,
+        reviewRows: this.reviewRows,
+        memberships: this.memberships,
+        feedbackRows: this.feedbackRows,
         review: [...this.review],
       });
       return { rows: [] };
@@ -118,10 +140,20 @@ class Store {
           rows: Row[];
           checkpoints: Record<string, Record<string, DigestCheckpoint>>;
           review: [string, number][];
+          details: Store['details'];
+          reviewRows: Store['reviewRows'];
+          memberships: string[];
+          feedbackRows: unknown[];
         };
         this.rows = s.rows;
         this.checkpoints = s.checkpoints;
         this.review = new Map(s.review);
+        Object.assign(this, {
+          details: s.details,
+          reviewRows: s.reviewRows,
+          memberships: s.memberships,
+          feedbackRows: s.feedbackRows,
+        });
       }
       return { rows: [] };
     }
@@ -146,7 +178,107 @@ class Store {
         }
       return { rows: result };
     }
-    if (text.includes('from event_groups eg'))
+    if (text.startsWith('select id, case when'))
+      return {
+        rows: Object.entries(this.details)
+          .reverse()
+          .map(([id, d]) => ({
+            id,
+            detail:
+              args[2] === null
+                ? d[String(args[1])]
+                : (d[String(args[1])] as Record<string, Stage3Step> | undefined)?.[String(args[2])],
+          })),
+      };
+    if (text.startsWith('update pipeline_runs set details')) {
+      const state = JSON.parse(String(args[3]));
+      if (
+        this.checkpointFails &&
+        args[1] === 'digest_ranking' &&
+        ['success', 'skipped'].includes(state.status)
+      )
+        throw new Error('Mock checkpoint database failure');
+      if (
+        this.consolidationCommitFails &&
+        args[1] === 'consolidation' &&
+        state.status === 'success'
+      )
+        throw new Error('Mock consolidation commit failure');
+      const d = (this.details[String(args[0])] ??= {});
+      if (args[2] === null) d[String(args[1])] = state;
+      else ((d[String(args[1])] ??= {}) as Record<string, Stage3Step>)[String(args[2])] = state;
+      return { rows: [], rowCount: 1 };
+    }
+    if (text.startsWith('select event_group_id,ai_rank,member_content_ids'))
+      return { rows: this.reviewRows[String(args[0])] ?? [] };
+    if (text.startsWith('select review_run_id from event_review_items'))
+      return { rows: [{ review_run_id: Object.keys(this.reviewRows).at(-1) }] };
+    if (text.includes('from event_review_items eri') && text.includes('join event_group_items')) {
+      return {
+        rows: [
+          {
+            reviewRunId: args[0],
+            reviewItemId: randomUUID(),
+            eventGroupId: this.groupId,
+            eventHint: 'Event',
+            aiRank: 1,
+            displayRank: 1,
+            processedContentIds: [this.eventId, ...this.memberships],
+          },
+        ],
+      };
+    }
+    if (text.startsWith('select id,event_hint from event_groups'))
+      return { rows: [{ id: this.groupId, event_hint: 'Event' }] };
+    if (text.startsWith('select pc.id, egi.event_group_id'))
+      return {
+        rows: this.rows
+          .filter(
+            (r) =>
+              r.routing === 'event' &&
+              (args[1] as string[]).includes(r.processedContentId) &&
+              this.memberships.includes(r.processedContentId),
+          )
+          .map((r) => ({ id: r.processedContentId, event_group_id: this.groupId })),
+      };
+    if (text.startsWith("update processed_contents set routing='event'")) {
+      const r = this.rows.find(
+        (r) => r.processedContentId === args[0] && r.daily === args[1] && r.routing === 'digest',
+      );
+      if (r) r.routing = 'event';
+      return { rows: [], rowCount: r ? 1 : 0 };
+    }
+    if (text.startsWith('insert into event_group_items')) {
+      const id = String(args[1]);
+      const found = this.memberships.includes(id);
+      if (!found) this.memberships.push(id);
+      return { rows: [], rowCount: found ? 0 : 1 };
+    }
+    if (text.startsWith('insert into feedback')) {
+      this.feedbackRows.push({
+        target_id: args[0],
+        before: JSON.parse(String(args[1])),
+        after: JSON.parse(String(args[2])),
+      });
+      return { rows: [], rowCount: 1 };
+    }
+    if (text.startsWith('select id from processed_contents where daily_date'))
+      return {
+        rows: this.rows
+          .filter(
+            (r) =>
+              r.daily === args[0] &&
+              r.category === args[1] &&
+              r.routing === 'digest' &&
+              (args[2] as string[]).includes(r.processedContentId),
+          )
+          .map((r) => ({ id: r.processedContentId })),
+      };
+    if (text.includes('from event_groups eg')) {
+      assert.ok(
+        text.includes("membership_added'='true'"),
+        'Ranking hash excludes only explicitly added Consolidation membership',
+      );
       return {
         rows: [
           {
@@ -159,8 +291,14 @@ class Store {
           },
         ],
       };
+    }
     if (text.includes('insert into event_review_items')) {
       this.review.set(String(args[0]), (this.review.get(String(args[0])) ?? 0) + 1);
+      (this.reviewRows[String(args[0])] ??= []).push({
+        event_group_id: args[3],
+        ai_rank: args[5],
+        member_content_ids: args[7],
+      });
       return { rows: [], rowCount: 1 };
     }
     if (text.includes('count(*)::text as count from event_review_items'))
@@ -177,12 +315,39 @@ class Store {
       };
     if (text.includes('pc.id as "processedContentId"') && text.includes('ra.url'))
       return { rows: [{ processedContentId: this.eventId, url: 'https://example.com/event' }] };
+    if (text.startsWith('select id as source_run_id, coalesce('))
+      return {
+        rows: Object.entries(this.details)
+          .reverse()
+          .filter(
+            ([, d]) =>
+              (d.digest_ranking as Record<string, Stage3Step> | undefined)?.[String(args[1])],
+          )
+          .map(([id, d]) => ({
+            source_run_id: id,
+            checkpoint: (d.digest_ranking as Record<string, Stage3Step>)[String(args[1])],
+          })),
+      };
     if (text.startsWith('select metrics->'))
       return {
         rows: Object.values(this.checkpoints)
           .reverse()
           .filter((c) => c[String(args[1])])
           .map((c) => ({ checkpoint: c[String(args[1])] })),
+      };
+    if (
+      text.startsWith('select id,ai_rank from processed_contents') &&
+      text.includes("routing='long_form'")
+    )
+      return {
+        rows: this.rows
+          .filter(
+            (r) =>
+              r.daily === args[0] &&
+              r.routing === 'long_form' &&
+              (args[1] as string[]).includes(r.processedContentId),
+          )
+          .map((r) => ({ id: r.processedContentId, ai_rank: r.ai })),
       };
     if (text.startsWith('select id,ai_rank from processed_contents'))
       return {
@@ -262,6 +427,25 @@ class Store {
     },
   };
   rankers = {
+    consolidation: async (input: ConsolidationInput) => {
+      this.consolidationCalls.push(input.category);
+      if (this.consolidationFails === input.category)
+        throw new ConsolidationCallError('Mock consolidation API failure', this.metrics);
+      return {
+        ...this.metrics,
+        output: {
+          matches:
+            this.consolidateMatches && input.category === 'Company'
+              ? [
+                  {
+                    event_group_id: this.groupId,
+                    digest_content_ids: input.candidates.map((c) => c.id),
+                  },
+                ]
+              : [],
+        },
+      };
+    },
     events: async (input: { events: { id: string }[] }, options: { memoryContext?: string }) => {
       this.memoryContexts.push(options.memoryContext);
       this.eventCalls++;
@@ -379,7 +563,7 @@ try {
   assert.equal(store.memoryContexts.length, 8, 'Event, six Digest categories and Long-form');
   assert.ok(
     store.memoryContexts.every(
-      (m) => m === '以下是长期编辑偏好，供当前任务参考：content preference',
+      (m) => m === formatMemories([{ type: 'content', content: 'content preference' }]),
     ),
   );
   assert.equal(first.status, 'partial');
@@ -414,7 +598,7 @@ try {
   assert.equal(store.memoryReads, 2);
   assert.deepEqual(
     store.memoryContexts.slice(beforeContexts),
-    ['以下是长期编辑偏好，供当前任务参考：updated content preference'],
+    [formatMemories([{ type: 'content', content: 'updated content preference' }])],
     'Only failed General reexecutes, with fresh Memory',
   );
   assert.equal(second.status, 'success');
@@ -460,7 +644,7 @@ try {
       .filter((r) => r.category === 'Technology' && r.daily === date)
       .every((r) => r.ai !== 99),
   );
-  // A newly deduplicated-away member must not retain an old rank when the winner's input hash is unchanged.
+  // Stage3 exact dedup is removed: a new same-URL candidate remains in category ranking.
   const winner = store.rows.find((r) => r.category === 'Company' && r.daily === date)!;
   const duplicate = {
     ...winner,
@@ -471,8 +655,11 @@ try {
   };
   store.rows.push(duplicate);
   const deduped = await store.run(root);
-  assert.equal(deduped.digestCategories.Company.reused, 'database');
-  assert.equal(duplicate.ai, null, 'Stale duplicate cleared in its own category');
+  assert.equal(deduped.digestCategories.Company.reused, null);
+  assert.ok(
+    duplicate.ai !== null && duplicate.ai !== 99,
+    'Same URL does not remove a Stage3 candidate',
+  );
   const emptyStore = new Store();
   for (const r of emptyStore.rows.filter((r) => r.category === 'Technology')) {
     r.url = 'https://example.com/event';
@@ -482,10 +669,14 @@ try {
   const emptyResult = await emptyStore.run(await mkdtemp(join(root, 'empty-')));
   assert.equal(emptyResult.status, 'success');
   assert.ok(
-    !emptyStore.calls.includes('Technology'),
-    'Entire deduplicated-away category needs no LLM',
+    emptyStore.calls.includes('Technology'),
+    'Same Event URL no longer removes a Digest category',
   );
-  assert.ok(emptyStore.rows.filter((r) => r.category === 'Technology').every((r) => r.ai === null));
+  assert.ok(
+    emptyStore.rows
+      .filter((r) => r.category === 'Technology')
+      .every((r) => r.ai !== null && r.ai !== 99),
+  );
   // Business commit and marker are one transaction: marker failure rolls ranks back.
   const broken = new Store();
   broken.checkpointFails = true;
@@ -515,7 +706,8 @@ try {
   const legacy = new Store();
   legacy.generalFails = true;
   const legacyFirst = await legacy.run(legacyRoot);
-  legacy.checkpoints = {}; // Simulate old Runs that predate durable category markers.
+  legacy.checkpoints = {};
+  legacy.details = {}; // Simulate old Runs that predate durable category markers.
   for (const row of legacy.rows) row.ai = null;
   legacy.generalFails = false;
   const legacyBefore = legacy.calls.length;
@@ -662,6 +854,85 @@ try {
     { status: 'partial', mergeMetrics: true },
   );
   assert.match(finishSql, /metrics=metrics \|\| \$6/);
+  // Consolidation commits routing, membership, feedback and a marker together; snapshot members stay immutable.
+  const consolidationRoot = await mkdtemp(join(root, 'consolidation-'));
+  const consolidated = new Store();
+  consolidated.consolidateMatches = true;
+  consolidated.consolidationFails = 'Finance & Economy';
+  const partialConsolidation = await consolidated.run(consolidationRoot);
+  assert.equal(partialConsolidation.status, 'partial');
+  assert.equal(consolidated.feedbackRows.length, 2);
+  assert.ok(
+    consolidated.rows.filter((r) => r.category === 'Company').every((r) => r.routing === 'event'),
+  );
+  assert.equal(consolidated.consolidationCalls.includes('Science'), false);
+  const oldReview = partialConsolidation.eventReviewRunId!;
+  assert.deepEqual(consolidated.reviewRows[oldReview][0].member_content_ids, [
+    consolidated.eventId,
+  ]);
+  const selection = await loadLatestStage4Selection(consolidated.pool, date, 15);
+  assert.equal(
+    selection[0].processedContentIds.length,
+    3,
+    'Stage4 reads current Group membership, including both routed Digest members',
+  );
+  const beforeConsolRetry = consolidated.consolidationCalls.length;
+  consolidated.consolidationFails = null;
+  // Remove ALL diagnostic artifacts: the successful Event, Consolidation and Long-form states are in PostgreSQL.
+  await rm(join(consolidationRoot, 'runtime'), { recursive: true, force: true });
+  const consolidatedRetry = await consolidated.run(consolidationRoot);
+  assert.equal(consolidatedRetry.status, 'success');
+  assert.equal(consolidatedRetry.eventReviewRunId, oldReview);
+  assert.equal(consolidated.eventCalls, 1);
+  assert.equal(consolidated.longCalls, 1);
+  assert.deepEqual(consolidated.consolidationCalls.slice(beforeConsolRetry), ['Finance & Economy']);
+  assert.equal(
+    consolidated.feedbackRows.length,
+    2,
+    'Retry does not duplicate feedback or membership',
+  );
+  const lastDetails = Object.values(consolidated.details).at(-1)!;
+  assert.equal((lastDetails.consolidation as Record<string, Stage3Step>).Company.status, 'skipped');
+  assert.equal(
+    (lastDetails.consolidation as Record<string, Stage3Step>).Science.reason,
+    'science_excluded',
+  );
+  assert.ok((lastDetails.consolidation as Record<string, Stage3Step>).Company.source_run_id);
+  const rollbackConsol = new Store();
+  rollbackConsol.consolidateMatches = true;
+  rollbackConsol.consolidationCommitFails = true;
+  const rollbackRoot = await mkdtemp(join(root, 'consol-rollback-'));
+  const rolledBack = await rollbackConsol.run(rollbackRoot);
+  assert.equal(rolledBack.status, 'failed');
+  assert.equal(rolledBack.llmCallCount, 2);
+  assert.equal(rollbackConsol.feedbackRows.length, 0);
+  assert.equal(rollbackConsol.memberships.length, 0);
+  assert.ok(rollbackConsol.rows.every((r) => r.category !== 'Company' || r.routing === 'digest'));
+  const failedState = (
+    Object.values(rollbackConsol.details).at(-1)!.consolidation as Record<string, Stage3Step>
+  ).Company;
+  assert.equal(failedState.status, 'failed');
+  assert.equal(failedState.failure_phase, 'persistence');
+  rollbackConsol.consolidationCommitFails = false;
+  assert.equal((await rollbackConsol.run(rollbackRoot)).status, 'success');
+  assert.equal(
+    rollbackConsol.consolidationCalls.filter((c) => c === 'Company').length,
+    2,
+    'LLM reruns after a rolled-back consolidation',
+  );
+  const downstream = new Store();
+  downstream.consolidateMatches = true;
+  downstream.generalFails = true;
+  const downstreamRoot = await mkdtemp(join(root, 'downstream-'));
+  assert.equal((await downstream.run(downstreamRoot)).status, 'partial');
+  const callsBefore = downstream.consolidationCalls.length;
+  downstream.generalFails = false;
+  assert.equal((await downstream.run(downstreamRoot)).status, 'success');
+  assert.equal(
+    downstream.consolidationCalls.length,
+    callsBefore,
+    'Digest ranking failure does not invalidate committed consolidation',
+  );
   const emptyMemory = new Store();
   emptyMemory.memoryContent = null;
   assert.equal((await emptyMemory.run(join(root, 'empty-memory'))).status, 'success');

@@ -1,5 +1,6 @@
-import type { Pool } from "pg";
-import type { PublishedAtScope } from "../lib/daily-scope.js";
+import type { Pool } from 'pg';
+import { NEWSLETTER_PROCESSABLE_SQL } from '../collectors/newsletter-content.js';
+import type { PublishedAtScope } from '../lib/daily-scope.js';
 
 type DuplicateRow = {
   id: string;
@@ -7,6 +8,9 @@ type DuplicateRow = {
   url: string | null;
   contentText: string | null;
   sourceName: string;
+  sourceId?: string;
+  sourceItemOriginId?: string | null;
+  newsletterContentType?: string | null;
 };
 
 export type PreStage1DuplicateSummary = {
@@ -25,18 +29,24 @@ export async function ignorePreStage1ExactDuplicates(
   scope: PublishedAtScope,
 ): Promise<PreStage1DuplicateSummary> {
   const result = await pool.query<DuplicateRow>(
-    `select ra.id, ra.title, ra.url, ra.content_text as "contentText", s.name as "sourceName"
+    `select ra.id, ra.title, ra.url, ra.content_text as "contentText", s.name as "sourceName",
+            ra.source_id as "sourceId", ra.source_item_origin_id as "sourceItemOriginId",
+            ra.metadata->'newsletter'->>'content_type' as "newsletterContentType"
        from raw_articles ra join sources s on s.id = ra.source_id
       where ra.stage1_status = 'pending'
+        and ${NEWSLETTER_PROCESSABLE_SQL}
         and ra.published_at >= $1::timestamptz and ra.published_at < $2::timestamptz
       order by ra.id asc`,
     [scope.startAt, scope.endAt],
   );
   const rows = result.rows;
   const historical = await pool.query<DuplicateRow>(
-    `select ra.id, ra.title, ra.url, ra.content_text as "contentText", s.name as "sourceName"
+    `select ra.id, ra.title, ra.url, ra.content_text as "contentText", s.name as "sourceName",
+            ra.source_id as "sourceId", ra.source_item_origin_id as "sourceItemOriginId",
+            ra.metadata->'newsletter'->>'content_type' as "newsletterContentType"
        from raw_articles ra join sources s on s.id = ra.source_id
       where ra.published_at >= $1::timestamptz - interval '72 hours'
+        and ${NEWSLETTER_PROCESSABLE_SQL}
         and ra.published_at < $1::timestamptz
       order by ra.id asc`,
     [scope.startAt],
@@ -67,9 +77,13 @@ export async function ignorePreStage1ExactDuplicates(
     const title = row.title.trim();
     const matchingRows = [...rows, ...historical.rows].filter((candidate) => candidate.id !== id);
     const sameUrl = Boolean(url && matchingRows.some((candidate) => candidate.url?.trim() === url));
-    const sameTitle = Boolean(title && matchingRows.some((candidate) => candidate.title.trim() === title));
+    const sameTitle = Boolean(
+      title && matchingRows.some((candidate) => candidate.title.trim() === title),
+    );
     const sameUrlAndTitle = Boolean(
-      url && title && matchingRows.some(
+      url &&
+      title &&
+      matchingRows.some(
         (candidate) => candidate.url?.trim() === url && candidate.title.trim() === title,
       ),
     );
@@ -97,6 +111,13 @@ export async function ignorePreStage1ExactDuplicates(
 }
 
 function duplicateKeys(row: DuplicateRow): string[] {
+  // An independently readable newsletter module is not the article it happens to link to.
+  if (row.newsletterContentType === 'standalone_content')
+    return [
+      row.sourceId && row.sourceItemOriginId
+        ? `newsletter:${row.sourceId}:${row.sourceItemOriginId}`
+        : `raw:${row.id}`,
+    ];
   const keys: string[] = [];
   const url = row.url?.trim();
   const title = row.title.trim();
@@ -108,7 +129,9 @@ function duplicateKeys(row: DuplicateRow): string[] {
 function compareDuplicateWinner(left: DuplicateRow, right: DuplicateRow): number {
   const leftContent = left.contentText?.trim().length ?? 0;
   const rightContent = right.contentText?.trim().length ?? 0;
-  return rightContent - leftContent
-    || right.sourceName.length - left.sourceName.length
-    || left.id.localeCompare(right.id);
+  return (
+    rightContent - leftContent ||
+    right.sourceName.length - left.sourceName.length ||
+    left.id.localeCompare(right.id)
+  );
 }

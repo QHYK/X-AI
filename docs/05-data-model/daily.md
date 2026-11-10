@@ -72,7 +72,7 @@ stage1_status, stage1_processed_at, processing_error
 ```text
 RSS GUID
 Atom ID
-Gmail Message ID
+Email 模块：gmail:<Gmail Message ID>:<Source-guided Unit ID>
 ```
 系统内部关联始终使用 `raw_articles.id`。具体 Collection / Dedup 行为见 `../06-workflow-spec/daily.md`。
 
@@ -85,6 +85,8 @@ Gmail Message ID
   "feed_specific_field": "..."
 }
 ```
+
+Newsletter 使用 `metadata.newsletter` 保存 `gmail_message_id`、`unit_id`、`source_rule_version`、`template`、`source_range`（原 HTML Hash 和模块偏移）及 `links`。`content_type` 为 `standalone_content` / `external_reference` / `non_content`，是 Parser 结构分类，不是 Stage 1 routing；这些是应用契约，不是数据库 CHECK。只保存模块纯文本，不保存完整邮件 HTML 或人工标注。Email 模块的 `published_at` 使用邮件接收时间，不代表链接文章的原始发布时间；`full_content_text` 不因结构分类而填充。处理与过滤见 [Daily Workflow](../06-workflow-spec/daily.md#33-collection-level-exact-dedup)。
 
 `raw_articles.metadata.put_back_preparation` 保存小型、经 Schema 校验的恢复准备结果（dailyDate、fields、ignoreType），不是新的 Pipeline 状态；独立于最终恢复事务提交，最终写入失败时可复用已付费生成结果。成功恢复保留该来源记录。准备缓存本身保存失败时返回生成字段并明确报错，不声称已经恢复；不保存重复正文。
 
@@ -370,6 +372,7 @@ runtime artifact 或原始模型输出。
 | `started_at` | timestamptz | NOT NULL；默认 now() |
 | `finished_at` | timestamptz | nullable |
 | `metrics` | jsonb | NOT NULL；默认 {} |
+| `details` | jsonb | NOT NULL；默认 {}；Migration `0028_pipeline_run_details.sql` |
 | `error_summary` | text | nullable |
 | `created_at` | timestamptz | NOT NULL；默认 now() |
 | `updated_at` | timestamptz | NOT NULL；默认 now() |
@@ -379,10 +382,11 @@ runtime artifact 或原始模型输出。
   `stage4_runs.status` 保持同一 canonical 值。
 - `trigger_source`（应用取值，无数据库 CHECK）: `daily_orchestrator`、`standalone`、`dashboard`。
 - `metrics` 为小型 JSONB 摘要（调用数、重试、耗时、Stage 特有计数及 Provider usage）；LLM Stage 可记录 `input_tokens`、`output_tokens`、`total_tokens`、`cached_input_tokens` 与 `token_usage_complete`。缓存命中率是由完整统计派生的 `cached_input_tokens / input_tokens`，不持久化，也不机械复制 runtime JSON。
-- Stage3 的 `metrics.stage3_digest_checkpoints[category]` 为分类成功记录：`status=success`、category、input_hash、prompt_version_id、system_fragment_versions、按排名排列的 processed content UUID 数组 `ranked_ids`，以及本次 execution 摘要。它与对应业务排名同事务提交，不保存正文或模型原始响应。去重后空分类只清理过期排名，`prompt_version_id=null`，不加载 Prompt 或调用模型；父 Run 为 partial / failed / running 并不否定已提交的分类。不存在标记、版本 / Hash 不符或实际排名不完整时，不可据此复用。`digest_categories` 和 `category_corrections` 提供本次执行诊断；结束日志不得覆盖已提交标记。这是现有 JSONB 的应用结构扩展，无新增 Schema / Migration。
+- Stage3 的 `details` 按固定子步骤存储：`event_ranking`、`consolidation[category]`、`digest_ranking[category]`、`long_form_ranking`。每步为 running / success / failed / skipped，包含 input_hash、必要的 ID / UUID 映射、Prompt / Fragment UUID、复用来源、模型 / Provider、调用 / 重试 / 耗时 / Usage、验证计数及有长度上限的错误；不保存文章正文、完整 Prompt 或原始响应。每次 Attempt 独立一行，分类状态覆盖本次固定键，不追加无限日志。
+- Event 检查点关联 review_run_id；Ranking 记录有序 UUID；Consolidation 保存输入 ID、匹配关系、matched_content_ids 和 remaining_hash。业务结果与成功标记同事务提交。旧 `metrics.stage3_digest_checkpoints` 保留读取兼容，不再写入新检查点。恢复校验属于 [Technical Spec](../04-technical-spec/daily.md#stage3-检查点与恢复一致性)。
 - Dashboard 对指定 `daily_date + step` 选择 `started_at` 最新的一条，即 Latest Attempt。
 
-Migration `0011` 的索引尾列为 `started_at DESC`；当前 Drizzle `.on()` 未声明 DESC。这里分别记录定义，不声称两者方向完全相同。`metrics` 只声明 JSONB 非空及默认对象，没有 JSON 对象类型 CHECK。
+Migration `0011` 的索引尾列为 `started_at DESC`；当前 Drizzle `.on()` 未声明 DESC。这里分别记录定义，不声称两者方向完全相同。`metrics` / `details` 只声明 JSONB 非空及默认对象，没有 JSON 对象类型 CHECK。
 
 ### 索引与数据库约束
 
@@ -408,6 +412,7 @@ Migration `0011` 的索引尾列为 `started_at DESC`；当前 Drizzle `.on()` �
 ranking_error
 false_positive
 false_negative
+routing_error
 ```
 
 人工修改 Ranking 时：
@@ -416,6 +421,8 @@ ai_rank 保持不变
 display_rank 更新
 feedback 写入修改记录
 ```
+
+Stage3 Consolidation 的 routing_error 使用 target_type=processed_content：before_value 保存 routing=digest、daily_date、category；after_value 保存 routing=event、event_group_id、daily_date、review_run_id、pipeline_run_id、source=stage3_consolidation 与 membership_added。Dashboard Routing Corrections 按目标 processed_contents.daily_date、distinct target_id 计数；这是来源标记，不是数据库枚举约束。
 
 `target_id` 是多态逻辑关联，没有数据库 FK；`feedback_type` 的示例值也不是枚举 CHECK。
 

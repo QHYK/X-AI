@@ -3,14 +3,11 @@
  *
  * snapshot 只保存排名、Event hint 与成员 ID；Review 展示内容继续关联现有业务表读取。
  */
-import type { Pool, PoolClient } from "pg";
-import type {
-  Stage3EventRankedOutput,
-  Stage3EventRankingInput,
-} from "./stage3-contract.js";
-import { MAX_STAGE3_EVENT_RANKINGS } from "./stage3-contract.js";
+import type { Pool, PoolClient } from 'pg';
+import type { Stage3EventRankedOutput, Stage3EventRankingInput } from './stage3-contract.js';
+import { MAX_STAGE3_EVENT_RANKINGS } from './stage3-contract.js';
 
-type Queryable = Pick<PoolClient, "query">;
+type Queryable = Pick<PoolClient, 'query'>;
 
 export type EventReviewSnapshotItem = {
   reviewRunId: string;
@@ -64,6 +61,7 @@ export function buildEventReviewSnapshotItems(options: {
 export async function persistEventReviewSnapshot(
   pool: Pool,
   items: EventReviewSnapshotItem[],
+  onPersisted?: (client: PoolClient) => Promise<void>,
 ): Promise<number> {
   if (items.length === 0) {
     return 0;
@@ -71,12 +69,13 @@ export async function persistEventReviewSnapshot(
 
   const client = await pool.connect();
   try {
-    await client.query("begin");
+    await client.query('begin');
     const inserted = await insertEventReviewSnapshotItems(client, items);
-    await client.query("commit");
+    await onPersisted?.(client);
+    await client.query('commit');
     return inserted;
   } catch (error) {
-    await client.query("rollback");
+    await client.query('rollback');
     throw error;
   } finally {
     client.release();

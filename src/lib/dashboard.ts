@@ -1,4 +1,8 @@
 import { loadDashboardPromptVersions } from './dashboard-prompt-versions.js';
+import {
+  NEWSLETTER_PROCESSABLE_SQL,
+  NON_EMAIL_SOURCE_SQL,
+} from '../collectors/newsletter-content.js';
 /**
  * Dashboard 的服务端数据聚合层。
  *
@@ -30,6 +34,7 @@ type CountRow = {
   ignored?: number | string;
   failed?: number | string;
   completion_backlog?: number | string;
+  routing_corrections?: number | string;
   event?: number | string;
   digest?: number | string;
   long_form?: number | string;
@@ -107,8 +112,8 @@ export type DashboardStageMetrics = {
   candidateCount: number | null;
   groupCount: number | null;
   selectedEventCount: number | null;
-  digestBeforeDedup: number | null;
-  digestAfterDedup: number | null;
+  digestInputCount: number | null;
+  digestAfterConsolidation: number | null;
   longFormCount: number | null;
   enrichmentSuccessCount: number | null;
   enrichmentFailureCount: number | null;
@@ -188,6 +193,7 @@ export type DashboardDay = {
   processed: Record<Routing, number> & { total: number };
   events: { published: number; draft: number };
   completionBacklog: number;
+  routingCorrections: number;
   runtime: {
     contentCompletion: DashboardContentCompletionMetrics | null;
     duplicateFilter: DashboardDuplicateFilterMetrics | null;
@@ -329,6 +335,8 @@ export async function getDashboardData(
           )::int as failed,
           count(ra.id) filter (
             where ra.stage1_status = 'pending'
+              and ${NON_EMAIL_SOURCE_SQL}
+              and ${NEWSLETTER_PROCESSABLE_SQL}
               and ra.url is not null
               and length(btrim(coalesce(ra.content_text, ''))) < $4
           )::int as completion_backlog
@@ -336,6 +344,7 @@ export async function getDashboardData(
         left join raw_articles ra
           on ra.published_at >= scope.start_at
           and ra.published_at < scope.end_at
+        left join sources s on s.id = ra.source_id
         group by scope.date
       `,
       [scopeDates, scopeStarts, scopeEnds, CONTENT_COMPLETION_SHORT_CHARS],
@@ -351,7 +360,12 @@ export async function getDashboardData(
           count(pc.id) filter (where pc.routing = 'event')::int as event,
           count(pc.id) filter (where pc.routing = 'digest')::int as digest,
           count(pc.id) filter (where pc.routing = 'long_form')::int as long_form,
-          count(pc.id) filter (where pc.routing = 'inspiration')::int as inspiration
+          count(pc.id) filter (where pc.routing = 'inspiration')::int as inspiration,
+          (select count(distinct f.target_id)::int from feedback f
+           join processed_contents corrected on corrected.id=f.target_id
+           where corrected.daily_date=scope.date::date and f.target_type='processed_content'
+             and f.feedback_type='routing_error' and f.before_value->>'routing'='digest'
+             and f.after_value->>'routing'='event' and f.after_value->>'source'='stage3_consolidation') as routing_corrections
         from scopes scope
         left join processed_contents pc on pc.daily_date = scope.date::date
         group by scope.date
@@ -456,6 +470,7 @@ export async function getDashboardData(
       },
       events: { published: count(event?.published), draft: count(event?.draft) },
       completionBacklog: count(raw?.completion_backlog),
+      routingCorrections: count(processed?.routing_corrections),
       runtime: {
         contentCompletion: pipelineRuns?.get('content_completion')
           ? completionMetricsFromPipelineRun(pipelineRuns.get('content_completion')!)
@@ -843,8 +858,8 @@ function stageMetricsFromPipelineRun(
     tokenUsageComplete: booleanFrom(metrics, 'token_usage_complete'),
     groupCount: numberFrom(metrics, 'group_count', 'event_group_count'),
     selectedEventCount,
-    digestBeforeDedup: numberFrom(metrics, 'digest_before_dedup'),
-    digestAfterDedup: numberFrom(metrics, 'digest_after_dedup'),
+    digestInputCount: numberFrom(metrics, 'digest_input_count'),
+    digestAfterConsolidation: numberFrom(metrics, 'digest_after_consolidation'),
     longFormCount: numberFrom(metrics, 'long_form_count'),
     enrichmentSuccessCount: numberFrom(metrics, 'ready_count'),
     enrichmentFailureCount: numberFrom(metrics, 'failed_count'),
@@ -1181,8 +1196,8 @@ function stage1MetricsFromDailyStep(step: JsonObject, startedAt: string): Dashbo
     candidateCount: null,
     groupCount: null,
     selectedEventCount: null,
-    digestBeforeDedup: null,
-    digestAfterDedup: null,
+    digestInputCount: null,
+    digestAfterConsolidation: null,
     longFormCount: null,
     enrichmentSuccessCount: null,
     enrichmentFailureCount: null,
@@ -1226,8 +1241,8 @@ function emptyStageMetrics(stage: DashboardStage): DashboardStageMetrics {
     candidateCount: null,
     groupCount: null,
     selectedEventCount: null,
-    digestBeforeDedup: null,
-    digestAfterDedup: null,
+    digestInputCount: null,
+    digestAfterConsolidation: null,
     longFormCount: null,
     enrichmentSuccessCount: null,
     enrichmentFailureCount: null,
@@ -1320,8 +1335,8 @@ async function parseStageMetrics(
     candidateCount: numberFrom(artifact, 'candidate_count'),
     groupCount: numberFrom(artifact, 'final_group_count', 'event_group_count'),
     selectedEventCount,
-    digestBeforeDedup: numberFrom(artifact, 'digest_before_dedup'),
-    digestAfterDedup: numberFrom(artifact, 'digest_after_dedup'),
+    digestInputCount: numberFrom(artifact, 'digest_input_count'),
+    digestAfterConsolidation: numberFrom(artifact, 'digest_after_consolidation'),
     longFormCount: numberFrom(artifact, 'long_form_count'),
     enrichmentSuccessCount,
     enrichmentFailureCount: numberFrom(artifact, 'enrichment_failure_count'),

@@ -15,6 +15,7 @@
     content_type       = article_body
 */
 import type { Pool, PoolClient } from "pg";
+import { NEWSLETTER_PROCESSABLE_SQL, NON_EMAIL_SOURCE_SQL } from '../collectors/newsletter-content.js';
 
 export type ContentCompletionOptions = {
   limit?: number;
@@ -193,6 +194,8 @@ export function resolveContentCompletionRuntimeConfig(
 
 const ELIGIBILITY = `
   ra.stage1_status = 'pending'
+  and ${NON_EMAIL_SOURCE_SQL}
+  and ${NEWSLETTER_PROCESSABLE_SQL}
   and ra.url is not null
   and (cardinality($1::text[]) = 0 or s.name = any($1::text[]))
   and length(btrim(coalesce(ra.content_text, ''))) < $2

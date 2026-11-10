@@ -4,6 +4,7 @@ import { getActiveMemories, formatMemories } from '../lib/memories.js';
  * 通过 raw_articles 状态与 processed_contents 的唯一约束保证重复运行安全。
  */
 import type { Pool, PoolClient, QueryResult } from 'pg';
+import { NEWSLETTER_PROCESSABLE_SQL } from '../collectors/newsletter-content.js';
 import { runStage1BatchLlm, type Stage1LlmOptions, type Stage1TokenUsage } from './stage1-llm.js';
 import { emptyLlmTokenUsage, mergeLlmTokenUsage } from './llm-token-usage.js';
 import type {
@@ -311,6 +312,7 @@ export async function loadPendingStage1Articles(
       from raw_articles ra
       join sources s on s.id = ra.source_id
       where ra.stage1_status in ('pending', 'failed')
+        and ${NEWSLETTER_PROCESSABLE_SQL}
         and ${publishedAtPredicate}
       order by
         case when s.priority = 'High' then 0 when s.priority = 'Medium' then 1 else 2 end,
@@ -353,6 +355,7 @@ export async function loadStage1EvaluationArticles(
       from raw_articles ra
       join sources s on s.id = ra.source_id
       where ra.published_at >= $1::timestamptz
+        and ${NEWSLETTER_PROCESSABLE_SQL}
         and ra.published_at < $2::timestamptz
       order by
         case when s.priority = 'High' then 0 when s.priority = 'Medium' then 1 else 2 end,
@@ -395,6 +398,7 @@ export async function loadStage1EvaluationArticlesByIds(
       from raw_articles ra
       join sources s on s.id = ra.source_id
       where ra.id = any($1::uuid[])
+        and ${NEWSLETTER_PROCESSABLE_SQL}
       order by array_position($1::uuid[], ra.id)
     `,
     [rawArticleIds],

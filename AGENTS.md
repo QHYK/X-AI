@@ -57,6 +57,7 @@
 ## 3. Architecture Boundaries
 
 遵守 `docs/04-technical-spec/architecture.md` 中 **Project Structure & Engineering Rules** 定义的模块与依赖边界。不要为了当前局部任务改变无关的 Database Schema、Routing values、LLM Output Contract、Daily Scope、Persistence semantics 或 Public API contract；确需改变时，先明确影响范围并读取对应 Source of Truth。
+在做技术 spike 时，代码（括 runtime 文件）都放到 `spikes/` 下。
 
 ## 4. Implementation Rules
 

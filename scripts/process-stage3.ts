@@ -74,6 +74,7 @@ async function main() {
         metrics: {
           prompt_versions: {
             event: promptVersions['daily.stage3.event_ranking'] ?? null,
+            consolidation: promptVersions['daily.stage3.event_digest_consolidation'] ?? null,
             digest: promptVersions['daily.stage3.digest_ranking'] ?? null,
             long_form: promptVersions['daily.stage3.long_form_ranking'] ?? null,
           },
@@ -84,8 +85,8 @@ async function main() {
           },
           event_group_count: result.eventGroupCount,
           selected_count: result.eventSelectedCount,
-          digest_before_dedup: result.digestBeforeDedup,
-          digest_after_dedup: result.digestAfterDedup,
+          digest_input_count: result.digestInputCount,
+          digest_after_consolidation: result.digestAfterConsolidation,
           long_form_count: result.longFormCount,
           llm_calls: result.llmCallCount,
           retry_count: result.retryCount,
@@ -105,7 +106,6 @@ async function main() {
             : null,
           ranking_statuses: result.rankingStatuses,
           category_correction_count: result.categoryCorrections.length,
-          digest_categories: JSON.parse(JSON.stringify(result.digestCategories)),
           category_corrections: JSON.parse(JSON.stringify(result.categoryCorrections)),
           ...stage3WarningMetrics(result),
         },

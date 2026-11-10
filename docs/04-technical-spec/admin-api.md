@@ -49,7 +49,7 @@ Dashboard 的 Prompt 版本展示按各阶段已保存的精确 UUID 批量关�
 
 Dashboard 是只读观察入口和显式管理操作入口，不是业务 Source of Truth；状态、Usage 或 Job Report 缺失时保持未知，不能从当前内容反推出历史执行成功。Evaluation 与正式结果隔离；Editorial、审核状态和 Notes 各自保存，不借一个 action 隐式修改其他控制对象。
 
-Digest 公开条目附带 `imageUrl: string | null`，由 `processed_contents.raw_article_id` 关联的 `raw_articles.image_url` 提供；仅接受绝对 HTTP(S) URL（不含凭据），缺失或非法返回 null。Xfield 使用固定 4:3 缩略图区域，缺图或加载失败显示中性占位；不补抓图片，不改变 Digest 成员、分类及排序，Event / Long-form 结构不变。
+Digest 公开条目附带 `imageUrl: string | null`，由 `processed_contents.raw_article_id` 关联的 `raw_articles.image_url` 提供；仅接受绝对 HTTP(S) URL（不含凭据），缺失或非法返回 null。Xfield 使用固定 4:3 缩略图区域，缺图或加载失败显示中性占位；不补抓图片，不改变 Digest 成员、分类及排序，Event / Long-form 的图片结构不变。
 
 ## 6. API 与展示边界
 
@@ -60,6 +60,7 @@ Digest 公开条目附带 `imageUrl: string | null`，由 `processed_contents.ra
 GET /api/brief?date=YYYY-MM-DD
 ```
 Daily Brief API 按指定日期提供 publish-ready 内容。它读取 Production 数据，不额外创建 `daily_briefs` snapshot 层，并作为 X-AI-field 与 X-field 之间的 Presentation Boundary。
+Digest 和 Long-form 条目包含 `contentLength: number`，优先计算 `raw_articles.full_content_text` 的字符数，否则计算 `raw_articles.content_text` 的字符数；两者均为空时为 `0`，API 不返回正文。
 
 Daily membership、Ranking 与 Composition 的执行语义见 `../06-workflow-spec/daily.md`。
 

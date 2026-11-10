@@ -110,7 +110,9 @@ globals.__promptWireClient = () => {
       output_text:
         schema?.format?.name === 'stage4_external_context_decision'
           ? JSON.stringify({ need_external_context: search })
-          : '{}',
+          : schema?.format?.name === 'stage3_consolidation'
+            ? '{"matches":[]}'
+            : '{}',
     };
   };
   return { structured: { create: request }, responses: { create: request }, close: async () => {} };
@@ -194,6 +196,52 @@ try {
       }
     }
   }
+  // New semantic matching request uses the actual Registry and structured client, with no legacy Prompt copy.
+  const consolidationModule = await moduleFromSource(
+    'src/processing/stage3-consolidation-llm.ts',
+    await readFile('src/processing/stage3-consolidation-llm.ts', 'utf8'),
+  );
+  const consolidationInput = {
+    category: 'Company',
+    events: [
+      {
+        event_group_id: '00000000-0000-4000-8000-000000000001',
+        hint: 'A specific earnings announcement',
+      },
+    ],
+    candidates: [
+      {
+        id: '00000000-0000-4000-8000-000000000002',
+        title: 'Report',
+        summary: 'Announcement',
+        source: 'Source',
+      },
+    ],
+  };
+  captured.length = 0;
+  const consolidationResult = (await withPromptBindings(
+    memory.db,
+    databasePromptBinder(memory.db, 'discovery', 'consolidation-wire'),
+    () =>
+      consolidationModule.runStage3Consolidation(consolidationInput, {
+        model: 'test-stage3-model',
+      }),
+  )) as import('../src/processing/stage3-consolidation-llm.js').ConsolidationResult;
+  assert.equal(consolidationResult.calls, 1);
+  assert.deepEqual(consolidationResult.output, { matches: [] });
+  const consolidationRequest = (
+    captured[0] as {
+      args: {
+        model: string;
+        input: { content: { text: string }[] }[];
+        text: { format: { strict: boolean; schema: { required: string[] } } };
+      };
+    }
+  ).args;
+  assert.equal(consolidationRequest.model, 'test-stage3-model');
+  assert.deepEqual(JSON.parse(consolidationRequest.input[0].content[0].text), consolidationInput);
+  assert.equal(consolidationRequest.text.format.strict, true);
+  assert.deepEqual(consolidationRequest.text.format.schema.required, ['matches']);
   // Optional Memory changes only the dynamic User data; retries reuse the prepared request.
   for (const test of cases.filter((c) => /stage[13]-/.test(c.path))) {
     const current = await moduleFromSource(test.path, await readFile(test.path, 'utf8'));

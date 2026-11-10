@@ -6,3 +6,10 @@ node_modules/
 *.tsbuildinfo
 *.log
 runtime/
+gmail-oauth-client.json
+# Gmail Desktop OAuth credentials; samples/tokens are covered by runtime/.
+/client_secret*.json
+/gmail-oauth-*.json
+
+# Local Gmail annotation proposals and other private spike artifacts.
+/spikes/gmail/runtime/

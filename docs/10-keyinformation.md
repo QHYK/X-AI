@@ -14,6 +14,12 @@ D2	contents: {}	general + topic
 stage1	articles: []	content
 stage3:event	events: []	content
 
+#### Pre-Stage1 去重逻辑
+normalized / trimmed URL 相同
+    OR
+title 相同
+Winner 的选择顺序为：正文更长、Source 名称更短、最后按 ID 稳定排序。
+
 #### stage 3 什么时候失败？
 Ranking	| Invented ID | 重复 ID | 缺失 ID
 Event	|  直接剔除    | 去重	 | 不补齐

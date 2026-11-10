@@ -32,6 +32,7 @@ const pool = {
           published_at: null,
           created_at: '2026-10-10T00:00:00.000Z',
           hasFullContent: true,
+          contentLength: index === 0 ? 1200 : 0,
         })),
       };
     if (text.includes("pc.routing = 'long_form'"))
@@ -50,6 +51,7 @@ const pool = {
             published_at: null,
             created_at: '2026-10-10T00:00:00.000Z',
             hasFullContent: false,
+            contentLength: 3200,
           },
         ],
       };
@@ -67,11 +69,19 @@ assert.deepEqual(
   images.map((_, i) => `digest-${i + 1}`),
 );
 assert.ok(!('imageUrl' in brief.long_form[0]), 'Long-form structure remains unchanged');
+assert.equal(brief.digests.Technology[0].contentLength, 1200);
+assert.equal(brief.digests.Technology[1].contentLength, 0);
+assert.equal(brief.long_form[0].contentLength, 3200);
+assert.ok(!('full_content_text' in brief.long_form[0]));
+assert.ok(!('content_text' in brief.digests.Technology[0]));
 const digestQuery = queries.filter((q) => q.includes("pc.routing = 'digest'"));
 assert.equal(digestQuery.length, 1, 'Images must not cause per-article queries');
 assert.ok(digestQuery[0].includes('ra.image_url'));
 assert.ok(digestQuery[0].includes('ra.id = pc.raw_article_id'));
 const contentQueries = queries.filter((query) => query.includes('content_read_more'));
+const contentLengthSql =
+  "char_length(coalesce(nullif(ra.full_content_text, ''), nullif(ra.content_text, ''), '')) as \"contentLength\"";
+assert.ok(contentQueries.every((query) => query.includes(contentLengthSql)));
 const passed =
   brief.digests.Technology?.[0]?.has_full_content === true &&
   brief.long_form[0]?.has_full_content === false &&

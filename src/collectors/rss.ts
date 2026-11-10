@@ -5,6 +5,14 @@
  */
 import Parser from "rss-parser";
 import type { Pool, PoolClient } from "pg";
+import {
+  emptyImageEnrichmentStats,
+  enrichRssImages,
+  imageEnrichmentHost,
+  type FeedIdentity,
+  type ImageEnrichmentStats,
+  type PageRequest,
+} from './rss-image-enrichment.js';
 
 export type RssSource = {
   id: string;
@@ -14,17 +22,8 @@ export type RssSource = {
   url: string;
 };
 
-export type NormalizedRawArticle = {
-  sourceItemOriginId: string | null;
-  title: string;
-  url: string | null;
-  author: string | null;
-  publishedAt: Date | null;
-  contentText: string | null;
-  imageUrl: string | null;
-  sourceTags: string[] | null;
-  metadata: Record<string, unknown> | null;
-};
+export type { NormalizedRawArticle } from './raw-articles.js';
+import { insertRawArticle, type NormalizedRawArticle } from './raw-articles.js';
 
 export type SourceCollectionResult = {
   sourceId: string;
@@ -38,6 +37,7 @@ export type SourceCollectionResult = {
   skippedDuplicateCount: number;
   skippedOutOfWindowCount: number;
   skippedInvalidCount: number;
+  imageEnrichment: ImageEnrichmentStats;
   error: string | null;
 };
 
@@ -139,12 +139,15 @@ const COMMON_ITEM_KEYS = new Set([
 ]);
 
 /** 并发采集全部启用的 RSS Source，并返回按来源可追踪的汇总结果。 */
-export async function collectRssSources(pool: Pool): Promise<RssCollectionSummary> {
+export async function collectRssSources(
+  pool: Pool,
+  dependencies: { fetchFeed?: (url: string) => Promise<string>; imageRequest?: PageRequest } = {},
+): Promise<RssCollectionSummary> {
   const sources = await loadEnabledRssSources(pool);
   const results = await runWithConcurrency(
     sources,
     Math.max(1, resolveRssRuntimeConfig().concurrency),
-    (source) => collectRssSource(pool, source),
+    (source) => collectRssSource(pool, source, dependencies),
   );
 
   return summarizeResults(results);
@@ -169,13 +172,17 @@ export async function loadEnabledRssSources(pool: Pool): Promise<RssSource[]> {
   return result.rows;
 }
 
-async function collectRssSource(pool: Pool, source: RssSource): Promise<SourceCollectionResult> {
+async function collectRssSource(
+  pool: Pool,
+  source: RssSource,
+  dependencies: { fetchFeed?: (url: string) => Promise<string>; imageRequest?: PageRequest },
+): Promise<SourceCollectionResult> {
   const lookbackDays = getLookbackDays(source);
   const baseResult: SourceCollectionResult = {
     sourceId: source.id,
     sourceName: source.name,
     sourceUrl: source.url,
-    status: "failure",
+    status: 'failure',
     lookbackDays,
     fetchedItemCount: 0,
     windowItemCount: 0,
@@ -183,15 +190,17 @@ async function collectRssSource(pool: Pool, source: RssSource): Promise<SourceCo
     skippedDuplicateCount: 0,
     skippedOutOfWindowCount: 0,
     skippedInvalidCount: 0,
+    imageEnrichment: emptyImageEnrichmentStats(),
     error: null,
   };
 
   try {
-    const feedXml = await fetchFeedXml(source.url);
+    const feedXml = await (dependencies.fetchFeed ?? fetchFeedXml)(source.url);
     const feed = await parser.parseString(feedXml);
     const cutoff = getCutoffDate(lookbackDays);
 
     baseResult.fetchedItemCount = feed.items.length;
+    const feedIdentities: FeedIdentity[] = [];
 
     const client = await pool.connect();
     try {
@@ -214,6 +223,7 @@ async function collectRssSource(pool: Pool, source: RssSource): Promise<SourceCo
           baseResult.skippedInvalidCount += 1;
           continue;
         }
+        feedIdentities.push(dedupeKey);
 
         if (await rawArticleExists(client, source.id, dedupeKey)) {
           baseResult.skippedDuplicateCount += 1;
@@ -227,9 +237,32 @@ async function collectRssSource(pool: Pool, source: RssSource): Promise<SourceCo
       client.release();
     }
 
+    if (imageEnrichmentHost(source)) {
+      try {
+        baseResult.imageEnrichment = await enrichRssImages(pool, source, feedIdentities, {
+          request: dependencies.imageRequest,
+        });
+      } catch (error) {
+        baseResult.imageEnrichment.failed = 1;
+        baseResult.imageEnrichment.failureReasons.setup_error = 1;
+        console.error('RSS image enrichment setup failed.', {
+          sourceId: source.id,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+      console.info(
+        JSON.stringify({
+          event: 'rss_image_enrichment',
+          sourceId: source.id,
+          sourceName: source.name,
+          ...baseResult.imageEnrichment,
+        }),
+      );
+    }
+
     return {
       ...baseResult,
-      status: "success",
+      status: 'success',
     };
   } catch (error) {
     return {
@@ -495,44 +528,6 @@ async function rawArticleExists(
   );
 
   return result.rowCount !== null && result.rowCount > 0;
-}
-
-async function insertRawArticle(
-  client: PoolClient,
-  sourceId: string,
-  article: NormalizedRawArticle,
-) {
-  await client.query(
-    `
-      insert into raw_articles (
-        source_id,
-        source_item_origin_id,
-        title,
-        url,
-        author,
-        published_at,
-        collected_at,
-        content_text,
-        image_url,
-        source_tags,
-        metadata,
-        stage1_status
-      )
-      values ($1, $2, $3, $4, $5, $6, now(), $7, $8, $9, $10, 'pending')
-    `,
-    [
-      sourceId,
-      article.sourceItemOriginId,
-      article.title,
-      article.url,
-      article.author,
-      article.publishedAt,
-      article.contentText,
-      article.imageUrl,
-      article.sourceTags,
-      JSON.stringify(article.metadata),
-    ],
-  );
 }
 
 function getLookbackDays(source: RssSource): number {

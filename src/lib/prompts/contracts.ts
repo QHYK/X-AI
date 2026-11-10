@@ -7,6 +7,7 @@ export const PROMPT_CONTRACTS = {
   'daily.stage2.event_merge': {},
   'daily.stage3.event_ranking': {},
   'daily.stage3.digest_ranking': { category: true },
+  'daily.stage3.event_digest_consolidation': {},
   'daily.stage3.long_form_ranking': {},
   'daily.stage4.external_context_decision': {},
   'daily.stage4.event_dedup': {},
