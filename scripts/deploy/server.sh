@@ -258,7 +258,7 @@ if (( needs_install )); then
   mkdir "$stage/deps"
   cp "$stage/package.json" "$stage/package-lock.json" "$stage/deps/"
   # Pipeline CLI uses tsx from devDependencies even on the production server.
-  (cd "$stage/deps" && npm ci --include=dev --no-audit --no-fund)
+  (cd "$stage/deps" && npm install --include=dev --no-audit --no-fund --package-lock=false)
   (cd "$stage/deps" && npm ls --include=dev --depth=0 --silent >/dev/null)
   mkdir -p "$stage/deps/node_modules"
 fi
