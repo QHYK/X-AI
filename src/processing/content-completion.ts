@@ -14,8 +14,11 @@
     full_content_text  = cleaned 完整正文
     content_type       = article_body
 */
-import type { Pool, PoolClient } from "pg";
-import { NEWSLETTER_PROCESSABLE_SQL, NON_EMAIL_SOURCE_SQL } from '../collectors/newsletter-content.js';
+import type { Pool, PoolClient } from 'pg';
+import {
+  NEWSLETTER_PROCESSABLE_SQL,
+  NON_EMAIL_SOURCE_SQL,
+} from '../collectors/newsletter-content.js';
 
 export type ContentCompletionOptions = {
   limit?: number;
@@ -26,17 +29,17 @@ export type ContentCompletionOptions = {
   scopeEndAt?: string;
 };
 
-export type CompletionStatus = "success" | "unusable" | "failed" | "skipped";
-export type FirecrawlPoolName = "A" | "B";
+export type CompletionStatus = 'success' | 'unusable' | 'failed' | 'skipped';
+export type FirecrawlPoolName = 'A' | 'B' | 'C';
 export type CompletionContentType =
-  | "article_body"
-  | "takeaways"
-  | "key_points"
-  | "abstract"
-  | "description"
-  | "summary"
-  | "executive_summary"
-  | "release_summary";
+  | 'article_body'
+  | 'takeaways'
+  | 'key_points'
+  | 'abstract'
+  | 'description'
+  | 'summary'
+  | 'executive_summary'
+  | 'release_summary';
 
 export type ContentCompletionResult = {
   rawArticleId: string;
@@ -56,6 +59,7 @@ export type ContentCompletionResult = {
   error: string | null;
   rawMarkdown: string | null;
   pool: FirecrawlPoolName;
+  processingFailed?: boolean;
 };
 
 export type ContentCompletionPoolSummary = {
@@ -91,21 +95,24 @@ export type ContentCompletionSummary = {
   contentTextLength: number;
   fullContentTextLength: number;
   poolMetrics: Record<FirecrawlPoolName, ContentCompletionPoolSummary>;
+  averageContentLength: number | null;
   results: ContentCompletionResult[];
 };
 
 export type ContentCompletionMetrics = Pick<
   ContentCompletionSummary,
-  | "candidateCount"
-  | "selectedCount"
-  | "successCount"
-  | "unusableCount"
-  | "failedCount"
-  | "skippedCount"
-  | "remainingCount"
-  | "attemptedCount"
-  | "firecrawlRequestCount"
-  | "retryCount"
+  | 'candidateCount'
+  | 'selectedCount'
+  | 'successCount'
+  | 'unusableCount'
+  | 'failedCount'
+  | 'skippedCount'
+  | 'remainingCount'
+  | 'attemptedCount'
+  | 'firecrawlRequestCount'
+  | 'retryCount'
+  | 'averageContentLength'
+  | 'poolMetrics'
 >;
 
 export type ContentCompletionLimits = {
@@ -151,14 +158,14 @@ export type FirecrawlExtraction = {
   contentType: CompletionContentType | null;
 };
 
-const MAX_TOTAL_LIMIT = 80;
-const MAX_POOL_ASSIGNMENT = 40;
-const SPECIAL_SKIP_SOURCE_NAMES = new Set(["xkcd", "NASA Image of the Day"]);
+const MAX_TOTAL_LIMIT = 90;
+const MAX_POOL_ASSIGNMENT = 30;
+const SPECIAL_SKIP_SOURCE_NAMES = new Set(['xkcd', 'NASA Image of the Day']);
 const INSTITUTIONAL_RELEASE_SOURCE_NAMES = new Set([
-  "CPI",
-  "PPI",
-  "非农报告 Employment Situation",
-  "BEA - 商务部数据",
+  'CPI',
+  'PPI',
+  '非农报告 Employment Situation',
+  'BEA - 商务部数据',
 ]);
 const INSTITUTIONAL_SUMMARY_MAX_CHARS = 2_500;
 // const PLACEHOLDERS = new Set(["comments", "comment", "read more", "continue reading...", "full text ]]>"]);
@@ -186,7 +193,7 @@ export function resolveContentCompletionRuntimeConfig(
     perSourceLimit: Number(environment.CONTENT_COMPLETION_PER_SOURCE_LIMIT ?? 10),
     concurrency: Number(environment.CONTENT_COMPLETION_CONCURRENCY ?? 2),
     // 是否值得触发 Content Completion 的正文长度阈值；不同于 Firecrawl 结果的最低可用阈值。
-    shortContentChars: Number(environment.CONTENT_COMPLETION_SHORT_CHARS ?? 80), 
+    shortContentChars: Number(environment.CONTENT_COMPLETION_SHORT_CHARS ?? 80),
     timeoutMs: Number(environment.CONTENT_COMPLETION_FIRECRAWL_TIMEOUT_MS ?? 30_000),
     maxRetries: Number(environment.CONTENT_COMPLETION_FIRECRAWL_MAX_RETRIES ?? 2),
   };
@@ -210,50 +217,80 @@ export async function completeRawArticleContent(
   options: ContentCompletionOptions = {},
   onMetrics?: (metrics: Partial<ContentCompletionMetrics>) => void,
 ): Promise<ContentCompletionSummary> {
+  onMetrics?.({
+    successCount: 0,
+    failedCount: 0,
+    unusableCount: 0,
+    skippedCount: 0,
+    attemptedCount: 0,
+    firecrawlRequestCount: 0,
+    retryCount: 0,
+    averageContentLength: null,
+  });
+  const firecrawlPools = resolveFirecrawlPools();
   const limits = resolveContentCompletionLimits(options);
   const candidateCount = await countCompletionCandidates(pool, options);
   onMetrics?.({ candidateCount });
-
   const candidates = await loadCompletionCandidates(pool, options);
   onMetrics?.({ selectedCount: candidates.length });
-
   const assignments = splitCompletionCandidates(candidates);
-  const firecrawlPools = candidates.length > 0 ? resolveFirecrawlPools() : null;
-  const concurrency = Math.max(1, options.concurrency ?? resolveContentCompletionRuntimeConfig().concurrency);
-  const [poolAResults, poolBResults] = firecrawlPools
-    ? await Promise.all([
-      concurrent(assignments.A, concurrency, (candidate) => complete(pool, candidate, firecrawlPools.A)),
-      concurrent(assignments.B, concurrency, (candidate) => complete(pool, candidate, firecrawlPools.B)),
-    ])
-    : [[], []] as [ContentCompletionResult[], ContentCompletionResult[]];
-  const results = [...poolAResults, ...poolBResults];
-  const counts = summarizeCompletionResults(results);
-  onMetrics?.(counts);
-
+  const completed: ContentCompletionResult[] = [];
+  const progress = () => {
+    const counts = summarizeCompletionResults(completed);
+    return {
+      ...counts,
+      attemptedCount: completed.filter((r) => r.status !== 'skipped').length,
+      firecrawlRequestCount: sum(completed, (r) => r.requestCount),
+      retryCount: sum(completed, (r) => r.retryCount),
+      averageContentLength: counts.successCount
+        ? sum(completed, (r) => (r.status === 'success' ? (r.contentLength ?? 0) : 0)) /
+          counts.successCount
+        : null,
+      poolMetrics: {
+        A: summarizePoolResults(
+          completed.filter((r) => r.pool === 'A'),
+          assignments.A.length,
+        ),
+        B: summarizePoolResults(
+          completed.filter((r) => r.pool === 'B'),
+          assignments.B.length,
+        ),
+        C: summarizePoolResults(
+          completed.filter((r) => r.pool === 'C'),
+          assignments.C.length,
+        ),
+      },
+    };
+  };
+  onMetrics?.(progress());
+  const concurrency = Math.max(
+    1,
+    options.concurrency ?? resolveContentCompletionRuntimeConfig().concurrency,
+  );
+  const grouped = await Promise.all(
+    (['A', 'B', 'C'] as const).map((name) =>
+      concurrent(assignments[name], concurrency, async (candidate) => {
+        const result = await complete(pool, candidate, firecrawlPools[name]);
+        completed.push(result);
+        onMetrics?.(progress());
+        return result;
+      }),
+    ),
+  );
+  const results = grouped.flat();
   const remainingCount = await countCompletionCandidates(pool, options);
   onMetrics?.({ remainingCount });
-
   return {
     candidateCount,
     selectedCount: candidates.length,
     remainingCount,
     ...limits,
     inputCount: candidates.length,
-    attemptedCount: results.filter((result) => result.status !== "skipped").length,
-    firecrawlRequestCount: sum(results, (result) => result.requestCount),
-    retryCount: sum(results, (result) => result.retryCount),
+    ...progress(),
     contentTypeDistribution: distribution(results),
-    rawLength: sum(results, (result) => result.rawLength ?? 0),
-    contentTextLength: sum(results, (result) => result.contentLength ?? 0),
-    fullContentTextLength: sum(
-      results,
-      (result) => result.fullContentLength ?? 0,
-    ),
-    poolMetrics: {
-      A: summarizePoolResults(poolAResults),
-      B: summarizePoolResults(poolBResults),
-    },
-    ...counts,
+    rawLength: sum(results, (r) => r.rawLength ?? 0),
+    contentTextLength: sum(results, (r) => r.contentLength ?? 0),
+    fullContentTextLength: sum(results, (r) => r.fullContentLength ?? 0),
     results,
   };
 }
@@ -262,16 +299,20 @@ export function resolveContentCompletionLimits(
   options: ContentCompletionOptions = {},
 ): ContentCompletionLimits {
   return {
-    // CONTENT_COMPLETION_LIMIT may lower the run cap, but cannot make either
-    // Firecrawl account receive more than its fixed 40-item assignment.
-    limit: Math.min(options.limit ?? resolveContentCompletionRuntimeConfig().limit, MAX_TOTAL_LIMIT),
-    perSourceLimit: options.perSourceLimit ?? resolveContentCompletionRuntimeConfig().perSourceLimit,
+    // CONTENT_COMPLETION_LIMIT may lower the run cap, but cannot make any
+    // Firecrawl account receive more than its fixed 30-item assignment.
+    limit: Math.min(
+      options.limit ?? resolveContentCompletionRuntimeConfig().limit,
+      MAX_TOTAL_LIMIT,
+    ),
+    perSourceLimit:
+      options.perSourceLimit ?? resolveContentCompletionRuntimeConfig().perSourceLimit,
   };
 }
 
 /** 单独统计完整候选池，用于区分实际处理量与受限后的待处理余量。 */
 export async function countCompletionCandidates(
-  queryable: Pick<Pool | PoolClient, "query">,
+  queryable: Pick<Pool | PoolClient, 'query'>,
   options: ContentCompletionOptions = {},
 ): Promise<number> {
   const result = await queryable.query<{ count: number | string }>(
@@ -291,7 +332,7 @@ export async function countCompletionCandidates(
  * 按 source 排名再应用全局 limit，避免单一来源占满本次补全配额。
  */
 export async function loadCompletionCandidates(
-  queryable: Pick<Pool | PoolClient, "query">,
+  queryable: Pick<Pool | PoolClient, 'query'>,
   options: ContentCompletionOptions,
 ): Promise<Candidate[]> {
   const limits = resolveContentCompletionLimits(options);
@@ -344,24 +385,23 @@ export function summarizeCompletionResults(
   results: ContentCompletionResult[],
 ): Pick<
   ContentCompletionSummary,
-  "successCount" | "unusableCount" | "failedCount" | "skippedCount"
+  'successCount' | 'unusableCount' | 'failedCount' | 'skippedCount'
 > {
   return {
-    successCount: results.filter((result) => result.status === "success").length,
-    unusableCount: results.filter((result) => result.status === "unusable")
-      .length,
-    failedCount: results.filter((result) => result.status === "failed").length,
-    skippedCount: results.filter((result) => result.status === "skipped").length,
+    successCount: results.filter((result) => result.status === 'success').length,
+    unusableCount: results.filter((result) => result.status === 'unusable').length,
+    failedCount: results.filter((result) => result.status === 'failed').length,
+    skippedCount: results.filter((result) => result.status === 'skipped').length,
   };
 }
 
 /** 单篇处理链：Firecrawl 抓取、内容提取，并将结果及本次状态写回文章。 */
 export function splitCompletionCandidates<T>(candidates: T[]): Record<FirecrawlPoolName, T[]> {
   const selected = candidates.slice(0, MAX_TOTAL_LIMIT);
-  const poolACount = Math.min(MAX_POOL_ASSIGNMENT, Math.ceil(selected.length / 2));
   return {
-    A: selected.slice(0, poolACount),
-    B: selected.slice(poolACount, poolACount + MAX_POOL_ASSIGNMENT),
+    A: selected.slice(0, MAX_POOL_ASSIGNMENT),
+    B: selected.slice(MAX_POOL_ASSIGNMENT, MAX_POOL_ASSIGNMENT * 2),
+    C: selected.slice(MAX_POOL_ASSIGNMENT * 2, MAX_POOL_ASSIGNMENT * 3),
   };
 }
 
@@ -376,10 +416,10 @@ async function complete(
   if (SPECIAL_SKIP_SOURCE_NAMES.has(candidate.sourceName)) {
     return makeResult(
       candidate,
-      "skipped",
+      'skipped',
       null,
       originalLength,
-      emptyFetch("special_source_skip"),
+      emptyFetch('special_source_skip'),
       null,
       firecrawlPool.name,
     );
@@ -387,67 +427,86 @@ async function complete(
 
   const fetched = await scrape(candidate.url, firecrawlPool);
 
-  if (!fetched.markdown) {
-    const status = fetched.requestSucceeded ? "unusable" : "failed";
+  try {
+    if (!fetched.markdown) {
+      const status = fetched.requestSucceeded ? 'unusable' : 'failed';
+      await persist(
+        pool,
+        candidate.id,
+        null,
+        null,
+        metadata(status, null, fetched, originalLength),
+      );
+
+      return makeResult(candidate, status, null, originalLength, fetched, null, firecrawlPool.name);
+    }
+
+    const extracted = extractFirecrawlContent(fetched.markdown, candidate.sourceName);
+
+    if (!extracted.contentText) {
+      await persist(
+        pool,
+        candidate.id,
+        null,
+        null,
+        metadata('unusable', null, fetched, originalLength),
+      );
+
+      return makeResult(
+        candidate,
+        'unusable',
+        null,
+        originalLength,
+        fetched,
+        null,
+        firecrawlPool.name,
+      );
+    }
+
     await persist(
       pool,
       candidate.id,
-      null,
-      null,
-      metadata(status, null, fetched, originalLength),
+      extracted.contentText,
+      extracted.fullContentText,
+      metadata('success', extracted.contentType, fetched, originalLength, extracted),
     );
 
-    return makeResult(candidate, status, null, originalLength, fetched, null, firecrawlPool.name);
-  }
-
-  const extracted = extractFirecrawlContent(
-    fetched.markdown,
-    candidate.sourceName,
-  );
-
-  if (!extracted.contentText) {
-    await persist(
-      pool,
-      candidate.id,
-      null,
-      null,
-      metadata("unusable", null, fetched, originalLength),
+    return makeResult(
+      candidate,
+      'success',
+      extracted.contentType,
+      originalLength,
+      fetched,
+      extracted,
+      firecrawlPool.name,
     );
-
-    return makeResult(candidate, "unusable", null, originalLength, fetched, null, firecrawlPool.name);
+  } catch (error) {
+    const result = makeResult(
+      candidate,
+      'failed',
+      null,
+      originalLength,
+      fetched,
+      null,
+      firecrawlPool.name,
+    );
+    result.error = `completion_processing_failed${typeof (error as { code?: unknown })?.code === 'string' ? `_${(error as { code: string }).code}` : ''}`;
+    result.processingFailed = true;
+    return result;
   }
-
-  await persist(
-    pool,
-    candidate.id,
-    extracted.contentText,
-    extracted.fullContentText,
-    metadata("success", extracted.contentType, fetched, originalLength, extracted),
-  );
-
-  return makeResult(
-    candidate,
-    "success",
-    extracted.contentType,
-    originalLength,
-    fetched,
-    extracted,
-    firecrawlPool.name,
-  );
 }
 
 /**
  * 只对可恢复的网络、5xx 与 429 重试；Firecrawl 已成功但内容无法提取时不再重复请求。
  */
-async function scrape(
-  url: string,
-  pool: FirecrawlPool,
-): Promise<FetchResult> {
+async function scrape(url: string, pool: FirecrawlPool): Promise<FetchResult> {
   const runtimeConfig = resolveContentCompletionRuntimeConfig();
   let requests = 0;
   let rateLimitedCount = 0;
   let timeoutCount = 0;
-  const observed = (result: Omit<FetchResult, "rateLimitedCount" | "timeoutCount">): FetchResult => ({
+  const observed = (
+    result: Omit<FetchResult, 'rateLimitedCount' | 'timeoutCount'>,
+  ): FetchResult => ({
     ...result,
     rateLimitedCount,
     timeoutCount,
@@ -455,21 +514,21 @@ async function scrape(
 
   for (let attempt = 0; attempt <= runtimeConfig.maxRetries; attempt += 1) {
     await pool.limiter.beforeRequest();
-    requests += 1;
-
     try {
-      const response = await fetch("https://api.firecrawl.dev/v2/scrape", {
-        method: "POST",
+      const signal = AbortSignal.timeout(runtimeConfig.timeoutMs);
+      requests += 1;
+      const response = await fetch('https://api.firecrawl.dev/v2/scrape', {
+        method: 'POST',
         headers: {
           Authorization: `Bearer ${pool.apiKey}`,
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           url,
-          formats: ["markdown"],
+          formats: ['markdown'],
           onlyMainContent: true,
         }),
-        signal: AbortSignal.timeout(runtimeConfig.timeoutMs),
+        signal,
       });
       const body = (await response.json().catch(() => null)) as FirecrawlBody | null;
       const markdown = markdownFrom(body);
@@ -486,9 +545,7 @@ async function scrape(
       }
 
       const error =
-        typeof body?.error === "string"
-          ? body.error
-          : `Firecrawl HTTP ${response.status}`;
+        typeof body?.error === 'string' ? body.error : `Firecrawl HTTP ${response.status}`;
 
       if (response.ok && body?.success !== false) {
         return observed({
@@ -546,7 +603,7 @@ async function scrape(
     }
   }
 
-  return { ...emptyFetch("Firecrawl retry exhausted."), rateLimitedCount, timeoutCount };
+  return { ...emptyFetch('Firecrawl retry exhausted.'), rateLimitedCount, timeoutCount };
 }
 
 /**
@@ -554,21 +611,21 @@ async function scrape(
  */
 export function extractFirecrawlContent(
   markdown: string,
-  sourceName: string | null
+  sourceName: string | null,
 ): FirecrawlExtraction {
   // 1. 科研论文：只要 Abstract
-  const abstract = section(markdown, ["abstract"]);
+  const abstract = section(markdown, ['abstract']);
   if (useful(abstract)) {
-    return extracted(clean(abstract), null, "abstract");
+    return extracted(clean(abstract), null, 'abstract');
   }
 
   // 2. 页面原生的高信息密度结构
   const candidates: Array<[readonly string[], CompletionContentType]> = [
-    [["ai takeaways", "takeaways"], "takeaways"],
-    [["key points"], "key_points"],
-    [["executive summary"], "executive_summary"],
-    [["summary", "overview"], "summary"],
-    [["description", "programme description"], "description"],
+    [['ai takeaways', 'takeaways'], 'takeaways'],
+    [['key points'], 'key_points'],
+    [['executive summary'], 'executive_summary'],
+    [['summary', 'overview'], 'summary'],
+    [['description', 'programme description'], 'description'],
   ];
 
   for (const [headings, type] of candidates) {
@@ -580,18 +637,11 @@ export function extractFirecrawlContent(
   }
 
   // 3. 官方超长报告 release：只保留开头摘要，不保留完整正文
-  if (
-    sourceName &&
-    INSTITUTIONAL_RELEASE_SOURCE_NAMES.has(sourceName)
-  ) {
+  if (sourceName && INSTITUTIONAL_RELEASE_SOURCE_NAMES.has(sourceName)) {
     const releaseSummary = extractInstitutionalReleaseSummary(markdown);
 
     if (useful(releaseSummary)) {
-      return extracted(
-        releaseSummary,
-        null,
-        "release_summary",
-      );
+      return extracted(releaseSummary, null, 'release_summary');
     }
   }
 
@@ -602,11 +652,7 @@ export function extractFirecrawlContent(
     return extracted(null, null, null);
   }
 
-  return extracted(
-    shorten(body),
-    body.length > STAGE1_MAX_CHARS ? body : null,
-    "article_body",
-  );
+  return extracted(shorten(body), body.length > STAGE1_MAX_CHARS ? body : null, 'article_body');
 }
 
 /**
@@ -622,7 +668,7 @@ function extractInstitutionalReleaseSummary(markdown: string): string | null {
     return null;
   }
 
-  const lines = cleaned.replace(/\r\n/g, "\n").split("\n");
+  const lines = cleaned.replace(/\r\n/g, '\n').split('\n');
   const kept: string[] = [];
   let meaningfulChars = 0;
 
@@ -630,10 +676,7 @@ function extractInstitutionalReleaseSummary(markdown: string): string | null {
     const trimmed = line.trim();
 
     // 已经进入 Markdown 统计表，后续内容不再作为 Stage1 输入。
-    if (
-      meaningfulChars >= MIN_USEFUL_CHARS &&
-      trimmed.startsWith("|")
-    ) {
+    if (meaningfulChars >= MIN_USEFUL_CHARS && trimmed.startsWith('|')) {
       break;
     }
 
@@ -655,8 +698,8 @@ function extractInstitutionalReleaseSummary(markdown: string): string | null {
   }
 
   const value = kept
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 
   if (!useful(value)) {
@@ -675,29 +718,19 @@ function shortenInstitutionalSummary(value: string): string {
     return value;
   }
 
-  const boundary = value.lastIndexOf(
-    "\n\n",
-    INSTITUTIONAL_SUMMARY_MAX_CHARS,
-  );
+  const boundary = value.lastIndexOf('\n\n', INSTITUTIONAL_SUMMARY_MAX_CHARS);
 
   return value
-    .slice(
-      0,
-      boundary > MIN_USEFUL_CHARS
-        ? boundary
-        : INSTITUTIONAL_SUMMARY_MAX_CHARS,
-    )
+    .slice(0, boundary > MIN_USEFUL_CHARS ? boundary : INSTITUTIONAL_SUMMARY_MAX_CHARS)
     .trim();
 }
 
 function section(markdown: string, headings: readonly string[]): string | null {
-  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
   const index = lines.findIndex((line) => {
     const match = /^#{1,6}\s+(.+?)\s*$/.exec(line);
 
-    return Boolean(
-      match && headings.includes(match[1]?.trim().toLowerCase() ?? ""),
-    );
+    return Boolean(match && headings.includes(match[1]?.trim().toLowerCase() ?? ''));
   });
 
   if (index < 0) {
@@ -714,18 +747,19 @@ function section(markdown: string, headings: readonly string[]): string | null {
     value.push(line);
   }
 
-  return value.join("\n");
+  return value.join('\n');
 }
 
 /** 这里只进行轻量 Markdown 清洗，去掉明显噪音，不承担完整正文 parser 的职责。 */
 function clean(markdown: string): string {
   const kept: string[] = [];
 
-  for (const line of markdown.replace(/\r\n/g, "\n").split("\n")) {
+  for (const line of markdown.replace(/\r\n/g, '\n').split('\n')) {
     if (
       /^(#{1,6}\s*)?(subscribe|sign in|access options|more from bloomberg|recommended|for you|top reads|related articles|newsletter|footer|copyright|privacy policy|terms of use|bloomberg terminal)\b/i.test(
         line.trim(),
-      ) || /this is a preview of subscription content/i.test(line)
+      ) ||
+      /this is a preview of subscription content/i.test(line)
     ) {
       break;
     }
@@ -735,7 +769,10 @@ function clean(markdown: string): string {
     }
   }
 
-  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return kept
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function useful(value: string | null): value is string {
@@ -748,11 +785,9 @@ function shorten(value: string): string {
     return value;
   }
 
-  const boundary = value.lastIndexOf("\n\n", STAGE1_MAX_CHARS);
+  const boundary = value.lastIndexOf('\n\n', STAGE1_MAX_CHARS);
 
-  return value
-    .slice(0, boundary > MIN_USEFUL_CHARS ? boundary : STAGE1_MAX_CHARS)
-    .trim();
+  return value.slice(0, boundary > MIN_USEFUL_CHARS ? boundary : STAGE1_MAX_CHARS).trim();
 }
 
 function extracted(
@@ -775,7 +810,7 @@ async function persist(
   full: string | null,
   completion: Record<string, unknown>,
 ): Promise<void> {
-  await pool.query(
+  const result = await pool.query(
     `
       update raw_articles
       set
@@ -787,17 +822,18 @@ async function persist(
     `,
     [content, full, JSON.stringify(completion), id],
   );
+  if (result.rowCount !== 1) throw new Error('completion_raw_not_updated');
 }
 
 function metadata(
-  status: "success" | "unusable" | "failed",
+  status: 'success' | 'unusable' | 'failed',
   type: CompletionContentType | null,
   fetched: FetchResult,
   original: number,
   extraction?: FirecrawlExtraction,
 ): Record<string, unknown> {
   return {
-    provider: "firecrawl",
+    provider: 'firecrawl',
     status,
     content_type: type,
     attempted_at: new Date().toISOString(),
@@ -835,7 +871,7 @@ function makeResult(
     retryCount: fetched.retryCount,
     rateLimitedCount: fetched.rateLimitedCount,
     timeoutCount: fetched.timeoutCount,
-    error: status === "unusable" ? null : fetched.error,
+    error: status === 'unusable' ? null : fetched.error,
     rawMarkdown: fetched.markdown,
     pool,
   };
@@ -857,31 +893,42 @@ function emptyFetch(error: string): FetchResult {
 function markdownFrom(body: FirecrawlBody | null): string | null {
   const value = body?.markdown ?? body?.data?.markdown;
 
-  return typeof value === "string" && value.trim() ? value : null;
+  return typeof value === 'string' && value.trim() ? value : null;
 }
 
 function resolveFirecrawlPools(): Record<FirecrawlPoolName, FirecrawlPool> {
   const firstKey = process.env.FIRECRAWL_API_KEY;
   const secondKey = process.env.FIRECRAWL_API_KEY_2;
+  const thirdKey = process.env.FIRECRAWL_API_KEY_3;
   if (!firstKey) {
-    throw new Error("FIRECRAWL_API_KEY is required for Content Completion pool A.");
+    throw new Error('FIRECRAWL_API_KEY is required for Content Completion pool A.');
   }
   if (!secondKey) {
-    throw new Error("FIRECRAWL_API_KEY_2 is required for Content Completion pool B; no work has been sent to pool A.");
+    throw new Error(
+      'FIRECRAWL_API_KEY_2 is required for Content Completion pool B; no work has been sent to pool A.',
+    );
   }
+  if (!thirdKey)
+    throw new Error(
+      'FIRECRAWL_API_KEY_3 is required for Content Completion pool C; no work has been sent to any pool.',
+    );
   return {
-    A: { name: "A", apiKey: firstKey, limiter: new FirecrawlRateLimiter() },
-    B: { name: "B", apiKey: secondKey, limiter: new FirecrawlRateLimiter() },
+    A: { name: 'A', apiKey: firstKey, limiter: new FirecrawlRateLimiter() },
+    B: { name: 'B', apiKey: secondKey, limiter: new FirecrawlRateLimiter() },
+    C: { name: 'C', apiKey: thirdKey, limiter: new FirecrawlRateLimiter() },
   };
 }
 
-function summarizePoolResults(results: ContentCompletionResult[]): ContentCompletionPoolSummary {
+function summarizePoolResults(
+  results: ContentCompletionResult[],
+  assignedCount = results.length,
+): ContentCompletionPoolSummary {
   return {
-    assignedCount: results.length,
-    successCount: results.filter((result) => result.status === "success").length,
-    failedCount: results.filter((result) => result.status === "failed").length,
-    unusableCount: results.filter((result) => result.status === "unusable").length,
-    skippedCount: results.filter((result) => result.status === "skipped").length,
+    assignedCount,
+    successCount: results.filter((result) => result.status === 'success').length,
+    failedCount: results.filter((result) => result.status === 'failed').length,
+    unusableCount: results.filter((result) => result.status === 'unusable').length,
+    skippedCount: results.filter((result) => result.status === 'skipped').length,
     firecrawlRequestCount: sum(results, (result) => result.requestCount),
     retryCount: sum(results, (result) => result.retryCount),
     rateLimitedCount: sum(results, (result) => result.rateLimitedCount),
@@ -954,13 +1001,13 @@ class FirecrawlRateLimiter {
 }
 
 function retryMs(response: Response, body: FirecrawlBody | null): number {
-  const header = response.headers.get("retry-after");
+  const header = response.headers.get('retry-after');
 
   if (header && Number.isFinite(Number(header))) {
     return Number(header) * 1_000;
   }
 
-  const error = typeof body?.error === "string" ? body.error : "";
+  const error = typeof body?.error === 'string' ? body.error : '';
   const match = /retry after\s+(\d+)\s*s/i.exec(error);
 
   return match?.[1] ? Number(match[1]) * 1_000 : 60_000;

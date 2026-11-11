@@ -7,7 +7,7 @@
 | 模块 | 技术职责 | 持久化边界 |
 |---|---|---|
 | Collection | RSS / Gmail 来源采集、标准化和原始身份去重；Gmail 先保存邮件再写 Raw。 | `newsletter_emails`、`raw_articles` 与来源元数据 |
-| Content Completion | 正文补全，不进行内容价值判断，不调用 LLM | `raw_articles` 与来源元数据  |
+| Content Completion | 三个独立 Firecrawl Pool；仅有效正文写库后计为 success，运行统计与持久化边界见 [Workflow](../06-workflow-spec/daily.md#5-content-completion)。 | Raw 正文与本次运行统计 |
 | Stage1 | 共享 LLM Client 完成内容理解，验证输出后映射 Routing | 保留内容写入 `processed_contents`；Ignored 状态留在 Raw，不创建对应处理结果 |
 | Stage2 | 将 Event Candidates 合并为中间分组，不生成最终 Event | `event_groups` / `event_group_items`，由 `src/processing/event-group-persistence.ts` 写入 |
 | Stage3 | Event / Digest Category / Long-form 独立排名 | Event 写 Review Snapshot；每个 Digest Category 和 Long-form 独立事务写排名 |

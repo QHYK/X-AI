@@ -68,7 +68,7 @@ export function NewsletterParser() {
         setItems(data.items);
         setId(data.items[0]?.id ?? '');
         setLoading(data.items.length > 0);
-        setNotice('显示数据库中每个来源符合筛选条件的最新 5 封邮件（按接收时间排序）。');
+        setNotice('显示数据库中每个来源符合筛选条件的最新 10 封邮件（按接收时间排序）。');
       })
       .catch((e) => {
         if (!abort.signal.aborted) {

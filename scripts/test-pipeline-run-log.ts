@@ -155,6 +155,27 @@ const dashboardRows: Row[] = [
     error_summary: null,
   },
 ];
+dashboardRows.push({
+  id: 'completion-new',
+  daily_date: '2026-08-24',
+  step: 'content_completion',
+  status: 'failed',
+  trigger_source: 'daily_orchestrator',
+  started_at: '2026-08-24T02:00:00Z',
+  finished_at: '2026-08-24T02:01:00Z',
+  provider: null,
+  model: null,
+  error_summary: 'Mock write failure',
+  metrics: {
+    selected_count: 90,
+    success_count: 60,
+    failed_count: 20,
+    unusable_count: 10,
+    attempted_count: 90,
+    firecrawl_request_count: 95,
+    average_content_length: 1250,
+  },
+});
 const dashboard = await getDashboardData(createDashboardPool(dashboardRows), {
   now: new Date('2026-08-24T16:00:00.000Z'),
   rootDir: '/private/tmp/x-ai-field-no-runtime',
@@ -163,7 +184,28 @@ const latestStage1 = dashboard.days[0]?.runtime.stages.stage1;
 const latestStage3 = dashboard.days[0]?.runtime.stages.stage3;
 const latestStage4 = dashboard.days[0]?.runtime.stages.stage4;
 
+const cc = dashboard.days[0]?.runtime.contentCompletion;
+const oldCompletion = await getDashboardData(
+  createDashboardPool([
+    { ...dashboardRows.at(-1)!, metrics: { selected_count: 80, success_count: 40 } },
+  ]),
+  { now: new Date('2026-08-24T16:00:00Z'), rootDir: '/private/tmp/x-ai-field-no-runtime' },
+);
 const checks = [
+  [
+    'Failed completion Run retains actual persisted counts and average from DB',
+    cc?.status === 'failed' &&
+      cc.successCount === 60 &&
+      cc.firecrawlRequestCount === 95 &&
+      cc.averageContentLength === 1250 &&
+      cc.attemptedCount === 90 &&
+      cc.unusableCount === 10,
+  ],
+  [
+    'Historical DB completion metrics stay null when absent',
+    oldCompletion.days[0]?.runtime.contentCompletion?.averageContentLength === null &&
+      oldCompletion.days[0]?.runtime.contentCompletion?.attemptedCount === null,
+  ],
   ['finish preserves runtime pointer', rows[0]?.metrics.runtime_dir === 'runtime/stage1/example'],
   ['dashboard carries exact failed attempt', latestStage1?.pipelineRunId === 'new'],
   [

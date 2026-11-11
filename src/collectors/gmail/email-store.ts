@@ -95,7 +95,7 @@ export async function listStoredEmails(db: Pick<Pool, 'query'>, source: string, 
           row_number() over (partition by coalesce(source_name,'Unknown') order by received_at desc nulls last,gmail_message_id) as source_rank
         from newsletter_emails
         where ($1='' or coalesce(source_name,'Unknown')=$1) and ($2='' or parse_status=$2)
-      ) select * from ranked_emails where source_rank <= 5
+      ) select * from ranked_emails where source_rank <= 10
         order by received_at desc nulls last,gmail_message_id`,
       [source, status],
     )

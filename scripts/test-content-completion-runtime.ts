@@ -1,22 +1,25 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { Pool } from "pg";
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { Pool } from 'pg';
 import {
   countCompletionCandidates,
   loadCompletionCandidates,
   summarizeCompletionResults,
   type ContentCompletionResult,
-} from "../src/processing/content-completion.js";
+} from '../src/processing/content-completion.js';
 import {
   contentCompletionRunDir,
+  contentCompletionPipelineMetrics,
   writeContentCompletionRuntime,
   type ContentCompletionRuntimeArtifact,
-} from "../src/processing/content-completion-runtime.js";
+} from '../src/processing/content-completion-runtime.js';
 import {
   formatContentCompletionRatio,
+  formatCompletionSuccessRate,
+  formatCompletionAverageLength,
   loadContentCompletionRuntimeByDate,
-} from "../src/lib/dashboard.js";
+} from '../src/lib/dashboard.js';
 
 type CapturedQuery = { text: string; values: unknown[] | undefined };
 type Check = { name: string; passed: boolean; detail?: unknown };
@@ -30,52 +33,52 @@ const countQueryable = createQueryable(async (text, values) => {
   return { rows: [{ count: countCall === 1 ? 12 : 9 }] };
 });
 const completionOptions = {
-  sourceNames: ["Example Source"],
+  sourceNames: ['Example Source'],
   limit: 2,
   perSourceLimit: 1,
 };
 const candidateCount = await countCompletionCandidates(countQueryable, completionOptions);
 const remainingCount = await countCompletionCandidates(countQueryable, completionOptions);
 checks.push({
-  name: "candidate and remaining counts share eligibility and ignore selection limits",
+  name: 'candidate and remaining counts share eligibility and ignore selection limits',
   passed:
     candidateCount === 12 &&
     remainingCount === 9 &&
     countQueries.length === 2 &&
     countQueries[0]?.text === countQueries[1]?.text &&
     JSON.stringify(countQueries[0]?.values) === JSON.stringify(countQueries[1]?.values) &&
-    !countQueries[0]?.text.includes("source_rank") &&
-    !countQueries[0]?.text.includes("limit $"),
+    !countQueries[0]?.text.includes('source_rank') &&
+    !countQueries[0]?.text.includes('limit $'),
   detail: countQueries,
 });
 
 const selectionQueries: CapturedQuery[] = [];
-const selectedRows = [completionCandidate("a1"), completionCandidate("a2")];
+const selectedRows = [completionCandidate('a1'), completionCandidate('a2')];
 const selectionQueryable = createQueryable(async (text, values) => {
   selectionQueries.push({ text, values });
   return { rows: selectedRows };
 });
 const selected = await loadCompletionCandidates(selectionQueryable, completionOptions);
 checks.push({
-  name: "selected count is constrained by per-source limit and total limit",
+  name: 'selected count is constrained by per-source limit and total limit',
   passed:
     selected.length === 2 &&
-    selectionQueries[0]?.text.includes("source_rank <= $5") === true &&
-    !selectionQueries[0]?.text.includes("full_content_text") &&
-    selectionQueries[0]?.text.includes("limit $6") === true &&
+    selectionQueries[0]?.text.includes('source_rank <= $5') === true &&
+    !selectionQueries[0]?.text.includes('full_content_text') &&
+    selectionQueries[0]?.text.includes('limit $6') === true &&
     selectionQueries[0]?.values?.[4] === 1 &&
     selectionQueries[0]?.values?.[5] === 2,
   detail: selectionQueries[0],
 });
 
 const resultCounts = summarizeCompletionResults([
-  completionResult("success"),
-  completionResult("success"),
-  completionResult("failed"),
-  completionResult("skipped"),
+  completionResult('success'),
+  completionResult('success'),
+  completionResult('failed'),
+  completionResult('skipped'),
 ]);
 checks.push({
-  name: "success, failed, and skipped results are counted from real statuses",
+  name: 'success, failed, and skipped results are counted from real statuses',
   passed:
     resultCounts.successCount === 2 &&
     resultCounts.failedCount === 1 &&
@@ -83,14 +86,14 @@ checks.push({
   detail: resultCounts,
 });
 
-const rootDir = await mkdtemp(join(tmpdir(), "x-ai-content-completion-test-"));
+const rootDir = await mkdtemp(join(tmpdir(), 'x-ai-content-completion-test-'));
 try {
-  await writeFixture(rootDir, "2026-08-24T02:00:00.000Z", {
+  await writeFixture(rootDir, '2026-08-24T02:00:00.000Z', {
     selected_count: 2,
     success_count: 1,
     remaining_count: 10,
   });
-  await writeFixture(rootDir, "2026-08-24T08:00:00.000Z", {
+  await writeFixture(rootDir, '2026-08-24T08:00:00.000Z', {
     selected_count: 3,
     success_count: 2,
     remaining_count: 8,
@@ -98,23 +101,47 @@ try {
 
   const dashboardMetrics = await loadContentCompletionRuntimeByDate(
     rootDir,
-    new Set(["2026-08-24", "2026-08-23"]),
+    new Set(['2026-08-24', '2026-08-23']),
   );
-  const latest = dashboardMetrics.get("2026-08-24");
+  const latest = dashboardMetrics.get('2026-08-24');
+  if (!latest) throw new Error('Missing fixture');
   checks.push({
-    name: "Dashboard reads the latest Content Completion runtime for the date",
+    name: 'Historical missing average is unknown',
+    passed: formatCompletionAverageLength(latest) === '—',
+  });
+  checks.push({
+    name: 'Missing attempted_count cannot infer a success rate',
+    passed: formatCompletionSuccessRate({ ...latest, attemptedCount: undefined }) === '—',
+  });
+  checks.push({
+    name: 'Zero attempts and zero successes have no rate/average',
+    passed:
+      formatCompletionSuccessRate({ ...latest, attemptedCount: 0 }) === '—' &&
+      formatCompletionAverageLength({ ...latest, successCount: 0, averageContentLength: 0 }) ===
+        '—',
+  });
+  checks.push({
+    name: 'New metrics format explicit persisted averages and processed denominator',
+    passed:
+      formatCompletionSuccessRate({ ...latest, attemptedCount: 4, successCount: 2 }) === '50.0%' &&
+      formatCompletionAverageLength({ ...latest, successCount: 2, averageContentLength: 1250 }) ===
+        '1,250 chars',
+  });
+
+  checks.push({
+    name: 'Dashboard reads the latest Content Completion runtime for the date',
     passed:
       latest?.selectedCount === 3 &&
       latest.successCount === 2 &&
       latest.remainingCount === 8 &&
-      formatContentCompletionRatio(latest) === "2 / 3",
+      formatContentCompletionRatio(latest) === '2 / 3',
     detail: latest,
   });
   checks.push({
-    name: "Dashboard renders N/A when the date has no Completion runtime",
+    name: 'Dashboard renders N/A when the date has no Completion runtime',
     passed:
-      dashboardMetrics.get("2026-08-23") === undefined &&
-      formatContentCompletionRatio(null) === "N/A",
+      dashboardMetrics.get('2026-08-23') === undefined &&
+      formatContentCompletionRatio(null) === 'N/A',
   });
 } finally {
   await rm(rootDir, { recursive: true, force: true });
@@ -128,43 +155,41 @@ if (failures.length > 0) {
 
 function createQueryable(
   handler: (text: string, values?: unknown[]) => Promise<{ rows: unknown[] }>,
-): Pick<Pool, "query"> {
-  return { query: handler as Pick<Pool, "query">["query"] };
+): Pick<Pool, 'query'> {
+  return { query: handler as Pick<Pool, 'query'>['query'] };
 }
 
 function completionCandidate(id: string) {
   return {
     id,
-    sourceName: "Example Source",
-    sourceCategory: "Technology",
-    sourceType: "rss",
+    sourceName: 'Example Source',
+    sourceCategory: 'Technology',
+    sourceType: 'rss',
     title: `Article ${id}`,
     url: `https://example.com/${id}`,
     contentText: null,
   };
 }
 
-function completionResult(
-  status: ContentCompletionResult["status"],
-): ContentCompletionResult {
+function completionResult(status: ContentCompletionResult['status']): ContentCompletionResult {
   return {
     rawArticleId: status,
-    sourceName: "Example Source",
+    sourceName: 'Example Source',
     title: status,
-    url: "https://example.com/article",
+    url: 'https://example.com/article',
     status,
-    contentType: status === "success" ? "article_body" : null,
+    contentType: status === 'success' ? 'article_body' : null,
     originalLength: 0,
-    rawLength: status === "skipped" ? null : 1200,
-    contentLength: status === "success" ? 1000 : null,
+    rawLength: status === 'skipped' ? null : 1200,
+    contentLength: status === 'success' ? 1000 : null,
     fullContentLength: null,
-    requestCount: status === "skipped" ? 0 : 1,
+    requestCount: status === 'skipped' ? 0 : 1,
     retryCount: 0,
     rateLimitedCount: 0,
     timeoutCount: 0,
-    error: status === "failed" ? "fetch failed" : null,
+    error: status === 'failed' ? 'fetch failed' : null,
     rawMarkdown: null,
-    pool: "A",
+    pool: 'A',
   };
 }
 
@@ -173,18 +198,18 @@ async function writeFixture(
   startedAt: string,
   metrics: Pick<
     ContentCompletionRuntimeArtifact,
-    "selected_count" | "success_count" | "remaining_count"
+    'selected_count' | 'success_count' | 'remaining_count'
   >,
 ): Promise<void> {
   const started = new Date(startedAt);
   const runDir = contentCompletionRunDir(started, rootDir);
-  await writeContentCompletionRuntime(runDir, {
-    status: "success",
+  const artifact: ContentCompletionRuntimeArtifact = {
+    status: 'success',
     started_at: startedAt,
     finished_at: new Date(started.getTime() + 10_000).toISOString(),
-    daily_date: "2026-08-24",
-    scope_start_at: "2026-08-23T00:30:00.000Z",
-    scope_end_at: "2026-08-24T00:30:00.000Z",
+    daily_date: '2026-08-24',
+    scope_start_at: '2026-08-23T00:30:00.000Z',
+    scope_end_at: '2026-08-24T00:30:00.000Z',
     duration_ms: 10_000,
     candidate_count: 12,
     selected_count: metrics.selected_count,
@@ -197,6 +222,7 @@ async function writeFixture(
     attempted_count: metrics.selected_count,
     firecrawl_request_count: metrics.selected_count,
     retry_count: 0,
+    average_content_length: null,
     content_type_distribution: { article_body: metrics.success_count ?? 0 },
     raw_length: 1000,
     content_text_length: 800,
@@ -205,5 +231,15 @@ async function writeFixture(
     limit: 50,
     per_source_limit: 10,
     error: null,
+  };
+  const durable = contentCompletionPipelineMetrics(artifact);
+  checks.push({
+    name: 'Runtime and pipeline_runs share the same completion statistics',
+    passed:
+      durable.firecrawl_request_count === artifact.firecrawl_request_count &&
+      durable.success_count === artifact.success_count &&
+      durable.average_content_length === artifact.average_content_length &&
+      durable.unusable_count === artifact.unusable_count,
   });
+  await writeContentCompletionRuntime(runDir, artifact);
 }

@@ -3,12 +3,12 @@
  *
  * runtime 只记录本次执行观测指标，供 Dashboard 和排障读取，不承载业务真相。
  */
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import type { ContentCompletionPoolSummary } from "./content-completion.js";
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { ContentCompletionPoolSummary } from './content-completion.js';
 
 export type ContentCompletionRuntimeArtifact = {
-  status: "running" | "success" | "failed";
+  status: 'running' | 'success' | 'failed';
   daily_date: string;
   scope_start_at: string;
   scope_end_at: string;
@@ -26,24 +26,22 @@ export type ContentCompletionRuntimeArtifact = {
   attempted_count: number | null;
   firecrawl_request_count: number | null;
   retry_count: number | null;
+  average_content_length: number | null;
   content_type_distribution: Record<string, number> | null;
   raw_length: number | null;
   content_text_length: number | null;
   full_content_text_length: number | null;
-  pool_metrics: Record<"A" | "B", ContentCompletionPoolSummary> | null;
+  pool_metrics: Record<'A' | 'B' | 'C', ContentCompletionPoolSummary> | null;
   limit: number;
   per_source_limit: number;
   error: string | null;
 };
 
-export function contentCompletionRunDir(
-  startedAt: Date,
-  rootDir: string = process.cwd(),
-): string {
+export function contentCompletionRunDir(startedAt: Date, rootDir: string = process.cwd()): string {
   return join(
     rootDir,
-    "runtime/content-completion",
-    startedAt.toISOString().replaceAll(":", "-").replaceAll(".", "-"),
+    'runtime/content-completion',
+    startedAt.toISOString().replaceAll(':', '-').replaceAll('.', '-'),
   );
 }
 
@@ -51,7 +49,7 @@ export async function writeContentCompletionResults(
   runDir: string,
   results: Array<Record<string, unknown>>,
 ): Promise<void> {
-  await writeFile(join(runDir, "results.json"), `${JSON.stringify(results, null, 2)}\n`);
+  await writeFile(join(runDir, 'results.json'), `${JSON.stringify(results, null, 2)}\n`);
 }
 
 /** 创建 run 目录并原样写入本次 Completion 的运行快照。 */
@@ -60,5 +58,25 @@ export async function writeContentCompletionRuntime(
   artifact: ContentCompletionRuntimeArtifact,
 ): Promise<void> {
   await mkdir(runDir, { recursive: true });
-  await writeFile(join(runDir, "run.json"), `${JSON.stringify(artifact, null, 2)}\n`);
+  await writeFile(join(runDir, 'run.json'), `${JSON.stringify(artifact, null, 2)}\n`);
+}
+
+export function contentCompletionPipelineMetrics(artifact: ContentCompletionRuntimeArtifact) {
+  return {
+    candidate_count: artifact.candidate_count,
+    selected_count: artifact.selected_count,
+    success_count: artifact.success_count,
+    failed_count: artifact.failed_count,
+    skipped_count: artifact.skipped_count,
+    remaining_count: artifact.remaining_count,
+    retry_count: artifact.retry_count,
+    duration_ms: artifact.duration_ms,
+    pool_metrics: artifact.pool_metrics,
+    unusable_count: artifact.unusable_count,
+    attempted_count: artifact.attempted_count,
+    firecrawl_request_count: artifact.firecrawl_request_count,
+    average_content_length: artifact.average_content_length,
+    limit: artifact.limit,
+    per_source_limit: artifact.per_source_limit,
+  };
 }

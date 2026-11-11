@@ -307,7 +307,20 @@ try {
     });
   assert.equal(db.rows.length, 39);
   const before = JSON.stringify(db.rows);
-  const completion = await completeRawArticleContent(db.pool);
+  const keys = ['FIRECRAWL_API_KEY', 'FIRECRAWL_API_KEY_2', 'FIRECRAWL_API_KEY_3'] as const;
+  const previousKeys = keys.map((k) => process.env[k]);
+  keys.forEach((k, i) => {
+    process.env[k] = `test-completion-${i}`;
+  });
+  let completion: Awaited<ReturnType<typeof completeRawArticleContent>>;
+  try {
+    completion = await completeRawArticleContent(db.pool);
+  } finally {
+    keys.forEach((k, i) => {
+      if (previousKeys[i] === undefined) delete process.env[k];
+      else process.env[k] = previousKeys[i];
+    });
+  }
   assert.equal(completion.candidateCount, 0);
   assert.equal(completion.remainingCount, 0);
   assert.equal(completion.firecrawlRequestCount, 0);

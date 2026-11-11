@@ -148,6 +148,10 @@ export type DashboardContentCompletionMetrics = {
   remainingCount: number | null;
   limit: number | null;
   perSourceLimit: number | null;
+  attemptedCount?: number | null;
+  firecrawlRequestCount?: number | null;
+  unusableCount?: number | null;
+  averageContentLength?: number | null;
 };
 
 export type DashboardDuplicateFilterMetrics = {
@@ -720,6 +724,10 @@ function contentCompletionMetricsFromArtifact(
     candidateCount: numberFrom(artifact, 'candidate_count'),
     selectedCount: numberFrom(artifact, 'selected_count'),
     successCount: numberFrom(artifact, 'success_count'),
+    attemptedCount: numberFrom(artifact, 'attempted_count'),
+    firecrawlRequestCount: numberFrom(artifact, 'firecrawl_request_count'),
+    unusableCount: numberFrom(artifact, 'unusable_count'),
+    averageContentLength: numberFrom(artifact, 'average_content_length'),
     failedCount: numberFrom(artifact, 'failed_count'),
     skippedCount: numberFrom(artifact, 'skipped_count'),
     remainingCount: numberFrom(artifact, 'remaining_count'),
@@ -895,6 +903,10 @@ function completionMetricsFromPipelineRun(row: PipelineRunRow): DashboardContent
     candidateCount: numberFrom(metrics, 'candidate_count'),
     selectedCount: numberFrom(metrics, 'selected_count'),
     successCount: numberFrom(metrics, 'success_count'),
+    attemptedCount: numberFrom(metrics, 'attempted_count'),
+    firecrawlRequestCount: numberFrom(metrics, 'firecrawl_request_count'),
+    unusableCount: numberFrom(metrics, 'unusable_count'),
+    averageContentLength: numberFrom(metrics, 'average_content_length'),
     failedCount: numberFrom(metrics, 'failed_count'),
     skippedCount: numberFrom(metrics, 'skipped_count'),
     remainingCount: numberFrom(metrics, 'remaining_count'),
@@ -1494,4 +1506,19 @@ function isMissingFile(error: unknown): boolean {
     'code' in error &&
     (error as { code?: unknown }).code === 'ENOENT'
   );
+}
+
+/** Missing historical metrics are unknown, never inferred from selected articles. */
+export function formatCompletionSuccessRate(metrics: DashboardContentCompletionMetrics): string {
+  if (
+    metrics.successCount === null ||
+    metrics.attemptedCount == null ||
+    metrics.attemptedCount <= 0
+  )
+    return '—';
+  return `${((metrics.successCount / metrics.attemptedCount) * 100).toFixed(1)}%`;
+}
+export function formatCompletionAverageLength(metrics: DashboardContentCompletionMetrics): string {
+  if (!metrics.successCount || metrics.averageContentLength == null) return '—';
+  return `${Math.round(metrics.averageContentLength).toLocaleString('en-US')} chars`;
 }

@@ -13,6 +13,8 @@ import {
 import { DiscoveryActions } from './discovery-actions.js';
 import {
   formatContentCompletionRatio,
+  formatCompletionSuccessRate,
+  formatCompletionAverageLength,
   getDashboardData,
   type DashboardContentCompletionMetrics,
   type DashboardDuplicateFilterMetrics,
@@ -568,11 +570,31 @@ function ContentCompletionCard({
         />
         <Metric
           label="Selected"
-          value={formatMetric(metrics.selectedCount)}
+          value={metrics.selectedCount == null ? '—' : formatMetric(metrics.selectedCount)}
         />
         <Metric
-          label="Succeeded"
-          value={formatMetric(metrics.successCount)}
+          label="Completed"
+          value={metrics.successCount == null ? '—' : formatMetric(metrics.successCount)}
+        />
+        <Metric
+          label="Success Rate"
+          value={formatCompletionSuccessRate(metrics)}
+        />
+        <Metric
+          label="Avg Length"
+          value={formatCompletionAverageLength(metrics)}
+        />
+        <Metric
+          label="Requests"
+          value={
+            metrics.firecrawlRequestCount == null
+              ? '—'
+              : formatMetric(metrics.firecrawlRequestCount)
+          }
+        />
+        <Metric
+          label="Unusable"
+          value={metrics.unusableCount == null ? '—' : formatMetric(metrics.unusableCount)}
         />
         <Metric
           label="Failed"

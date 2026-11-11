@@ -105,7 +105,7 @@ Dashboard 不是 Production Source of Truth。它读取 Production 数据与 Run
 
 ### Newsletter Parser
 
-`/newsletter-parser`（浏览器 `/ai/newsletter-parser`）。`GET /api/admin/newsletter-parser` 从 PostgreSQL `newsletter_emails` 列出邮件，支持 `source` / `status` 筛选；按接收时间降序返回每个来源符合筛选条件的最新 5 封（全部来源也分别限 5 封）；`?id=<Gmail Message ID>` 读取已采集邮件并使用正式 `src/collectors/gmail/` Source-guided Selection 生成当前代码预览。不调用 Gmail，不读取 Spike 样本，不直接返回完整 Gmail JSON。缺少迁移返回 503；非法筛选 / ID 返回 400，邮件不存在返回 404。
+`/newsletter-parser`（浏览器 `/ai/newsletter-parser`）。`GET /api/admin/newsletter-parser` 从 PostgreSQL `newsletter_emails` 列出邮件，支持 `source` / `status` 筛选；按接收时间降序返回每个来源符合筛选条件的最新 10 封（全部来源也分别限 10 封）；`?id=<Gmail Message ID>` 读取已采集邮件并使用正式 `src/collectors/gmail/` Source-guided Selection 生成当前代码预览。不调用 Gmail，不读取 Spike 样本，不直接返回完整 Gmail JSON。缺少迁移返回 503；非法筛选 / ID 返回 400，邮件不存在返回 404。
 
 左侧原 HTML 从已保存的 MIME 解码，经共享白名单处理后以无脚本 sandbox iframe / 严格 CSP 展示，禁止远程资源、链接导航和表单。右侧显示当前 Parser 模块、原文边界、链接及采集 / 解析错误；选择模块定位并高亮。历史 `unsupported` / `conflict` 不阻断当前代码预览；当前结果与已入库内容不一致时明确提示，不更新 Raw。成功邮件展示映射中的实际 Raw 模块数。
 

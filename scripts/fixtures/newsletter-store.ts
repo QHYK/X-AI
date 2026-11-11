@@ -102,7 +102,7 @@ export function newsletterStore() {
                 .filter(
                   (other) => (other.source_name ?? 'Unknown') === (e.source_name ?? 'Unknown'),
                 )
-                .indexOf(e) < 5,
+                .indexOf(e) < 10,
           ),
       };
     if (sql.startsWith('select id from sources') && args.length === 2)

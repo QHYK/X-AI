@@ -1,25 +1,30 @@
 import { safelyRecordPipelineRuntime } from '../src/processing/pipeline-run-log.js';
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { Pool } from "pg";
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { Pool } from 'pg';
 import {
   resolveCatchupPublishedAtScope,
   resolveDailyScope,
   readCatchupPublishedAtScopeFromEnv,
-} from "../src/lib/daily-scope.js";
+} from '../src/lib/daily-scope.js';
 import {
   completeRawArticleContent,
   resolveContentCompletionLimits,
   type ContentCompletionMetrics,
-} from "../src/processing/content-completion.js";
+} from '../src/processing/content-completion.js';
 import {
   contentCompletionRunDir,
+  contentCompletionPipelineMetrics,
   writeContentCompletionRuntime,
   writeContentCompletionResults,
   type ContentCompletionRuntimeArtifact,
-} from "../src/processing/content-completion-runtime.js";
-import { pipelineTriggerSource, safelyFinishPipelineRun, safelyStartPipelineRun } from "../src/processing/pipeline-run-log.js";
-import { loadPipelineEnvironment } from "../src/lib/pipeline-env.js";
+} from '../src/processing/content-completion-runtime.js';
+import {
+  pipelineTriggerSource,
+  safelyFinishPipelineRun,
+  safelyStartPipelineRun,
+} from '../src/processing/pipeline-run-log.js';
+import { loadPipelineEnvironment } from '../src/lib/pipeline-env.js';
 
 loadPipelineEnvironment();
 const inheritedRunPointer = process.env.DAILY_STAGE_RUN_POINTER;
@@ -42,7 +47,7 @@ async function main() {
   const limits = resolveContentCompletionLimits(options);
   const runDir = contentCompletionRunDir(startedAt);
   const artifact: ContentCompletionRuntimeArtifact = {
-    status: "running",
+    status: 'running',
     daily_date: dailyScope.dailyDate,
     scope_start_at: scope.startAt,
     scope_end_at: scope.endAt,
@@ -60,6 +65,7 @@ async function main() {
     attempted_count: null,
     firecrawl_request_count: null,
     retry_count: null,
+    average_content_length: null,
     content_type_distribution: null,
     raw_length: null,
     content_text_length: null,
@@ -79,19 +85,24 @@ async function main() {
   try {
     const databaseUrl = process.env.DATABASE_URL;
     if (!databaseUrl) {
-      throw new Error("DATABASE_URL is required to complete raw article content.");
+      throw new Error('DATABASE_URL is required to complete raw article content.');
     }
 
     pool = new Pool({
       connectionString: databaseUrl,
       ssl:
-        process.env.DATABASE_SSL === "true"
+        process.env.DATABASE_SSL === 'true'
           ? {
               rejectUnauthorized: false,
             }
           : undefined,
     });
-    pipelineRunId = await safelyStartPipelineRun(pool, { dailyDate: dailyScope.dailyDate, step: "content_completion", triggerSource: pipelineTriggerSource(process.env.PIPELINE_TRIGGER_SOURCE), startedAt });
+    pipelineRunId = await safelyStartPipelineRun(pool, {
+      dailyDate: dailyScope.dailyDate,
+      step: 'content_completion',
+      triggerSource: pipelineTriggerSource(process.env.PIPELINE_TRIGGER_SOURCE),
+      startedAt,
+    });
     await safelyRecordPipelineRuntime(pool, pipelineRunId, runDir);
     const summary = await completeRawArticleContent(pool, options, (metrics) => {
       applyMetrics(artifact, metrics);
@@ -99,13 +110,27 @@ async function main() {
     applySummaryMetrics(artifact, summary);
     await writeRawMarkdown(runDir, summary.results);
     const runtimeResults = summary.results.map((result) => {
-      return Object.fromEntries(Object.entries(result).filter(([key]) => key !== "rawMarkdown"));
+      return Object.fromEntries(Object.entries(result).filter(([key]) => key !== 'rawMarkdown'));
     });
     await writeContentCompletionResults(runDir, runtimeResults);
-    finishArtifact(artifact, startedAt, "success", null);
+    const processingFailure = summary.results.some((result) => result.processingFailed);
+    const status = processingFailure ? 'failed' : 'success';
+    finishArtifact(
+      artifact,
+      startedAt,
+      status,
+      processingFailure
+        ? 'One or more extraction/Raw writes failed; completed pool statistics retained.'
+        : null,
+    );
     await writeContentCompletionRuntime(runDir, artifact);
-    await safelyFinishPipelineRun(pool, pipelineRunId, { status: "success", metrics: completionMetrics(artifact) });
+    await safelyFinishPipelineRun(pool, pipelineRunId, {
+      status,
+      metrics: contentCompletionPipelineMetrics(artifact),
+      errorSummary: artifact.error,
+    });
 
+    if (processingFailure) process.exitCode = 1;
     // Log the summary, but exclude the rawMarkdown content
     const { results: _results, ...summaryForLog } = summary;
     console.log(
@@ -122,13 +147,17 @@ async function main() {
     finishArtifact(
       artifact,
       startedAt,
-      "failed",
+      'failed',
       error instanceof Error ? error.message : String(error),
     );
     await writeContentCompletionRuntime(runDir, artifact);
     if (pool) {
       // The row may not exist when connection creation itself failed; the helper handles that safely.
-      await safelyFinishPipelineRun(pool, pipelineRunId, { status: "failed", metrics: completionMetrics(artifact), errorSummary: artifact.error });
+      await safelyFinishPipelineRun(pool, pipelineRunId, {
+        status: 'failed',
+        metrics: contentCompletionPipelineMetrics(artifact),
+        errorSummary: artifact.error,
+      });
     }
     throw error;
   } finally {
@@ -136,25 +165,25 @@ async function main() {
   }
 }
 
-function completionMetrics(artifact: ContentCompletionRuntimeArtifact) {
-  return { candidate_count: artifact.candidate_count, selected_count: artifact.selected_count,
-    success_count: artifact.success_count, failed_count: artifact.failed_count, skipped_count: artifact.skipped_count,
-    remaining_count: artifact.remaining_count, retry_count: artifact.retry_count, duration_ms: artifact.duration_ms,
-    pool_metrics: artifact.pool_metrics };
-}
-
 async function writeRawMarkdown(
   runDir: string,
   results: Array<{ rawArticleId: string; rawMarkdown: string | null }>,
 ): Promise<void> {
-  const rawDir = join(runDir, "firecrawl-raw-markdown");
+  const rawDir = join(runDir, 'firecrawl-raw-markdown');
   await mkdir(rawDir, { recursive: true });
-  await Promise.all(results.filter((result) => result.rawMarkdown).map((result) =>
-    writeFile(join(rawDir, `${result.rawArticleId}.md`), result.rawMarkdown as string),
-  ));
+  await Promise.all(
+    results
+      .filter((result) => result.rawMarkdown)
+      .map((result) =>
+        writeFile(join(rawDir, `${result.rawArticleId}.md`), result.rawMarkdown as string),
+      ),
+  );
 }
 
-function applySummaryMetrics(artifact: ContentCompletionRuntimeArtifact, summary: Awaited<ReturnType<typeof completeRawArticleContent>>): void {
+function applySummaryMetrics(
+  artifact: ContentCompletionRuntimeArtifact,
+  summary: Awaited<ReturnType<typeof completeRawArticleContent>>,
+): void {
   artifact.unusable_count = summary.unusableCount;
   artifact.input_count = summary.inputCount;
   artifact.attempted_count = summary.attemptedCount;
@@ -165,6 +194,7 @@ function applySummaryMetrics(artifact: ContentCompletionRuntimeArtifact, summary
   artifact.content_text_length = summary.contentTextLength;
   artifact.full_content_text_length = summary.fullContentTextLength;
   artifact.pool_metrics = summary.poolMetrics;
+  artifact.average_content_length = summary.averageContentLength;
 }
 
 function applyMetrics(
@@ -177,12 +207,19 @@ function applyMetrics(
   artifact.failed_count = metrics.failedCount ?? artifact.failed_count;
   artifact.skipped_count = metrics.skippedCount ?? artifact.skipped_count;
   artifact.remaining_count = metrics.remainingCount ?? artifact.remaining_count;
+  artifact.attempted_count = metrics.attemptedCount ?? artifact.attempted_count;
+  artifact.firecrawl_request_count =
+    metrics.firecrawlRequestCount ?? artifact.firecrawl_request_count;
+  artifact.retry_count = metrics.retryCount ?? artifact.retry_count;
+  if (metrics.averageContentLength !== undefined)
+    artifact.average_content_length = metrics.averageContentLength;
+  if (metrics.poolMetrics !== undefined) artifact.pool_metrics = metrics.poolMetrics;
 }
 
 function finishArtifact(
   artifact: ContentCompletionRuntimeArtifact,
   startedAt: Date,
-  status: "success" | "failed",
+  status: 'success' | 'failed',
   error: string | null,
 ): void {
   const finishedAt = new Date();
@@ -201,7 +238,7 @@ async function writeRunPointer(runDir: string): Promise<void> {
 
 function parseSourceNames(value: string | undefined): string[] | undefined {
   const sourceNames = value
-    ?.split(",")
+    ?.split(',')
     .map((name) => name.trim())
     .filter(Boolean);
 

@@ -182,7 +182,7 @@ export async function serveNewsletterParser(
           receivedAt: iso(r.received_at),
           status: r.parse_status,
         })),
-        perSourceLimit: 5,
+        perSourceLimit: 10,
       },
       { headers },
     );

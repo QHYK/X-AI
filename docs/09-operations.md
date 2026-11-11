@@ -371,11 +371,12 @@ Scope 的时间含义和 current/historical 行为在 [Workflow Overview](02-wor
 | `RSS_COLLECTOR_CONCURRENCY` | `4` | RSS collection 并发 |
 | `RSS_FETCH_TIMEOUT_MS` | `20000` ms | RSS fetch timeout |
 | `FIRECRAWL_API_KEY` | — | Content Completion pool A 必填；Firecrawl diagnostic 使用此 Key |
-| `FIRECRAWL_API_KEY_2` | — | Content Completion pool B 必填；缺失时有候选的 Completion 会在发起请求前失败 |
+| `FIRECRAWL_API_KEY_2` | — | Content Completion pool B 必填 |
+| `FIRECRAWL_API_KEY_3` | — | Content Completion pool C 必填；三个 Key 缺一时启动失败，不发送抓取请求 |
 | `CONTENT_COMPLETION_SOURCE_NAMES` | 全部 source | 逗号分隔 source name filter |
-| `CONTENT_COMPLETION_LIMIT` | `80` | Content Completion 最大处理数；显式设置可降低此值，但不能超过 80 |
+| `CONTENT_COMPLETION_LIMIT` | `90` | 最大处理数；可降低，不能超过 90；三个固定批次各最多 30 篇 |
 | `CONTENT_COMPLETION_PER_SOURCE_LIMIT` | `10` | 每个 source 最大处理数 |
-| `CONTENT_COMPLETION_CONCURRENCY` | `2` | Content Completion 并发 |
+| `CONTENT_COMPLETION_CONCURRENCY` | `2` | 每个 Content Completion Pool 内部并发；三池独立运行 |
 | `CONTENT_COMPLETION_SHORT_CHARS` | `80` | Completion 候选正文长度阈值；Dashboard 也读取此值显示阈值 |
 | `CONTENT_COMPLETION_FIRECRAWL_TIMEOUT_MS` | `30000` ms | 单次 Firecrawl timeout |
 | `CONTENT_COMPLETION_FIRECRAWL_MAX_RETRIES` | `2` | 单次 Firecrawl 最大重试数 |

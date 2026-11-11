@@ -112,7 +112,7 @@ console.log(
 
 const capped = newsletterStore();
 for (const source of ['Source A', 'Source B'])
-  for (let day = 1; day <= 8; day++) {
+  for (let day = 1; day <= 12; day++) {
     const id = `${source.replace(' ', '_')}_${day}`;
     await saveFetchedEmail(capped.pool, id, {
       ...raw,
@@ -124,19 +124,19 @@ for (const source of ['Source A', 'Source B'])
   }
 const cappedDeps = { ...deps, database: () => capped.pool };
 const all = await (await serveNewsletterParser(request(), cappedDeps)).json();
-assert.equal(all.items.length, 10);
-assert.equal(all.perSourceLimit, 5);
+assert.equal(all.items.length, 20);
+assert.equal(all.perSourceLimit, 10);
 for (const source of ['Source A', 'Source B'])
   assert.deepEqual(
     all.items
       .filter((m: { source: string }) => m.source === source)
       .map((m: { id: string }) => m.id.split('_').at(-1)),
-    ['8', '7', '6', '5', '4'],
+    ['12', '11', '10', '9', '8', '7', '6', '5', '4', '3'],
   );
 const filtered = await (
   await serveNewsletterParser(request('?source=Source%20A&status=unsupported'), cappedDeps)
 ).json();
-assert.equal(filtered.items.length, 4);
+assert.equal(filtered.items.length, 6);
 assert.ok(
   filtered.items.every(
     (m: { source: string; status: string }) =>
@@ -144,7 +144,7 @@ assert.ok(
   ),
 );
 console.log(
-  'PASS newest five per source, independent source caps, received_at ordering and status-before-limit filtering.',
+  'PASS newest ten per source, independent source caps, received_at ordering and status-before-limit filtering.',
 );
 
 const reviewDetails = await (

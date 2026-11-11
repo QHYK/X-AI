@@ -261,8 +261,8 @@ function EventContent({ item, rank, cutoff }: { item: EventReviewItem; rank: num
         <>
           <h2>{finalEvent.titleZh}</h2>
           <p className={styles.summary}>{finalEvent.summaryZh}</p>
-          <TagLine label="Tags" values={[...finalEvent.tagsZh]} />
-          <TagLine label="Entities" values={[...finalEvent.entitiesZh]} />
+          {/* <TagLine label="Tags" values={[...finalEvent.tagsZh]} />
+          <TagLine label="Entities" values={[...finalEvent.entitiesZh]} /> */}
         </>
       ) : (
         <>
@@ -278,8 +278,8 @@ function EventContent({ item, rank, cutoff }: { item: EventReviewItem; rank: num
                 <h3>{candidate.title}</h3>
                 {!finalEvent && candidate.titleZh ? <p className={styles.titleZh}>{candidate.titleZh}</p> : null}
                 {!finalEvent && candidate.summaryZh ? <p>{candidate.summaryZh}</p> : null}
-                {!finalEvent ? <TagLine label="Tags" values={candidate.tags} /> : null}
-                {!finalEvent ? <TagLine label="Entities" values={[...candidate.entitiesZh, ...candidate.entities]} /> : null}
+                {/* {!finalEvent ? <TagLine label="Tags" values={candidate.tags} /> : null}
+                {!finalEvent ? <TagLine label="Entities" values={[...candidate.entitiesZh, ...candidate.entities]} /> : null} */}
               </section>
             ))}
           </div>
@@ -295,10 +295,10 @@ function LongFormContent({ item }: { item: LongFormReviewItem; rank: number }) {
       <div className={styles.itemMeta}>
         <span>AI rank #{item.aiRank}</span>
         <span>{item.source}</span>
+        {item.url ? <a className={styles.originalLink} href={item.url} target="_blank" rel="noreferrer">Read original ↗</a> : null}
       </div>
       <h2>{item.titleZh ?? "Untitled"}</h2>
       {item.summaryZh ? <p className={styles.summary}>{item.summaryZh}</p> : null}
-      {item.url ? <a className={styles.originalLink} href={item.url} target="_blank" rel="noreferrer">Read original ↗</a> : null}
     </div>
   );
 }

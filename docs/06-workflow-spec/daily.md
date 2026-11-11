@@ -288,7 +288,7 @@ content_text = empty
 
 当前使用 Firecrawl `/v2/scrape` 获取 Markdown。
 
-一次 Content Completion 最多选择 80 个既有排序后的候选；固定分为两个并行工作池：A 使用 `FIRECRAWL_API_KEY`，B 使用 `FIRECRAWL_API_KEY_2`。候选按原有顺序前半（向上取整）分配给 A、后半分配给 B，每池最多 40 个；不会在某个池提前结束后转移任务。两个 Key 必须同时配置，避免缺少第二个 Key 时意外消耗第一个账号。具体环境变量见 [Operations](../09-operations.md#53-collection-与-content-completion)。
+一次 Content Completion 最多选择 90 个既有排序后的候选；按顺序固定分为三个并行工作池：A 使用 `FIRECRAWL_API_KEY` 处理前 30 篇，B 使用 `FIRECRAWL_API_KEY_2` 处理接下来的 30 篇，C 使用 `FIRECRAWL_API_KEY_3` 处理剩余最多 30 篇。不足的批次为空，不在 Key 间转移或接管任务；每池沿用既有并发、重试、超时和限流。三个 Key 均须在启动时配置，即使没有候选也会验证。90 为处理上限，不是成功保证。具体环境变量见 [Operations](../09-operations.md#53-collection-与-content-completion)。
 
 提取优先关注：
 
@@ -322,6 +322,8 @@ Stage 1 may still judge from available title / metadata / content
 ```
 
 Content Completion 失败和 Stage 1 失败是两个独立概念。
+
+补全 success 仅在现有提取 / 清洗标准通过、最终 `content_text` 写入 Raw 且更新恰好一行后计入；Firecrawl 响应成功但正文无效为 unusable，不计成功。单篇处理 / 写入失败会记录 failed，其他 Pool 继续；处理 / 写入异常使本次 Run 为 failed，但保留其他已完成统计。平均有效长度只使用本次 success 文章写入的 `content_text.length`，不使用原始 Markdown 或独立保留的 `full_content_text`；无成功时为 null。`attempted_count` 统计非 skipped 文章，`firecrawl_request_count` 包含实际重试请求，两者不等同。
 
 ### 5.5 Runtime
 
