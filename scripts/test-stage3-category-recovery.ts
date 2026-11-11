@@ -80,6 +80,7 @@ class Store {
   released = 0;
   memoryReads = 0;
   memoryContent: string | null = 'content preference';
+  eventMemoryContent: string | null = null;
   memoryReadFails = false;
   memoryContexts: (string | undefined)[] = [];
   constructor() {
@@ -101,25 +102,22 @@ class Store {
     const text = sql.replace(/\s+/g, ' ').trim();
     if (text.includes('from memories')) {
       this.memoryReads++;
-      assert.deepEqual(args, [['content']]);
+      assert.deepEqual(args, [['content', 'event']]);
       assert.ok(text.includes('enabled = true'));
       assert.ok(text.includes('order by priority desc, created_at desc, id desc'));
       if (this.memoryReadFails) throw new Error('Mock Memory read failure');
       return {
-        rows:
-          this.memoryContent === null
-            ? []
-            : [
-                {
-                  id: 'memory',
-                  content: this.memoryContent,
-                  type: 'content',
-                  enabled: true,
-                  priority: 0,
-                  createdAt: '2026-10-20',
-                  updatedAt: '2026-10-20',
-                },
-              ],
+        rows: [
+          { id: 'event-memory', content: this.eventMemoryContent, type: 'event', priority: 5 },
+          { id: 'memory', content: this.memoryContent, type: 'content', priority: 0 },
+        ]
+          .filter((row) => row.content !== null)
+          .map((row) => ({
+            ...row,
+            enabled: true,
+            createdAt: '2026-10-20',
+            updatedAt: '2026-10-20',
+          })),
       };
     }
     if (text === 'begin') {
@@ -937,6 +935,35 @@ try {
   emptyMemory.memoryContent = null;
   assert.equal((await emptyMemory.run(join(root, 'empty-memory'))).status, 'success');
   assert.ok(emptyMemory.memoryContexts.every((context) => context === ''));
+  const eventMemory = new Store();
+  eventMemory.eventMemoryContent = 'Event preference';
+  const eventMemoryRoot = join(root, 'event-memory');
+  assert.equal((await eventMemory.run(eventMemoryRoot)).status, 'success');
+  assert.equal(eventMemory.memoryReads, 1);
+  assert.equal(
+    eventMemory.memoryContexts[0],
+    formatMemories([
+      { type: 'event', content: 'Event preference' },
+      { type: 'content', content: 'content preference' },
+    ]),
+  );
+  assert.ok(
+    eventMemory.memoryContexts
+      .slice(1)
+      .every(
+        (context) =>
+          context === formatMemories([{ type: 'content', content: 'content preference' }]),
+      ),
+    'Event Memory must not enter Digest or Long-form',
+  );
+  const eventCallsBefore = eventMemory.eventCalls;
+  eventMemory.eventMemoryContent = 'Changed after saved ranking';
+  assert.equal((await eventMemory.run(eventMemoryRoot)).status, 'success');
+  assert.equal(
+    eventMemory.eventCalls,
+    eventCallsBefore,
+    'Memory changes do not invalidate a successful ranking',
+  );
   const failedMemory = new Store();
   failedMemory.memoryReadFails = true;
   const memoryFailure = await failedMemory.run(join(root, 'failed-memory'));

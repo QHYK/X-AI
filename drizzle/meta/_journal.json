@@ -211,6 +211,13 @@
       "when": 1794300000000,
       "tag": "0029_newsletter_emails",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794355200000,
+      "tag": "0030_event_memory",
+      "breakpoints": true
     }
   ]
 }

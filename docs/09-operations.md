@@ -168,7 +168,7 @@ Put Back 部署需通过 `npm run db:migrate` 应用 `0020_digest_put_back.sql` 
 
 ### 2.5 Memory 管理部署
 
-先核对数据库连接目标与待执行迁移，使用现有 `npm run db:migrate` 应用 `0023_memories.sql`，再部署并按既有方式重启 Web。只新增独立管理表，无回填、Seed、Prompt 导入或 Pipeline 操作；接入 Memory Runtime 的代码部署后需按既有方式重启 Discovery Worker；本次 Runtime 无额外 Migration。不要为回滚界面自动删表。管理入口与行为见 [Technical Spec](04-technical-spec/admin-api.md#75-memory-管理)，字段见 [Data Model](05-data-model/memory.md#memories)。
+管理入口与行为见 [Technical Spec](04-technical-spec/admin-api.md#75-memory-管理)，字段见 [Data Model](05-data-model/memory.md#memories)。
 
 ## 3. Production Processing 命令
 
@@ -487,6 +487,7 @@ npm run test:newsletter-parser-ui
 npm run test:memories
 npm run test:memories-ui
 npm run test:ranking-review
+npm run test:event-review-ui
 npm run test:event-consolidation-review
 npm run test:model-evaluation
 npm run test:read-more-cache

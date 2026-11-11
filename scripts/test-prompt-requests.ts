@@ -348,6 +348,14 @@ try {
       enabled: false,
       createdAt: '2026-10-23',
     },
+    { content: 'event marker', type: 'event', priority: 5, enabled: true, createdAt: '2026-10-20' },
+    {
+      content: 'disabled event',
+      type: 'event',
+      priority: 100,
+      enabled: false,
+      createdAt: '2026-10-20',
+    },
     ...['general', 'topic', 'source'].map((type) => ({
       content: type,
       type,
@@ -367,7 +375,10 @@ try {
           sql.includes('enabled = true') &&
             sql.includes('order by priority desc, created_at desc, id desc'),
         );
-        assert.deepEqual(values, [['content']]);
+        assert.ok(
+          JSON.stringify(values) === JSON.stringify([['content']]) ||
+            JSON.stringify(values) === JSON.stringify([['content', 'event']]),
+        );
         if (failRead) throw new Error('Memory read failure');
         return {
           rows: activeRows
@@ -461,8 +472,15 @@ try {
           )!.content,
         ),
       ),
-      { events: [], memory: context },
+      {
+        events: [],
+        memory: formatMemories(await getActiveMemories(db, { types: ['content', 'event'] })),
+      },
     );
+    const eventMemory = JSON.parse(eventPreview.businessInput).memory as string;
+    assert.equal(eventMemory.split('event marker').length - 1, 1);
+    assert.ok(!eventMemory.includes('disabled event'));
+    assert.ok(!JSON.parse(preview.businessInput).memory.includes('event marker'));
     assert.equal(eventPreview.request.max_output_tokens, 8000);
     assert.equal(preview.request.max_output_tokens, 2400);
     for (const step of ['D2', 'stage1', 'stage3:event'])

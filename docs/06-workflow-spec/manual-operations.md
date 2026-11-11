@@ -55,6 +55,8 @@ Long-form Review 与 Production 使用相同 Daily membership，按 `processed_c
 
 Event 被人工移入 Top cutoff 且尚无最终 Event 时，才按需执行对应单 Event Stage4 enrichment；普通排序调整不意味着重跑 Stage4 全阶段。补全失败时不保存本次 Review 排名；成功后再保存排名及必要的最终 Event。
 
+Top 15 内尚未发布、仍有来源内容的 Event 可单独 Publish：仅恢复点击项，沿用当前已保存的排名，保留其他发布项和跳过项；已有正文直接复用，缺失时仅补齐此 Event。人工 Publish 不受已发布 15 条的总量限制，可保留额外发布的 Event，Daily Brief 展示全部已发布结果；有未保存排序时先保存或刷新。重复 Publish 不重复创建 Event，失败不提交部分发布结果。此操作无需重建 Brief，公开查询直接读取发布结果。
+
 接口与展示边界见 [Human Review](../04-technical-spec/admin-api.md#73-human-review)，Stage4 执行与恢复仍遵循 [Daily Workflow](daily.md)。
 
 ## 5. Model Evaluation

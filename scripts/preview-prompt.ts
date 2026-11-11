@@ -139,7 +139,9 @@ export async function preparePromptPreview(
         };
       }
       const scope = resolveDailyScope(options.date);
-      const memories = await getActiveMemories(db, { types: ['content'] });
+      const memories = await getActiveMemories(db, {
+        types: step === 'stage3:event' ? ['content', 'event'] : ['content'],
+      });
       const memoryContext = formatMemories(memories);
       if (step === 'stage1') {
         // Include already processed articles for inspection; never modify the pending queue.

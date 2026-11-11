@@ -61,8 +61,17 @@ export async function getEventReviewEnrichmentRequests(
     reviewRunId: string;
     orderedIds: string[];
     touchedIds: string[];
+    publishId?: string;
   },
 ): Promise<Stage4EventGroup[]> {
+  if (input.publishId) {
+    const plan = await loadEventPublicationPlan(
+      pool,
+      { ...input, publishId: input.publishId },
+      false,
+    );
+    return plan.needsEnrichment ? [plan.target] : [];
+  }
   const rows = await loadEventReviewRows(pool, input, false);
   const changeSet = buildRankingChangeSet({
     currentRows: rows,
@@ -169,6 +178,7 @@ export async function saveEventReviewRanking(
     orderedIds: string[];
     touchedIds: string[];
     enrichedEvents?: EnrichedStage4Event[];
+    publishId?: string;
   },
 ): Promise<{
   updatedCount: number;
@@ -176,6 +186,8 @@ export async function saveEventReviewRanking(
   eventsUpdated: number;
   eventsCreated: number;
 }> {
+  if (input.publishId)
+    return saveEventReviewPublication(pool, { ...input, publishId: input.publishId });
   return withTransaction(pool, async (client) => {
     const rows = await loadEventReviewRows(client, input, true);
     const changeSet = buildRankingChangeSet({
@@ -254,6 +266,118 @@ export async function saveEventReviewRanking(
       eventsUpdated,
       eventsCreated,
     };
+  });
+}
+
+/** Plan from persisted ranks/publication, never from a client's unsaved order. */
+async function loadEventPublicationPlan(
+  db: Queryable,
+  input: { dailyDate: string; reviewRunId: string; publishId: string },
+  lock: boolean,
+) {
+  const rows = await loadEventReviewRows(db, input, lock);
+  const row = rows.find((item) => item.id === input.publishId);
+  if (!row || row.displayRank < 1 || row.displayRank > EVENT_DISPLAY_CUTOFF)
+    throw new ReviewValidationError(
+      'Publish requires an Event in the saved Top 15. Reload or adjust the ranking first.',
+    );
+  const runs = await db.query<{ id: string; status: string }>(
+    `select id, status from stage4_runs
+     where review_run_id = $1::uuid and daily_date = $2::date ${lock ? 'for update' : ''}`,
+    [input.reviewRunId, input.dailyDate],
+  );
+  const run = runs.rows[0];
+  if (!run || run.status !== 'success')
+    throw new ReviewValidationError('Publish requires a successfully completed Stage4 Run.');
+  const links = await loadEventReviewLinks(db, rows, lock);
+  const published = await db.query<{ id: string; event_review_item_id: string | null }>(
+    `select id, event_review_item_id from events
+     where stage4_run_id = $1::uuid and publication_status = 'published'
+     ${lock ? 'for update' : ''}`,
+    [run.id],
+  );
+  const reviewIdByEventId = new Map(
+    [...links.eventIdByReviewItemId].map(([reviewId, eventId]) => [eventId, reviewId]),
+  );
+  const publishedIds = published.rows.map(
+    (event) => event.event_review_item_id ?? reviewIdByEventId.get(event.id),
+  );
+  if (publishedIds.some((id) => !id || !rows.some((item) => item.id === id)))
+    throw new ReviewValidationError(
+      'Published Events cannot be safely mapped to this Review snapshot. Reload and inspect the Run.',
+    );
+  const selectedIds = publishedIds as string[];
+  const alreadyPublished = selectedIds.includes(row.id);
+  return {
+    runId: run.id,
+    links,
+    selectedIds: alreadyPublished ? selectedIds : [...selectedIds, row.id],
+    alreadyPublished,
+    needsEnrichment: !alreadyPublished && !links.eventIdByReviewItemId.has(row.id),
+    target: {
+      eventGroupId: row.id,
+      eventReviewItemId: row.id,
+      eventHint: row.eventHint,
+      aiRank: row.aiRank,
+      displayRank: row.displayRank,
+      processedContentIds: row.memberContentIds,
+    } satisfies Stage4EventGroup,
+  };
+}
+
+/** Restore one skipped selection through the same Stage4 draft/publication transaction. */
+async function saveEventReviewPublication(
+  pool: Pool,
+  input: {
+    dailyDate: string;
+    reviewRunId: string;
+    publishId: string;
+    enrichedEvents?: EnrichedStage4Event[];
+  },
+) {
+  return withTransaction(pool, async (client) => {
+    const plan = await loadEventPublicationPlan(client, input, true);
+    const unchanged = { updatedCount: 0, feedbackCount: 0, eventsUpdated: 0, eventsCreated: 0 };
+    if (plan.alreadyPublished) return unchanged;
+    const enriched = input.enrichedEvents ?? [];
+    if (enriched.some((event) => event.group.eventReviewItemId !== input.publishId))
+      throw new ReviewValidationError('Publish can only enrich the requested Event.');
+    let eventsCreated = 0;
+    if (plan.needsEnrichment) {
+      if (
+        enriched.length !== 1 ||
+        !sameIdSet(enriched[0]!.group.processedContentIds, plan.target.processedContentIds)
+      )
+        throw new ReviewValidationError(
+          'Event content changed or enrichment is missing. Reload and publish again.',
+        );
+      const inserted = await persistStage4Draft(
+        client,
+        plan.runId,
+        toReviewStage4EventToPersist({
+          ...enriched[0]!,
+          group: plan.target,
+        }),
+      );
+      if (inserted) eventsCreated = 1;
+    }
+    await backfillLegacyEventReviewLinks(
+      client,
+      plan.links.legacyLinks.filter((link) => plan.selectedIds.includes(link.reviewItemId)),
+    );
+    const existingEventId = plan.links.eventIdByReviewItemId.get(input.publishId);
+    if (existingEventId)
+      await client.query(
+        'update events set display_rank = $2, updated_at = now() where id = $1::uuid',
+        [existingEventId, plan.target.displayRank],
+      );
+    // Publication count follows the explicit human selection, including legacy Runs.
+    await client.query('update stage4_runs set expected_count=$2 where id=$1::uuid', [
+      plan.runId,
+      plan.selectedIds.length,
+    ]);
+    const result = await publishStage4ReviewSelection(client, plan.runId, plan.selectedIds);
+    return { ...unchanged, eventsUpdated: result.publishedCount, eventsCreated };
   });
 }
 

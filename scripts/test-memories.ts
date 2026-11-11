@@ -59,8 +59,24 @@ assert.match(sql, /"enabled" boolean DEFAULT true NOT NULL/);
 const journal = JSON.parse(
   await readFile(new URL('../drizzle/meta/_journal.json', import.meta.url), 'utf8'),
 );
-assert.equal(journal.entries.at(-1).tag, '0023_memories');
-assert.equal(journal.entries.at(-1).idx, 23);
+assert.equal(
+  journal.entries.find((entry: { tag: string }) => entry.tag === '0023_memories').idx,
+  23,
+);
+assert.equal(
+  journal.entries.find((entry: { tag: string }) => entry.tag === '0030_event_memory').idx,
+  30,
+);
+const eventMigration = await readFile(
+  new URL('../drizzle/0030_event_memory.sql', import.meta.url),
+  'utf8',
+);
+assert.match(eventMigration, /ADD CONSTRAINT "memories_type_check"/);
+assert.match(eventMigration, /'general', 'topic', 'source', 'content', 'event'/);
+assert.equal(
+  MemoryCreateSchema.parse({ content: 'Event preference', type: 'event' }).type,
+  'event',
+);
 
 const sessionDir = await mkdtemp(join(tmpdir(), 'x-ai-memory-test-'));
 process.env.ADMIN_SESSION_DIR = sessionDir;
@@ -235,6 +251,21 @@ try {
   assert.equal(
     (await route.PATCH(request('PATCH', { id: first.id, content: 'bad', enabled: true }))).status,
     400,
+  );
+  const eventCreated = await route.POST(
+    request('POST', { content: 'Event preference', type: 'event' }),
+  );
+  assert.equal(eventCreated.status, 201);
+  const eventRecord = (await eventCreated.json()).item as Memory;
+  assert.equal(eventRecord.type, 'event');
+  assert.equal(
+    (await route.PATCH(request('PATCH', { id: eventRecord.id, enabled: false }))).status,
+    200,
+  );
+  const eventList = await route.GET(request('GET', undefined, '?type=event'));
+  assert.deepEqual(
+    (await eventList.json()).items.map((item: Memory) => [item.id, item.enabled]),
+    [[eventRecord.id, false]],
   );
   fail = true;
   for (const [method, body] of [

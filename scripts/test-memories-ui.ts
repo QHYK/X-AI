@@ -134,6 +134,11 @@ async function change(label: string, value: string, scope: ParentNode = document
 const checkbox = (scope: ParentNode) =>
   scope.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
 await act(async () => root.render(createElement(MemoryManagement)));
+assert.equal(
+  document.querySelector('select[aria-label="Memory Type filter"] option[value="event"]')
+    ?.textContent,
+  'Event',
+);
 assert.deepEqual(
   rows().map((r) => r.dataset.memoryId),
   records.map((r) => r.id),
@@ -239,6 +244,11 @@ assert.deepEqual(
 await act(async () => root.unmount());
 root = createRoot(document.getElementById('root')!);
 await act(async () => root.render(createElement(MemoryManagement)));
+assert.equal(
+  document.querySelector('select[aria-label="Memory Type filter"] option[value="event"]')
+    ?.textContent,
+  'Event',
+);
 assert.equal(rows().length, 4);
 assert.equal(checkbox(row(base.id)).checked, false);
 assert.match(row(created.id).textContent ?? '', /Edited content/);

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const MEMORY_TYPES = ['general', 'topic', 'source', 'content'] as const;
+export const MEMORY_TYPES = ['general', 'topic', 'source', 'content', 'event'] as const;
 export const MemoryTypeSchema = z.enum(MEMORY_TYPES);
 export type MemoryType = z.infer<typeof MemoryTypeSchema>;
 const content = z.string().trim().min(1, 'Content 不能为空。');

@@ -58,6 +58,7 @@
 
 .dateForm input,
 .dateForm button,
+.reviewAction,
 .itemControls input,
 .itemControls button,
 .saveBar button {
@@ -76,6 +77,7 @@
 }
 
 .dateForm button,
+.reviewAction,
 .itemControls button,
 .saveBar button {
   padding: 0 12px;
@@ -353,3 +355,5 @@
   .consolidationGroup > header { gap: 12px; }
   .consolidationGroup ul { padding-left: 12px; }
 }
+
+.reviewAction:disabled { cursor: default; opacity: 0.5; }

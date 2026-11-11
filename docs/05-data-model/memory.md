@@ -14,11 +14,11 @@
 | `created_at` | timestamptz | NOT NULL，默认 `now()`；编辑不改变创建时间 |
 | `updated_at` | timestamptz | NOT NULL，默认 `now()`；更新操作显式写入当前时间 |
 
-Type 定义：`general` 为通用编辑偏好，`topic` 为话题选择与关注方向，`source` 为来源发现与选择偏好，`content` 为内容整理、翻译、总结偏好。
+Type 定义：`general` 为通用编辑偏好，`topic` 为话题选择与关注方向，`source` 为来源发现与选择偏好，`content` 为内容整理、翻译、总结偏好，`event` 为 Event 重要性判断和排序偏好（后台显示为 Event）。
 
 ### 索引与数据库约束
 
 - 除主键外无额外索引、唯一键或外键。
-- `memories_type_check`：仅允许上述四种 Type。
+- `memories_type_check`：仅允许上述五种 Type。
 - `memories_content_check`：`length(btrim(content)) > 0`；应用层另用字符串 trim 校验空白输入。
-- Schema 与 Migration `0023_memories.sql` 定义一致；无到期、标签、权重或版本表。管理读写契约见 [Memory 管理](../04-technical-spec/admin-api.md#75-memory-管理)。
+- `0023_memories.sql` 创建表，`0030_event_memory.sql` 仅扩展 Type CHECK，保留其他约束与已有记录；无到期、标签、权重或版本表。管理读写契约见 [Memory 管理](../04-technical-spec/admin-api.md#75-memory-管理)。

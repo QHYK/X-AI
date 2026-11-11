@@ -56,6 +56,7 @@
     "test:stage2-retry": "tsx scripts/test-stage2-retry.ts",
     "test:event-consolidation-review": "tsx scripts/test-event-consolidation-review.ts",
     "test:ranking-review": "tsx scripts/test-ranking-review.ts",
+    "test:event-review-ui": "tsx scripts/test-event-review-ui.ts",
     "test:event-review-finalization": "tsx scripts/test-event-review-finalization.ts",
     "test:model-evaluation": "tsx scripts/test-model-evaluation.ts",
     "test:model-evaluation-review": "tsx scripts/test-model-evaluation-review.ts",

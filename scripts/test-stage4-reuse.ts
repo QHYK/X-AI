@@ -1,5 +1,6 @@
 /** State-sequence regression: real job body, persistence and Review service; no DB or paid client. */
 import assert from 'node:assert/strict';
+import { getDailyBriefForDailyDate } from '../src/lib/daily-brief.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
@@ -135,6 +136,14 @@ class Memory {
       );
     if (q.startsWith('select id, success_count, status, selection_snapshot from stage4_runs'))
       return result(this.runs.filter((r) => r.review_run_id === p[0]));
+    if (q.startsWith('select id, status from stage4_runs'))
+      return result(this.runs.filter((r) => r.review_run_id === p[0] && r.daily_date === p[1]));
+    if (q.startsWith('select id, event_review_item_id from events'))
+      return result(
+        this.events
+          .filter((e) => e.run === p[0] && e.status === 'published')
+          .map((e) => ({ id: e.id, event_review_item_id: e.item })),
+      );
     if (q.startsWith('insert into stage4_runs')) {
       const r = {
         id: uid(1000 + this.runs.length),
@@ -632,4 +641,207 @@ assert.deepEqual(
 assert.equal(selectionCalls, 1);
 console.log(
   'PASS frozen Dedup membership → partial → Resume → publish → human override → successful Retry no-op.',
+);
+
+// Explicit Publish restores only one skipped Top-15 item through existing Stage4 persistence.
+const publishMemory = new Memory();
+assert.equal((await run(publishMemory)).success, true);
+const publishId = publishMemory.items[0]!.id;
+const secondSkipped = publishMemory.items[1]!.id;
+const originalRanks = structuredClone(publishMemory.items);
+const priorPublished = publishMemory.events.map((e) => e.item);
+const publishInput = {
+  dailyDate: date,
+  reviewRunId: publishMemory.snapshot,
+  orderedIds: [],
+  touchedIds: [],
+  publishId,
+};
+const plan = await getEventReviewEnrichmentRequests(publishMemory.db(), publishInput);
+assert.equal(plan.length, 1);
+assert.equal(plan[0]!.eventReviewItemId, publishId);
+const publicationPrepared = prepareStage4Event(
+  plan[0]!,
+  new Map([
+    [
+      publishId,
+      {
+        processedContentId: publishId,
+        title: 'Evidence',
+        summary: 'Evidence',
+        entities: [],
+        source: 'Source',
+        url: null,
+        publishedAt: null,
+      },
+    ],
+  ]),
+  new Date(),
+  date,
+);
+const publicationEnrichment = {
+  ...publicationPrepared,
+  output,
+  llm: {} as never,
+  toolUsage: {} as never,
+};
+const publicationResult = await saveEventReviewRanking(publishMemory.db(), {
+  ...publishInput,
+  enrichedEvents: [publicationEnrichment],
+});
+assert.equal(publicationResult.eventsCreated, 1);
+assert.equal(publicationResult.feedbackCount, 0);
+assert.deepEqual(publishMemory.items, originalRanks, 'Publish never changes human or AI ranks');
+assert.deepEqual(
+  publishMemory.events
+    .filter((e) => e.status === 'published')
+    .map((e) => e.item)
+    .sort(),
+  [...priorPublished, publishId].sort(),
+);
+assert.ok(
+  !publishMemory.events.some((e) => e.item === secondSkipped),
+  'Other skipped Events remain skipped',
+);
+assert.equal((await getEventReviewEnrichmentRequests(publishMemory.db(), publishInput)).length, 0);
+assert.equal(
+  (await saveEventReviewRanking(publishMemory.db(), publishInput)).eventsCreated,
+  0,
+  'Repeat Publish is idempotent',
+);
+// Read the actual Brief service against this state; filtering remains the existing Published query.
+const readPublishedBrief = (memory: Memory) =>
+  getDailyBriefForDailyDate(
+    {
+      query: async (sql: string) => {
+        if (sql.includes('join stage4_runs on stage4_runs.id = events.stage4_run_id')) {
+          assert.ok(sql.includes("events.publication_status = 'published'"));
+          return {
+            rows: memory.events
+              .filter((e) => e.status === 'published')
+              .sort((a, b) => a.rank - b.rank)
+              .map((e) => ({
+                id: e.id,
+                rank: e.rank,
+                event_date: date,
+                created_at: new Date(),
+                title: e.title,
+                title_zh: e.title,
+                summary: 'Summary',
+                summary_zh: '摘要',
+                tags: [],
+                tags_zh: [],
+                entities: [],
+                entities_zh: [],
+                source_perspectives: [],
+                external_context: null,
+              })),
+          };
+        }
+        return { rows: [] };
+      },
+    } as unknown as Pool,
+    date,
+  );
+const brief = await readPublishedBrief(publishMemory);
+assert.ok(
+  brief.events.some((e) => e.id === publishMemory.events.find((e) => e.item === publishId)!.id),
+);
+assert.equal(brief.events.length, priorPublished.length + 1);
+const restored = publishMemory.events.find((e) => e.item === publishId)!;
+restored.status = 'archived';
+restored.rank = 99;
+assert.equal(
+  (await getEventReviewEnrichmentRequests(publishMemory.db(), publishInput)).length,
+  0,
+  'Saved Event is reused',
+);
+await saveEventReviewRanking(publishMemory.db(), publishInput);
+assert.equal(restored.status, 'published');
+assert.equal(restored.rank, publishMemory.items[0]!.rank);
+assert.equal(
+  (await run(publishMemory)).success,
+  true,
+  'Successful automatic Retry remains a no-op',
+);
+assert.deepEqual(publishMemory.items, originalRanks);
+// Publish failure rolls back draft, count, published set and backlinks together.
+const rollbackMemory = new Memory();
+await run(rollbackMemory);
+const rollbackInput = {
+  ...publishInput,
+  reviewRunId: rollbackMemory.snapshot,
+  publishId: rollbackMemory.items[0]!.id,
+};
+const rollbackState = JSON.stringify([
+  rollbackMemory.events,
+  rollbackMemory.runs,
+  rollbackMemory.links,
+]);
+rollbackMemory.failPublish = true;
+await assert.rejects(
+  saveEventReviewRanking(rollbackMemory.db(), {
+    ...rollbackInput,
+    enrichedEvents: [publicationEnrichment],
+  }),
+  /Injected publication failure/,
+);
+assert.equal(
+  JSON.stringify([rollbackMemory.events, rollbackMemory.runs, rollbackMemory.links]),
+  rollbackState,
+);
+// A full published set retains every existing Event and allows a manual 16th publication.
+newSelection = false;
+const fullMemory = new Memory();
+await run(fullMemory);
+fullMemory.events[0]!.status = 'archived';
+fullMemory.events.push({
+  ...fullMemory.events[0]!,
+  id: uid(9999),
+  item: fullMemory.items.at(-1)!.id,
+  status: 'published',
+  rank: 16,
+});
+const fullPublication = {
+  ...publishInput,
+  reviewRunId: fullMemory.snapshot,
+  publishId: fullMemory.items[0]!.id,
+};
+const fullRanks = structuredClone(fullMemory.items);
+const priorFullPublishedIds = fullMemory.events
+  .filter((e) => e.status === 'published')
+  .map((e) => e.id);
+assert.equal((await getEventReviewEnrichmentRequests(fullMemory.db(), fullPublication)).length, 0);
+await saveEventReviewRanking(fullMemory.db(), fullPublication);
+assert.equal(fullMemory.events.filter((e) => e.status === 'published').length, 16);
+assert.equal(
+  (await readPublishedBrief(fullMemory)).events.length,
+  16,
+  'Brief returns every Published Event without a Top-15 cutoff',
+);
+assert.ok(
+  priorFullPublishedIds.every((id) =>
+    fullMemory.events.some((e) => e.id === id && e.status === 'published'),
+  ),
+);
+assert.deepEqual(fullMemory.items, fullRanks);
+await assert.rejects(
+  getEventReviewEnrichmentRequests(fullMemory.db(), {
+    ...publishInput,
+    reviewRunId: fullMemory.snapshot,
+    publishId: fullMemory.items.at(-1)!.id,
+  }),
+  /saved Top 15/,
+);
+fullMemory.runs[0]!.status = 'running';
+await assert.rejects(
+  getEventReviewEnrichmentRequests(fullMemory.db(), {
+    ...publishInput,
+    reviewRunId: fullMemory.snapshot,
+    publishId: fullMemory.items[0]!.id,
+  }),
+  /successfully completed/,
+);
+console.log(
+  'PASS single Event Publish: one enrichment, original ranks/other publications retained, Brief visibility, idempotency, archived reuse, publication beyond 15 and atomic rollback (Mock DB).',
 );

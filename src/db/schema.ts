@@ -97,7 +97,7 @@ export const memories = pgTable(
     ...timestamps,
   },
   (table) => [
-    check('memories_type_check', sql`${table.type} in ('general', 'topic', 'source', 'content')`),
+    check('memories_type_check', sql`${table.type} in ('general', 'topic', 'source', 'content', 'event')`),
     check('memories_content_check', sql`length(btrim(${table.content})) > 0`),
   ],
 );

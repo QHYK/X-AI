@@ -147,6 +147,10 @@ Analytics 的 Ignored Articles 提供 Put Back，调用 `POST /api/admin/dashboa
 
 In-depth Review 区分客观元数据、Agent 诊断与可编辑 Editorial；Discovery Path、处理阶段、Candidate ID 与 Run ID 不混用。Tags / Cover 缺失保持历史兼容，不影响审核。字段见 [Data Model](../05-data-model/discovery.md#discovery_candidates)，Source 规则见 [Discovery §5.1](discovery.md#51-candidate-source-归一化)；具体布局以页面实现为准。
 
+#### Event Publish
+
+`PATCH /api/admin/review/events/ranking` 另接受 `{date, reviewRunId, publishId}`，复用 Admin Session / 同源校验、Stage4 Prompt 绑定及单 Event enrichment；操作语义见 [Human Review](../06-workflow-spec/manual-operations.md#按需补全-event)。预检与提交均按持久化的 Review Snapshot 定位，要求目标在已保存 Top 15 且 Stage4 Run 已成功完成。提交事务锁定 Review 行、Run 和 Event，重查发布集合后，复用 `publishStage4ReviewSelection()` 发布当前集合加目标项；仅同步目标 Event 的展示名次，不重写任何 Review Rank、不新增排名 Feedback。非法目标或执行上下文不适用返回 400，enrichment 失败返回 502，其他失败返回 500；重复发布返回已保存结果。若已有正文可复用，不调用模型。并发提交仍会在事务内重查；enrichment 在事务外，竞争失败可能浪费已生成结果，但不会覆盖他人排序。人工 Publish 不限制已发布总数；Daily Brief 的 Published 查询无 Top 15 截断。Review 已有最终正文的展示不按排名截断，Published 标记依据真实发布状态。
+
 #### Event Consolidation Review
 
 `/ai/review/event_consolidation` 是 REVIEW 下的只读检查页，复用 Review 日期控件和样式。未指定日期时选择最近存在自动修正 Feedback 或 Stage3 Consolidation 诊断记录的 `daily_date`；指定日期无记录时明确显示空状态。`GET /api/admin/review/event_consolidation?date=YYYY-MM-DD`（含 basePath 为 `/ai/api/admin/...`）沿用 Admin Session；缺失或非法日期返回 400，未授权返回 401，查询失败返回 500，响应禁止缓存。
@@ -208,7 +212,7 @@ Dashboard 的具体 UI Layout 与交互细节以实现为准，不在 Technical 
 
 `/api/admin/memories` 的 GET / POST / PATCH 均独立校验 Admin Session，写请求校验同源 Origin：
 
-- GET 默认返回全部记录，包含 disabled；可用 `?type=general|topic|source|content` 筛选。排序为 `priority DESC, created_at DESC`，完全相同时间以 `id DESC` 稳定排序，不提供分页或搜索。
+- GET 默认返回全部记录，包含 disabled；可用 `?type=general|topic|source|content|event` 筛选。排序为 `priority DESC, created_at DESC`，完全相同时间以 `id DESC` 稳定排序，不提供分页或搜索。
 - POST 创建记录；PATCH 支持 `{id, content, type, priority, enabled}` 原子保存整行，并保留 `{id, enabled}` 接口兼容。非法参数 400、目标不存在 404、数据库失败 503，创建成功 201，其余成功 200；响应 no-store。
 - 新增行默认值由共享 Schema 定义；新增 / 编辑可以取消，失败保留输入。非编辑状态的 Enabled Checkbox 禁用；Edit 后与其他字段一起修改，Submit 一起保存，Cancel 放弃全部修改，提交失败保留全部输入。请求期间禁用重复提交；保存成功重新读取当前筛选列表，以数据库排序为准。保存已成功但列表刷新失败时明确提示刷新，不误报为未保存。
 

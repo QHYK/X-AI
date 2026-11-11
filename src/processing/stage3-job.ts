@@ -355,7 +355,11 @@ async function processStage3Bound(
   try {
     if (!options.pipelineRunId)
       throw new Error('Stage3 requires a durable pipeline_runs ID before ranking.');
-    const memoryContext = formatMemories(await getActiveMemories(pool, { types: ['content'] }));
+    const activeMemories = await getActiveMemories(pool, { types: ['content', 'event'] });
+    const memoryContext = formatMemories(
+      activeMemories.filter((memory) => memory.type === 'content'),
+    );
+    const eventMemoryContext = formatMemories(activeMemories);
     categoryCorrections = await correctInvalidDigestCategories(pool, dailyDate);
     warningCount += categoryCorrections.length;
     if (categoryCorrections.length) {
@@ -427,7 +431,10 @@ async function processStage3Bound(
         : null;
     const eventRanking =
       reusableEvent ??
-      (await (options.rankers?.events ?? rankEvents)(eventBundle.input, { model, memoryContext }));
+      (await (options.rankers?.events ?? rankEvents)(eventBundle.input, {
+        model,
+        memoryContext: eventMemoryContext,
+      }));
     if (reusableEvent) {
       rankingStatuses.event = 'skipped';
       eventReviewRunId = databaseEvent?.reviewRunId ?? resume!.eventReviewRunId;

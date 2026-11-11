@@ -1,6 +1,6 @@
 # Daily Prompt Contracts
 
-Stage1 与 Stage3 的动态 User Input 可带顶层 `memory: string`，位于原业务字段之后；无启用的 `content` Memory 时省略，原输入字段及 Output Schema 不变。该字段复用现有纯文本编辑偏好格式，作为参考数据，不覆盖系统硬性规则或 Structured Output；不修改 Registry Prompt 正文。读取范围、批次及恢复边界见 [Daily Content Memory](../04-technical-spec/daily.md#content-memory)。
+Stage1 与 Stage3 的动态 User Input 可带顶层 `memory: string`，位于原业务字段之后；无启用的适用 Memory 时省略，原输入字段及 Output Schema 不变。该字段复用现有纯文本编辑偏好格式，作为参考数据，不覆盖系统硬性规则或 Structured Output；不修改 Registry Prompt 正文。读取范围、批次及恢复边界见 [Daily Content Memory](../04-technical-spec/daily.md#content-memory)。
 
 ## Stage 1 — Content Understanding & Selection
 

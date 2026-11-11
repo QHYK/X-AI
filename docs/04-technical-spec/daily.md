@@ -17,7 +17,7 @@
 
 ### Content Memory
 
-Stage1 / Stage3 复用 [Memory Runtime](discovery.md#memory-runtime)，仅查询启用的 `content` Type。每次 Stage 执行读取、格式化一次，以独立 `memory` 字段加入动态 User Input。每次模型调用的自动重试复用已构造请求，不重复追加 Memory；空结果不增加字段，读取失败明确失败且不调用模型。
+Stage1 / Stage3 复用 [Memory Runtime](discovery.md#memory-runtime)。Stage1、Stage3 Digest / Long-form 仅使用启用的 `content`；Stage3 Event Ranking 使用启用的 `content + event`。Stage3 一次读取两种 Type，再按任务过滤并保持优先级 / 创建时间顺序；以独立 `memory` 字段加入动态 User Input。每次模型调用的自动重试复用已构造请求，不重复追加 Memory；空结果不增加字段，读取失败明确失败且不调用模型。
 
 Memory 不写入 Published Prompt，也不保存历史 Snapshot。重新执行时允许读取当前 Memory。Evaluation 复用调用层时不自动查询 Memory。
 

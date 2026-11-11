@@ -107,10 +107,10 @@ export function MemoryManagement() {
             <option value="all">All</option>
             {MEMORY_TYPES.map((entry) => (
               <option
-                key={entry}
-                value={entry}
+                key={entry === 'event' ? 'Event' : entry}
+                value={entry === 'event' ? 'Event' : entry}
               >
-                {entry}
+                {entry === 'event' ? 'Event' : entry}
               </option>
             ))}
           </select>
@@ -243,10 +243,10 @@ function MemoryRow({
           >
             {MEMORY_TYPES.map((entry) => (
               <option
-                key={entry}
-                value={entry}
+                key={entry === 'event' ? 'Event' : entry}
+                value={entry === 'event' ? 'Event' : entry}
               >
-                {entry}
+                {entry === 'event' ? 'Event' : entry}
               </option>
             ))}
           </select>

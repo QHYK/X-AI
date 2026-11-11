@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 /**
  * Event 与 Long-form Review 共用的本地排序交互。
@@ -12,25 +12,25 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
-} from "@dnd-kit/core";
+} from '@dnd-kit/core';
 import {
   SortableContext,
   arrayMove,
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { useMemo, useState, type ReactNode } from "react";
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   EventReviewData,
   EventReviewItem,
   LongFormReviewData,
   LongFormReviewItem,
-} from "@/lib/review.js";
-import styles from "./review.module.css";
+} from '@/lib/review.js';
+import styles from './review.module.css';
 
-type SaveState = "idle" | "saving" | "saved" | "error";
+type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 export function EventRankingReview({ data }: { data: EventReviewData }) {
   return (
@@ -40,7 +40,20 @@ export function EventRankingReview({ data }: { data: EventReviewData }) {
       endpoint="../api/admin/review/events/ranking"
       reviewRunId={data.reviewRunId}
       initialItems={data.items}
-      renderContent={(item, rank) => <EventContent item={item} rank={rank} cutoff={data.cutoff} />}
+      canPublish={(item, rank) =>
+        rank <= data.cutoff &&
+        item.candidates.length > 0 &&
+        (!item.finalEvent ||
+          item.finalEvent.publicationStatus === 'draft' ||
+          item.finalEvent.publicationStatus === 'archived')
+      }
+      renderContent={(item, rank) => (
+        <EventContent
+          item={item}
+          rank={rank}
+          cutoff={data.cutoff}
+        />
+      )}
     />
   );
 }
@@ -52,7 +65,12 @@ export function LongFormRankingReview({ data }: { data: LongFormReviewData }) {
       cutoff={data.cutoff}
       endpoint="../api/admin/review/long-form/ranking"
       initialItems={data.items}
-      renderContent={(item, rank) => <LongFormContent item={item} rank={rank} />}
+      renderContent={(item, rank) => (
+        <LongFormContent
+          item={item}
+          rank={rank}
+        />
+      )}
     />
   );
 }
@@ -64,11 +82,13 @@ function RankingEditor<T extends { id: string; aiRank: number; displayRank: numb
   reviewRunId?: string | null;
   initialItems: T[];
   renderContent: (item: T, rank: number) => ReactNode;
+  canPublish?: (item: T, rank: number) => boolean;
 }) {
   const [items, setItems] = useState(() => [...props.initialItems].sort(byDisplayRank));
   const [touchedIds, setTouchedIds] = useState<Set<string>>(() => new Set());
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [saveState, setSaveState] = useState<SaveState>('idle');
   const [message, setMessage] = useState<string | null>(null);
+  const publishing = useRef(false);
   const [initialRankById, setInitialRankById] = useState(
     () => new Map(props.initialItems.map((item) => [item.id, item.displayRank])),
   );
@@ -86,7 +106,42 @@ function RankingEditor<T extends { id: string; aiRank: number; displayRank: numb
     [initialRankById, items, touchedIds],
   );
 
+  async function publishEvent(id: string): Promise<void> {
+    if (
+      publishing.current ||
+      saveState === 'saving' ||
+      meaningfulTouchedIds.length ||
+      !props.reviewRunId
+    )
+      return;
+    publishing.current = true;
+    setSaveState('saving');
+    setMessage(null);
+    try {
+      const response = await fetch(props.endpoint, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: props.dailyDate,
+          reviewRunId: props.reviewRunId,
+          publishId: id,
+        }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? 'Failed to publish Event.');
+      setSaveState('saved');
+      setMessage('Event published.');
+      window.location.reload();
+    } catch (error) {
+      setSaveState('error');
+      setMessage(error instanceof Error ? error.message : 'Failed to publish Event.');
+    } finally {
+      publishing.current = false;
+    }
+  }
+
   function moveItem(id: string, targetRank: number): void {
+    if (publishing.current) return;
     const from = items.findIndex((item) => item.id === id);
     const to = Math.max(0, Math.min(items.length - 1, targetRank - 1));
     if (from < 0 || from === to) {
@@ -94,11 +149,12 @@ function RankingEditor<T extends { id: string; aiRank: number; displayRank: numb
     }
     setItems((current) => arrayMove(current, from, to));
     setTouchedIds((current) => new Set(current).add(id));
-    setSaveState("idle");
+    setSaveState('idle');
     setMessage(null);
   }
 
   function handleDragEnd(event: DragEndEvent): void {
+    if (publishing.current) return;
     if (!event.over || event.active.id === event.over.id) {
       return;
     }
@@ -109,21 +165,22 @@ function RankingEditor<T extends { id: string; aiRank: number; displayRank: numb
     }
     setItems((current) => arrayMove(current, from, to));
     setTouchedIds((current) => new Set(current).add(String(event.active.id)));
-    setSaveState("idle");
+    setSaveState('idle');
     setMessage(null);
   }
 
   async function saveChanges(): Promise<void> {
+    if (publishing.current || saveState === 'saving') return;
     if (meaningfulTouchedIds.length === 0) {
-      setMessage("No final ranking changes to save.");
+      setMessage('No final ranking changes to save.');
       return;
     }
-    setSaveState("saving");
+    setSaveState('saving');
     setMessage(null);
     try {
       const response = await fetch(props.endpoint, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           date: props.dailyDate,
           reviewRunId: props.reviewRunId,
@@ -133,20 +190,20 @@ function RankingEditor<T extends { id: string; aiRank: number; displayRank: numb
       });
       const result: { error?: string; feedbackCount?: number } = await response.json();
       if (!response.ok) {
-        throw new Error(result.error ?? "Failed to save ranking changes.");
+        throw new Error(result.error ?? 'Failed to save ranking changes.');
       }
 
       const rankedItems = items.map((item, index) => ({ ...item, displayRank: index + 1 }));
       setItems(rankedItems);
       setInitialRankById(new Map(rankedItems.map((item) => [item.id, item.displayRank])));
       setTouchedIds(new Set());
-      setSaveState("saved");
+      setSaveState('saved');
       setMessage(`Saved. ${result.feedbackCount ?? 0} feedback record(s) created.`);
       // 新补齐的 Event enrichment 只能由服务端查询得到，保存后重新加载同一相对地址。
       window.location.reload();
     } catch (error) {
-      setSaveState("error");
-      setMessage(error instanceof Error ? error.message : "Failed to save ranking changes.");
+      setSaveState('error');
+      setMessage(error instanceof Error ? error.message : 'Failed to save ranking changes.');
     }
   }
 
@@ -161,27 +218,35 @@ function RankingEditor<T extends { id: string; aiRank: number; displayRank: numb
   return (
     <section className={styles.reviewSection}>
       <div className={styles.saveBar}>
-        <p>
-          Changes stay local until saved. Only directly moved items create feedback.
-        </p>
+        <p>Changes stay local until saved. Only directly moved items create feedback.</p>
         <div>
           {message ? (
-            <span className={saveState === "error" ? styles.error : styles.message} role="status">
+            <span
+              className={saveState === 'error' ? styles.error : styles.message}
+              role="status"
+            >
               {message}
             </span>
           ) : null}
           <button
             type="button"
             onClick={saveChanges}
-            disabled={saveState === "saving" || meaningfulTouchedIds.length === 0}
+            disabled={saveState === 'saving' || meaningfulTouchedIds.length === 0}
           >
-            {saveState === "saving" ? "Saving..." : "Save Changes"}
+            {saveState === 'saving' ? 'Saving...' : 'Save Changes'}
           </button>
         </div>
       </div>
 
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext
+          items={items.map((item) => item.id)}
+          strategy={verticalListSortingStrategy}
+        >
           <div className={styles.rankedList}>
             {items.map((item, index) => (
               <SortableItem
@@ -191,6 +256,12 @@ function RankingEditor<T extends { id: string; aiRank: number; displayRank: numb
                 count={items.length}
                 touched={touchedIds.has(item.id)}
                 onMove={(rank) => moveItem(item.id, rank)}
+                onPublish={
+                  props.canPublish?.(item, index + 1) ? () => publishEvent(item.id) : undefined
+                }
+                publishDisabled={
+                  saveState === 'saving' || meaningfulTouchedIds.length > 0 || !props.reviewRunId
+                }
               >
                 {props.renderContent(item, index + 1)}
               </SortableItem>
@@ -208,6 +279,8 @@ function SortableItem(props: {
   count: number;
   touched: boolean;
   onMove: (rank: number) => void;
+  onPublish?: () => void;
+  publishDisabled?: boolean;
   children: ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -216,7 +289,7 @@ function SortableItem(props: {
   return (
     <article
       ref={setNodeRef}
-      className={`${styles.reviewItem} ${isDragging ? styles.dragging : ""}`}
+      className={`${styles.reviewItem} ${isDragging ? styles.dragging : ''}`}
       style={{ transform: CSS.Transform.toString(transform), transition }}
     >
       <div className={styles.itemControls}>
@@ -234,7 +307,7 @@ function SortableItem(props: {
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            const value = Number(new FormData(event.currentTarget).get("rank"));
+            const value = Number(new FormData(event.currentTarget).get('rank'));
             if (Number.isInteger(value)) {
               props.onMove(value);
             }
@@ -242,23 +315,58 @@ function SortableItem(props: {
         >
           <label>
             Move to
-            <input name="rank" type="number" min={1} max={props.count} required />
+            <input
+              name="rank"
+              type="number"
+              min={1}
+              max={props.count}
+              required
+            />
           </label>
           <button type="submit">Move</button>
         </form>
+        {props.onPublish ? (
+          <button
+            type="button"
+            className={styles.reviewAction}
+            disabled={props.publishDisabled}
+            title={
+              props.publishDisabled
+                ? 'Save or cancel ranking changes before publishing.'
+                : 'Restore only this Event; keep existing ranks and published Events.'
+            }
+            onClick={props.onPublish}
+          >
+            Publish
+          </button>
+        ) : null}
       </div>
       {props.children}
     </article>
   );
 }
 
-function EventContent({ item, rank, cutoff }: { item: EventReviewItem; rank: number; cutoff: number }) {
-  const finalEvent = rank <= cutoff ? item.finalEvent : null;
+function EventContent({
+  item,
+  rank,
+  cutoff,
+}: {
+  item: EventReviewItem;
+  rank: number;
+  cutoff: number;
+}) {
+  const finalEvent = item.finalEvent;
   return (
     <div className={styles.itemContent}>
       <div className={styles.itemMeta}>
         <span>AI rank #{item.aiRank}</span>
-        <span>{rank <= cutoff ? `Published selection · Top ${cutoff}` : "Review candidate"}</span>
+        <span>
+          {item.finalEvent?.publicationStatus === 'published'
+            ? 'Published'
+            : rank <= cutoff
+              ? `Top selection · Top ${cutoff}`
+              : 'Review candidate'}
+        </span>
         <span>{item.eventTempId}</span>
       </div>
       {finalEvent ? (
@@ -271,16 +379,28 @@ function EventContent({ item, rank, cutoff }: { item: EventReviewItem; rank: num
       ) : (
         <>
           <h2>{item.eventHint}</h2>
-          <p className={styles.fallback}>Stage 4 content unavailable; showing Event Group candidates.</p>
+          <p className={styles.fallback}>
+            Stage 4 content unavailable; showing Event Group candidates.
+          </p>
           <div className={styles.candidates}>
             {item.candidates.map((candidate) => (
               <section key={candidate.id}>
                 <div className={styles.sourceLine}>
                   <strong>{candidate.source}</strong>
-                  {candidate.url ? <a href={candidate.url} target="_blank" rel="noreferrer">Original ↗</a> : null}
+                  {candidate.url ? (
+                    <a
+                      href={candidate.url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Original ↗
+                    </a>
+                  ) : null}
                 </div>
                 <h3>{candidate.title}</h3>
-                {!finalEvent && candidate.titleZh ? <p className={styles.titleZh}>{candidate.titleZh}</p> : null}
+                {!finalEvent && candidate.titleZh ? (
+                  <p className={styles.titleZh}>{candidate.titleZh}</p>
+                ) : null}
                 {!finalEvent && candidate.summaryZh ? <p>{candidate.summaryZh}</p> : null}
                 {/* {!finalEvent ? <TagLine label="Tags" values={candidate.tags} /> : null}
                 {!finalEvent ? <TagLine label="Entities" values={[...candidate.entitiesZh, ...candidate.entities]} /> : null} */}
@@ -299,9 +419,18 @@ function LongFormContent({ item }: { item: LongFormReviewItem; rank: number }) {
       <div className={styles.itemMeta}>
         <span>AI rank #{item.aiRank}</span>
         <span>{item.source}</span>
-        {item.url ? <a className={styles.originalLink} href={item.url} target="_blank" rel="noreferrer">Read original ↗</a> : null}
+        {item.url ? (
+          <a
+            className={styles.originalLink}
+            href={item.url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Read original ↗
+          </a>
+        ) : null}
       </div>
-      <h2>{item.titleZh ?? "Untitled"}</h2>
+      <h2>{item.titleZh ?? 'Untitled'}</h2>
       {item.summaryZh ? <p className={styles.summary}>{item.summaryZh}</p> : null}
     </div>
   );
@@ -314,7 +443,9 @@ function TagLine({ label, values }: { label: string; values: string[] }) {
   return (
     <div className={styles.tagLine}>
       <span>{label}</span>
-      {[...new Set(values)].map((value) => <em key={value}>{value}</em>)}
+      {[...new Set(values)].map((value) => (
+        <em key={value}>{value}</em>
+      ))}
     </div>
   );
 }

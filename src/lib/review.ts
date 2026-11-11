@@ -3,11 +3,8 @@
  *
  * Event snapshot、Candidates 和已有 Stage 4 Event 通过批量查询组合；Long-form 按 Daily attribution 读取。
  */
-import type { Pool } from "pg";
-import {
-  EVENT_DISPLAY_CUTOFF,
-  LONG_FORM_DISPLAY_CUTOFF,
-} from "./ranking-config.js";
+import type { Pool } from 'pg';
+import { EVENT_DISPLAY_CUTOFF, LONG_FORM_DISPLAY_CUTOFF } from './ranking-config.js';
 
 export type ReviewCandidate = {
   id: string;
@@ -24,6 +21,7 @@ export type ReviewCandidate = {
 
 export type ReviewFinalEvent = {
   id: string;
+  publicationStatus?: 'draft' | 'published' | 'archived';
   titleZh: string;
   summaryZh: string;
   tags: string[];
@@ -90,6 +88,7 @@ type CandidateRow = {
 
 type FinalEventRow = {
   id: string;
+  publication_status?: 'draft' | 'published' | 'archived';
   event_review_item_id: string | null;
   title_zh: string;
   summary_zh: string;
@@ -105,10 +104,7 @@ type EventMemberRow = {
 };
 
 /** 读取指定日期最新 Event Review snapshot，并批量补齐 Candidate 与已有 Stage 4 内容。 */
-export async function getEventReviewData(
-  pool: Pool,
-  dailyDate: string,
-): Promise<EventReviewData> {
+export async function getEventReviewData(pool: Pool, dailyDate: string): Promise<EventReviewData> {
   const latest = await pool.query<{ review_run_id: string }>(
     `
       select review_run_id
@@ -147,6 +143,7 @@ export async function getEventReviewData(
       select
         id,
         event_review_item_id,
+        publication_status,
         title_zh,
         summary_zh,
         tags,
@@ -195,7 +192,7 @@ export async function getEventReviewData(
     ? await Promise.all([
         pool.query<FinalEventRow>(
           `
-            select id, event_review_item_id, title_zh, summary_zh, tags, tags_zh, entities, entities_zh
+            select id, event_review_item_id, publication_status, title_zh, summary_zh, tags, tags_zh, entities, entities_zh
             from events
             where id = any($1::uuid[])
           `,
@@ -228,26 +225,31 @@ export async function getEventReviewData(
       const candidates = row.member_content_ids.flatMap((id): ReviewCandidate[] => {
         const candidate = candidateById.get(id);
         return candidate
-          ? [{
-              id: candidate.id,
-              eventId: candidate.event_id,
-              source: candidate.source,
-              title: candidate.title,
-              titleZh: candidate.title_zh,
-              summaryZh: candidate.summary_zh,
-              tags: candidate.tags ?? [],
-              entities: candidate.entities ?? [],
-              entitiesZh: candidate.entities_zh ?? [],
-              url: candidate.url,
-            }]
+          ? [
+              {
+                id: candidate.id,
+                eventId: candidate.event_id,
+                source: candidate.source,
+                title: candidate.title,
+                titleZh: candidate.title_zh,
+                summaryZh: candidate.summary_zh,
+                tags: candidate.tags ?? [],
+                entities: candidate.entities ?? [],
+                entitiesZh: candidate.entities_zh ?? [],
+                url: candidate.url,
+              },
+            ]
           : [];
       });
-      const linkedEventIds = [...new Set(candidates.flatMap((item) => item.eventId ? [item.eventId] : []))];
+      const linkedEventIds = [
+        ...new Set(candidates.flatMap((item) => (item.eventId ? [item.eventId] : []))),
+      ];
       const linkedEventId = linkedEventIds.length === 1 ? linkedEventIds[0] : null;
       // 新数据优先使用明确外键；旧数据仅在完整成员集合仍完全一致时才作为安全 fallback。
       const final =
         directFinalEventByReviewItemId.get(row.id) ??
-        (linkedEventId && sameIds(memberIdsByEventId.get(linkedEventId) ?? [], row.member_content_ids)
+        (linkedEventId &&
+        sameIds(memberIdsByEventId.get(linkedEventId) ?? [], row.member_content_ids)
           ? finalEventById.get(linkedEventId)
           : undefined);
       return {
@@ -260,6 +262,7 @@ export async function getEventReviewData(
         finalEvent: final
           ? {
               id: final.id,
+              publicationStatus: final.publication_status,
               titleZh: final.title_zh,
               summaryZh: final.summary_zh,
               tags: final.tags ?? [],

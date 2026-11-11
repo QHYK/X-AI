@@ -77,6 +77,7 @@ function parseRequest(value: unknown): {
   reviewRunId: string;
   orderedIds: string[];
   touchedIds: string[];
+  publishId?: string;
 } {
   if (!isRecord(value)) {
     throw new ReviewValidationError('Request body must be an object.');
@@ -88,11 +89,17 @@ function parseRequest(value: unknown): {
   if (typeof value.reviewRunId !== 'string' || !isUuid(value.reviewRunId)) {
     throw new ReviewValidationError('reviewRunId must be a UUID.');
   }
+  if (
+    value.publishId !== undefined &&
+    (typeof value.publishId !== 'string' || !isUuid(value.publishId))
+  )
+    throw new ReviewValidationError('publishId must be a UUID.');
   return {
     dailyDate,
     reviewRunId: value.reviewRunId,
-    orderedIds: stringArray(value.orderedIds, 'orderedIds'),
-    touchedIds: stringArray(value.touchedIds, 'touchedIds'),
+    ...(typeof value.publishId === 'string' ? { publishId: value.publishId } : {}),
+    orderedIds: stringArray(value.orderedIds ?? (value.publishId ? [] : undefined), 'orderedIds'),
+    touchedIds: stringArray(value.touchedIds ?? (value.publishId ? [] : undefined), 'touchedIds'),
   };
 }
 
