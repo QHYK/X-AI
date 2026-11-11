@@ -14,7 +14,7 @@
 | `created_at` | timestamptz | NOT NULL，默认 `now()`；编辑不改变创建时间 |
 | `updated_at` | timestamptz | NOT NULL，默认 `now()`；更新操作显式写入当前时间 |
 
-Type 定义：`general` 为通用编辑偏好，`topic` 为话题选择与关注方向，`source` 为来源发现与选择偏好，`content` 为内容整理、翻译、总结偏好，`event` 为 Event 重要性判断和排序偏好（后台显示为 Event）。
+Type 定义：`general` 为通用编辑偏好，`topic` 为话题选择与关注方向，`source` 为来源发现与选择偏好，`content` 为内容整理、翻译、总结偏好，`event` 为 Event 重要性判断和排序偏好（后台显示为 `event`）。
 
 ### 索引与数据库约束
 

@@ -3,7 +3,12 @@ import { register } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { JSDOM } from 'jsdom';
 import { act, createElement } from 'react';
-import type { Memory } from '../src/lib/memory-contracts.js';
+import {
+  MemoryCreateSchema,
+  MemoryUpdateSchema,
+  MemoryTypeSchema,
+  type Memory,
+} from '../src/lib/memory-contracts.js';
 
 register(
   `data:text/javascript,${encodeURIComponent(`export async function load(url,context,nextLoad){if(url.endsWith('.module.css'))return {format:'module',source:'export default new Proxy({}, {get:(_,k)=>k});',shortCircuit:true};return nextLoad(url,context);}`)}`,
@@ -67,6 +72,12 @@ globalThis.fetch = async (url, init) => {
       return Response.json({ error: 'Read failed' }, { status: 503 });
     }
     const type = target.searchParams.get('type');
+    if (type)
+      assert.equal(
+        MemoryTypeSchema.safeParse(type).success,
+        true,
+        'Filter must use a valid lowercase Memory Type',
+      );
     const items = records
       .filter((r) => !type || r.type === type)
       .sort((a, b) => b.priority - a.priority || Date.parse(b.createdAt) - Date.parse(a.createdAt));
@@ -79,6 +90,11 @@ globalThis.fetch = async (url, init) => {
     return Response.json({ items });
   }
   const body = JSON.parse(String(init?.body));
+  assert.equal(
+    (method === 'POST' ? MemoryCreateSchema : MemoryUpdateSchema).safeParse(body).success,
+    true,
+    'Submitted payload must pass the real API schema',
+  );
   writes.push({ method, body });
   if (failWrite) return Response.json({ error: 'Save failed' }, { status: 503 });
   if (holdWrite) {
@@ -137,7 +153,7 @@ await act(async () => root.render(createElement(MemoryManagement)));
 assert.equal(
   document.querySelector('select[aria-label="Memory Type filter"] option[value="event"]')
     ?.textContent,
-  'Event',
+  'event',
 );
 assert.deepEqual(
   rows().map((r) => r.dataset.memoryId),
@@ -247,7 +263,7 @@ await act(async () => root.render(createElement(MemoryManagement)));
 assert.equal(
   document.querySelector('select[aria-label="Memory Type filter"] option[value="event"]')
     ?.textContent,
-  'Event',
+  'event',
 );
 assert.equal(rows().length, 4);
 assert.equal(checkbox(row(base.id)).checked, false);
@@ -261,6 +277,33 @@ assert.equal(row(created.id).querySelector('textarea'), null);
 assert.match(row(created.id).textContent ?? '', /Saved before refresh failure/);
 assert.match(document.body.textContent ?? '', /列表刷新失败/);
 assert.equal(records.find((r) => r.id === created.id)?.content, 'Saved before refresh failure');
+// Exercise the real select values through create, filter and edit, not just the displayed label.
+await click('Add Memory');
+await change('Content', 'event type regression', row('new'));
+await change('Type', 'event', row('new'));
+assert.equal((row('new').querySelector('select') as HTMLSelectElement).value, 'event');
+await click('Submit', row('new'));
+const eventMemory = records.find((record) => record.content === 'event type regression')!;
+assert.ok(eventMemory, 'Selecting event must successfully create a Memory');
+assert.equal(eventMemory.type, 'event');
+assert.equal(writes.at(-1)?.method, 'POST');
+assert.equal(writes.at(-1)?.body.type, 'event');
+await change('Memory Type filter', 'event');
+assert.deepEqual(
+  rows().map((item) => item.dataset.memoryId),
+  [eventMemory.id],
+);
+await click('Edit', row(eventMemory.id));
+assert.equal((row(eventMemory.id).querySelector('select') as HTMLSelectElement).value, 'event');
+await change('Content', 'updated event preference', row(eventMemory.id));
+await act(async () => checkbox(row(eventMemory.id)).click());
+await click('Submit', row(eventMemory.id));
+assert.equal(writes.at(-1)?.method, 'PATCH');
+assert.equal(writes.at(-1)?.body.type, 'event');
+assert.equal(eventMemory.enabled, false);
+assert.equal(row(eventMemory.id).querySelector('textarea'), null);
+assert.equal(checkbox(row(eventMemory.id)).disabled, true);
+assert.equal(rows().length, 1, 'Disabled event Memory remains visible under its type filter');
 await act(async () => root.unmount());
 dom.window.close();
 console.log(

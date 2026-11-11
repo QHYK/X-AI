@@ -44,6 +44,7 @@ export type RankingChangeSet = {
 };
 
 type EventReviewRow = RankingRow & {
+  eventGroupId: string | null;
   eventHint: string;
   memberContentIds: string[];
 };
@@ -81,20 +82,19 @@ export async function getEventReviewEnrichmentRequests(
   });
   const links = await loadEventReviewLinks(pool, rows, false);
 
-  return changeSet.changes
+  const missing = changeSet.changes
     .filter((change) => change.nextDisplayRank <= EVENT_DISPLAY_CUTOFF)
-    .filter((change) => !links.eventIdByReviewItemId.has(change.id))
-    .map((change) => {
-      const row = rows.find((candidate) => candidate.id === change.id)!;
-      return {
-        eventGroupId: row.id,
-        eventReviewItemId: row.id,
-        eventHint: row.eventHint,
-        aiRank: row.aiRank,
-        displayRank: change.nextDisplayRank,
-        processedContentIds: row.memberContentIds,
-      };
-    });
+    .filter((change) => !links.eventIdByReviewItemId.has(change.id));
+  const groups = await loadCurrentReviewEventGroups(
+    pool,
+    input.dailyDate,
+    missing.map((change) => rows.find((row) => row.id === change.id)!),
+    false,
+  );
+  return groups.map((group) => ({
+    ...group,
+    displayRank: missing.find((change) => change.id === group.eventReviewItemId)!.nextDisplayRank,
+  }));
 }
 
 export class ReviewValidationError extends Error {}
@@ -217,6 +217,23 @@ export async function saveEventReviewRanking(
       );
     }
 
+    const currentGroups = await loadCurrentReviewEventGroups(
+      client,
+      input.dailyDate,
+      rows.filter((row) => missingTopIds.includes(row.id)),
+      true,
+    );
+    for (const group of currentGroups) {
+      const generatedGroup = enrichedByReviewItemId.get(group.eventReviewItemId!)!.group;
+      if (
+        generatedGroup.eventGroupId !== group.eventGroupId ||
+        !sameIdSet(generatedGroup.processedContentIds, group.processedContentIds)
+      )
+        throw new ReviewValidationError(
+          'Event Group membership changed while enrichment was in progress. Reload and save again.',
+        );
+    }
+
     let eventsCreated = 0;
     const stage4Run = await loadOrCreateStage4Run(
       client,
@@ -308,20 +325,24 @@ async function loadEventPublicationPlan(
     );
   const selectedIds = publishedIds as string[];
   const alreadyPublished = selectedIds.includes(row.id);
+  const needsEnrichment = !alreadyPublished && !links.eventIdByReviewItemId.has(row.id);
+  const target = needsEnrichment
+    ? (await loadCurrentReviewEventGroups(db, input.dailyDate, [row], lock))[0]!
+    : {
+        eventGroupId: row.eventGroupId ?? row.id,
+        eventReviewItemId: row.id,
+        eventHint: row.eventHint,
+        aiRank: row.aiRank,
+        displayRank: row.displayRank,
+        processedContentIds: row.memberContentIds,
+      };
   return {
     runId: run.id,
     links,
     selectedIds: alreadyPublished ? selectedIds : [...selectedIds, row.id],
     alreadyPublished,
-    needsEnrichment: !alreadyPublished && !links.eventIdByReviewItemId.has(row.id),
-    target: {
-      eventGroupId: row.id,
-      eventReviewItemId: row.id,
-      eventHint: row.eventHint,
-      aiRank: row.aiRank,
-      displayRank: row.displayRank,
-      processedContentIds: row.memberContentIds,
-    } satisfies Stage4EventGroup,
+    needsEnrichment,
+    target,
   };
 }
 
@@ -346,6 +367,7 @@ async function saveEventReviewPublication(
     if (plan.needsEnrichment) {
       if (
         enriched.length !== 1 ||
+        enriched[0]!.group.eventGroupId !== plan.target.eventGroupId ||
         !sameIdSet(enriched[0]!.group.processedContentIds, plan.target.processedContentIds)
       )
         throw new ReviewValidationError(
@@ -393,9 +415,10 @@ async function loadEventReviewRows(
     display_rank: number;
     event_hint: string;
     member_content_ids: string[];
+    event_group_id: string | null;
   }>(
     `
-      select id, ai_rank, display_rank, event_hint, member_content_ids
+      select id, ai_rank, display_rank, event_hint, member_content_ids, event_group_id
       from event_review_items
       where review_run_id = $1::uuid
         and daily_date = $2::date
@@ -408,9 +431,60 @@ async function loadEventReviewRows(
     id: row.id,
     aiRank: row.ai_rank,
     displayRank: row.display_rank,
+    eventGroupId: row.event_group_id ?? null,
     eventHint: row.event_hint,
     memberContentIds: row.member_content_ids,
   }));
+}
+
+/** Same live Group membership as automatic Stage4; keep frozen members only for unlinked legacy items. */
+async function loadCurrentReviewEventGroups(
+  db: Queryable,
+  dailyDate: string,
+  rows: EventReviewRow[],
+  lock: boolean,
+): Promise<Stage4EventGroup[]> {
+  const groupIds = [
+    ...new Set(rows.flatMap((row) => (row.eventGroupId ? [row.eventGroupId] : []))),
+  ];
+  const membersByGroup = new Map<string, string[]>();
+  if (groupIds.length) {
+    if (lock)
+      await db.query(
+        'select id from event_groups where id = any($1::uuid[]) and daily_date = $2::date order by id for update',
+        [groupIds, dailyDate],
+      );
+    // Read after taking the parent lock so any in-flight Consolidation has committed.
+    const result = await db.query<{ id: string; processed_content_id: string }>(
+      `select eg.id, egi.processed_content_id
+       from event_groups eg
+       join event_group_items egi on egi.event_group_id = eg.id
+       where eg.id = any($1::uuid[]) and eg.daily_date = $2::date
+       order by eg.id, egi.processed_content_id
+       ${lock ? 'for share of egi' : ''}`,
+      [groupIds, dailyDate],
+    );
+    for (const member of result.rows) {
+      const ids = membersByGroup.get(member.id) ?? [];
+      if (member.processed_content_id) ids.push(member.processed_content_id);
+      membersByGroup.set(member.id, ids);
+    }
+  }
+  return rows.map((row) => {
+    const ids = row.eventGroupId ? membersByGroup.get(row.eventGroupId) : row.memberContentIds;
+    if (!ids?.length)
+      throw new ReviewValidationError(
+        'Event Group is missing or has no source content. Reload and inspect the Review.',
+      );
+    return {
+      eventGroupId: row.eventGroupId ?? row.id,
+      eventReviewItemId: row.id,
+      eventHint: row.eventHint,
+      aiRank: row.aiRank,
+      displayRank: row.displayRank,
+      processedContentIds: ids,
+    };
+  });
 }
 
 /**

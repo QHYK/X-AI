@@ -56,6 +56,9 @@ class Memory {
   failPublish = false;
   released = 0;
   queries: string[] = [];
+  groupMembers: Record<string, string[]> = {};
+  groupIdByItem: Record<string, string> = {};
+  frozenMembers: Record<string, string[]> = {};
   backup?: string;
   constructor() {
     this.addSnapshot(this.snapshot);
@@ -280,6 +283,32 @@ class Memory {
       return result([
         { count: String(this.events.filter((e) => e.run === p[0] && e.status === 'draft').length) },
       ]);
+    if (q.startsWith('select id from event_groups')) {
+      assert.ok(q.includes('for update'));
+      assert.equal(p[1], date);
+      return result(
+        (p[0] as string[]).filter((id) => id in this.groupMembers).map((id) => ({ id })),
+      );
+    }
+    if (q.startsWith('select eg.id, egi.processed_content_id')) {
+      assert.equal(p[1], date);
+      assert.ok(q.includes('join event_group_items egi on egi.event_group_id = eg.id'));
+      if (this.backup) {
+        assert.ok(q.includes('for share of egi'));
+        assert.ok(
+          this.queries.at(-2)?.startsWith('select id from event_groups'),
+          'Group lock must precede the fresh membership read',
+        );
+      }
+      return result(
+        (p[0] as string[]).flatMap((id) =>
+          (this.groupMembers[id] ?? []).map((processed_content_id) => ({
+            id,
+            processed_content_id,
+          })),
+        ),
+      );
+    }
     if (q.startsWith('select id, ai_rank, display_rank'))
       return result(
         this.items
@@ -290,7 +319,8 @@ class Memory {
             ai_rank: i.ai,
             display_rank: i.rank,
             event_hint: i.id,
-            member_content_ids: [i.id],
+            member_content_ids: this.frozenMembers[i.id] ?? [i.id],
+            event_group_id: this.groupIdByItem[i.id] ?? (i.id in this.groupMembers ? i.id : null),
           })),
       );
     if (q.startsWith('select e.id, e.event_review_item_id')) {
@@ -844,4 +874,144 @@ await assert.rejects(
 );
 console.log(
   'PASS single Event Publish: one enrichment, original ranks/other publications retained, Brief visibility, idempotency, archived reuse, publication beyond 15 and atomic rollback (Mock DB).',
+);
+
+// Original ranking snapshot has 6 members; Consolidation grows the live Group to 11.
+newSelection = true;
+const consolidatedPublish = new Memory();
+await run(consolidatedPublish);
+const consolidatedTarget = consolidatedPublish.items[0]!.id;
+const consolidatedGroup = uid(8000);
+consolidatedPublish.groupIdByItem[consolidatedTarget] = consolidatedGroup;
+const eleven = Array.from({ length: 11 }, (_, i) => uid(4000 + i));
+consolidatedPublish.frozenMembers[consolidatedTarget] = eleven.slice(0, 6);
+consolidatedPublish.groupMembers[consolidatedGroup] = [...eleven];
+const consolidatedInput = {
+  ...publishInput,
+  reviewRunId: consolidatedPublish.snapshot,
+  publishId: consolidatedTarget,
+};
+const [consolidatedRequest] = await getEventReviewEnrichmentRequests(
+  consolidatedPublish.db(),
+  consolidatedInput,
+);
+assert.deepEqual(consolidatedRequest!.processedContentIds, eleven);
+assert.equal(consolidatedRequest!.eventGroupId, consolidatedGroup);
+assert.equal(consolidatedRequest!.eventReviewItemId, consolidatedTarget);
+function enrichCurrent(group: NonNullable<typeof consolidatedRequest>) {
+  const prepared = prepareStage4Event(
+    group,
+    new Map(
+      group.processedContentIds.map((id) => [
+        id,
+        {
+          processedContentId: id,
+          title: `Source ${id}`,
+          summary: 'Evidence',
+          entities: [],
+          source: 'Source',
+          url: null,
+          publishedAt: null,
+        },
+      ]),
+    ),
+    new Date(),
+    date,
+  );
+  return { ...prepared, output, llm: {} as never, toolUsage: {} as never };
+}
+const consolidatedEnrichment = enrichCurrent(consolidatedRequest!);
+assert.equal(
+  consolidatedEnrichment.input.sources.length,
+  11,
+  'All 11 source articles enter enrichment',
+);
+const unchangedPublication = JSON.stringify([
+  consolidatedPublish.events,
+  consolidatedPublish.runs,
+  consolidatedPublish.items,
+]);
+consolidatedPublish.groupMembers[consolidatedGroup]!.push(uid(4500));
+await assert.rejects(
+  saveEventReviewRanking(consolidatedPublish.db(), {
+    ...consolidatedInput,
+    enrichedEvents: [consolidatedEnrichment],
+  }),
+  /content changed/,
+);
+assert.equal(
+  JSON.stringify([consolidatedPublish.events, consolidatedPublish.runs, consolidatedPublish.items]),
+  unchangedPublication,
+);
+consolidatedPublish.groupMembers[consolidatedGroup] = [...eleven];
+await saveEventReviewRanking(consolidatedPublish.db(), {
+  ...consolidatedInput,
+  enrichedEvents: [consolidatedEnrichment],
+});
+assert.equal(
+  consolidatedPublish.frozenMembers[consolidatedTarget]!.length,
+  6,
+  'Do not rewrite the original ranking snapshot',
+);
+assert.equal(
+  consolidatedPublish.events.find((event) => event.item === consolidatedTarget)?.status,
+  'published',
+);
+// The ordinary ranking save uses the same full Group, and rejects stale memberships too.
+newSelection = false;
+const consolidatedRanking = new Memory();
+await run(consolidatedRanking);
+const rankingTarget = consolidatedRanking.items[0]!.id;
+const rankingGroup = uid(8001);
+consolidatedRanking.groupIdByItem[rankingTarget] = rankingGroup;
+consolidatedRanking.events = consolidatedRanking.events.filter(
+  (event) => event.item !== rankingTarget,
+);
+consolidatedRanking.frozenMembers[rankingTarget] = eleven.slice(0, 6);
+consolidatedRanking.groupMembers[rankingGroup] = [...eleven];
+const rankingInput = {
+  dailyDate: date,
+  reviewRunId: consolidatedRanking.snapshot,
+  orderedIds: consolidatedRanking.selected(consolidatedRanking.snapshot, 16).map((item) => item.id),
+  touchedIds: [],
+};
+const [rankingRequest] = await getEventReviewEnrichmentRequests(
+  consolidatedRanking.db(),
+  rankingInput,
+);
+assert.deepEqual(rankingRequest!.processedContentIds, eleven);
+const rankingEnrichment = enrichCurrent(rankingRequest!);
+const rankingBefore = JSON.stringify([
+  consolidatedRanking.events,
+  consolidatedRanking.items,
+  consolidatedRanking.runs,
+]);
+consolidatedRanking.groupMembers[rankingGroup] = eleven.slice(1);
+await assert.rejects(
+  saveEventReviewRanking(consolidatedRanking.db(), {
+    ...rankingInput,
+    enrichedEvents: [rankingEnrichment],
+  }),
+  /membership changed/,
+);
+assert.equal(
+  JSON.stringify([consolidatedRanking.events, consolidatedRanking.items, consolidatedRanking.runs]),
+  rankingBefore,
+);
+consolidatedRanking.groupMembers[rankingGroup] = [];
+await assert.rejects(
+  getEventReviewEnrichmentRequests(consolidatedRanking.db(), rankingInput),
+  /missing or has no source/,
+);
+consolidatedRanking.groupMembers[rankingGroup] = [...eleven];
+await saveEventReviewRanking(consolidatedRanking.db(), {
+  ...rankingInput,
+  enrichedEvents: [rankingEnrichment],
+});
+assert.equal(
+  consolidatedRanking.events.find((event) => event.item === rankingTarget)?.status,
+  'published',
+);
+console.log(
+  'PASS manual Publish and ranking enrichment use all 11 live Group members, preserve the 6-member historical snapshot, reject empty/changed Groups and roll back safely.',
 );
