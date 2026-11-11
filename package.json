@@ -54,6 +54,7 @@
     "test:stage2-standalone": "tsx scripts/test-stage2-standalone.ts",
     "test:stage2-persistence": "tsx scripts/test-stage2-persistence.ts",
     "test:stage2-retry": "tsx scripts/test-stage2-retry.ts",
+    "test:event-consolidation-review": "tsx scripts/test-event-consolidation-review.ts",
     "test:ranking-review": "tsx scripts/test-ranking-review.ts",
     "test:event-review-finalization": "tsx scripts/test-event-review-finalization.ts",
     "test:model-evaluation": "tsx scripts/test-model-evaluation.ts",

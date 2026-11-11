@@ -487,6 +487,7 @@ npm run test:newsletter-parser-ui
 npm run test:memories
 npm run test:memories-ui
 npm run test:ranking-review
+npm run test:event-consolidation-review
 npm run test:model-evaluation
 npm run test:read-more-cache
 npm run test:brief-read-more-availability

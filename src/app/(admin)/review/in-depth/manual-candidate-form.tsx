@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { DiscoveryTagsSchema } from '@/lib/discovery-content-metadata.js';
 import type { InDepthReviewItem } from '@/lib/in-depth-reads.js';
 import styles from '../review.module.css';
+import detailStyles from './in-depth.module.css';
 
 export function ManualCandidateForm(props: {
   apiUrl: () => string;
@@ -66,7 +67,7 @@ export function ManualCandidateForm(props: {
   }
 
   return (
-    <details className={styles.inDepthEditor}>
+    <details className={detailStyles.inDepthEditor}>
       <summary>人工添加 In-depth 候选</summary>
       <form onSubmit={(event) => void submit(event)}>
         <label>
@@ -83,7 +84,7 @@ export function ManualCandidateForm(props: {
         <p>Tags 可留空，最多三组。此步不调用 LLM；没有已存正文时会抓取原文。</p>
         {tags.map((tag, index) => (
           <div
-            className={styles.manualTagRow}
+            className={detailStyles.manualTagRow}
             key={index}
           >
             <label>
@@ -170,7 +171,7 @@ export function SavedArticleContent(props: { id: string; apiUrl: () => string })
     }
   }
   return (
-    <details className={styles.inDepthCopy}>
+    <details className={detailStyles.inDepthCopy}>
       <summary>已保存正文（只读）</summary>
       <button
         type="button"
@@ -180,7 +181,7 @@ export function SavedArticleContent(props: { id: string; apiUrl: () => string })
         {busy ? '读取中…' : '读取已保存正文'}
       </button>
       {error ? <p role="alert">{error}</p> : null}
-      {content !== null ? <pre className={styles.savedArticleContent}>{content}</pre> : null}
+      {content !== null ? <pre className={detailStyles.savedArticleContent}>{content}</pre> : null}
     </details>
   );
 }

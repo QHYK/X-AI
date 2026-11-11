@@ -26,7 +26,7 @@ export default async function IgnoredArticlesPage(props: {
         dailyDate={date}
         action="./ignored"
       />
-      <section className={styles.inDepthSection}>
+      <section className={styles.reviewSection}>
         {completed ? (
           <IgnoredArticlesList
             key={date}

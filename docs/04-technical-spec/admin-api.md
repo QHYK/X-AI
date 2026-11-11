@@ -147,6 +147,14 @@ Analytics 的 Ignored Articles 提供 Put Back，调用 `POST /api/admin/dashboa
 
 In-depth Review 区分客观元数据、Agent 诊断与可编辑 Editorial；Discovery Path、处理阶段、Candidate ID 与 Run ID 不混用。Tags / Cover 缺失保持历史兼容，不影响审核。字段见 [Data Model](../05-data-model/discovery.md#discovery_candidates)，Source 规则见 [Discovery §5.1](discovery.md#51-candidate-source-归一化)；具体布局以页面实现为准。
 
+#### Event Consolidation Review
+
+`/ai/review/event_consolidation` 是 REVIEW 下的只读检查页，复用 Review 日期控件和样式。未指定日期时选择最近存在自动修正 Feedback 或 Stage3 Consolidation 诊断记录的 `daily_date`；指定日期无记录时明确显示空状态。`GET /api/admin/review/event_consolidation?date=YYYY-MM-DD`（含 basePath 为 `/ai/api/admin/...`）沿用 Admin Session；缺失或非法日期返回 400，未授权返回 401，查询失败返回 500，响应禁止缓存。
+
+文章级明细仅接受 `feedback` 中 `target_type=processed_content`、`feedback_type=routing_error`、`before_value.routing=digest`、`after_value.routing=event` 且 `after_value.source=stage3_consolidation` 的记录。按关联文章的 `processed_contents.daily_date` 查询，原分类取 `before_value.category`，目标 Group 取 `after_value.event_group_id`；同篇文章保留最新 Feedback（`created_at`、`id` 降序），跨 Attempt 不重复计数。批量关联 Raw / Source 和同日 Event Group，按目标 Group 分组展示修正数；Group 被重建或删除仍保留原 ID、文章及“原 Event Group 不再可用”提示，不依赖当前 membership 排除历史记录。
+
+汇总仅显示有修正的 Group 数和去重文章数。最新 `pipeline_runs.details.consolidation` 非空的 Stage3 Run 状态仅作诊断；有运行但无修正可显示零，无任何记录不伪造零结果。不同 Attempt 的 Digest 输入可能已被先前修正改变，因此不展示不可靠的原始 Digest Inputs。此页不匹配、撤销、编辑或调用模型。
+
 #### In-depth Category
 
 Review 通过现有 `PATCH /api/admin/review/in-depth` 独立提交 `{id, action: "category", category}`；`id` 是 Review Item ID，`category` 为合法枚举或 `null`。沿用 Admin Session、同源与请求校验；仅更新关联 Candidate 的分类、人工标记及更新时间，不修改审核状态、Notes、Tags 或 Editorial。公开 API 返回 `category` / `categoryLabel`，未分类为 null，Xfield 不展示其 Badge，Approved 发布边界不变。

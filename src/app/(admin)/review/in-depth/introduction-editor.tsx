@@ -7,6 +7,7 @@ import {
   type EditorialIntroduction,
 } from '@/lib/in-depth-editorial.js';
 import styles from '../review.module.css';
+import detailStyles from './in-depth.module.css';
 import type { InDepthReviewItem } from '@/lib/in-depth-reads.js';
 
 export function IntroductionEditor(props: {
@@ -122,12 +123,12 @@ export function IntroductionEditor(props: {
 
   return (
     <section
-      className={styles.inDepthEditor}
+      className={detailStyles.inDepthEditor}
       aria-label="完善介绍"
     >
       <h3>完善介绍</h3>
       <p>中文 Markdown，仅用于展示；生成成功后自动保存，不改变审核状态。</p>
-      <div className={styles.inDepthActions}>
+      <div className={detailStyles.inDepthActions}>
         <button
           type="button"
           disabled={Boolean(busy)}
@@ -166,7 +167,7 @@ export function IntroductionEditor(props: {
           rows={8}
         />
       </label>
-      <div className={styles.inDepthActions}>
+      <div className={detailStyles.inDepthActions}>
         <button
           type="button"
           disabled={Boolean(busy) || !dirty || Boolean(conflict)}

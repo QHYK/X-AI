@@ -17,6 +17,7 @@ import {
 } from '@/lib/discovery-content-metadata.js';
 import { type InDepthReviewItem, type InDepthReviewStatus } from '@/lib/in-depth-reads.js';
 import styles from '../review.module.css';
+import detailStyles from './in-depth.module.css';
 
 function apiUrl(): string {
   return window.location.pathname.replace(/\/review\/in-depth\/?$/, '/api/admin/review/in-depth');
@@ -118,7 +119,7 @@ export function InDepthReviewClient(props: {
   const cover = contentMetadata.cover?.url === failedCover ? null : contentMetadata.cover;
 
   return (
-    <section className={styles.inDepthSection}>
+    <section className={styles.reviewSection}>
       <ManualCandidateForm
         apiUrl={apiUrl}
         disabled={saving}
@@ -134,7 +135,7 @@ export function InDepthReviewClient(props: {
         }}
       />
       <nav
-        className={styles.inDepthFilters}
+        className={detailStyles.inDepthFilters}
         aria-label="In-depth review status"
       >
         {STATUSES.map((value) => (
@@ -147,9 +148,9 @@ export function InDepthReviewClient(props: {
           </a>
         ))}
       </nav>
-      <div className={styles.inDepthGrid}>
+      <div className={detailStyles.inDepthGrid}>
         <div
-          className={styles.inDepthList}
+          className={detailStyles.inDepthList}
           aria-label={`${props.status} candidates`}
         >
           {items.length === 0 ? (
@@ -164,7 +165,7 @@ export function InDepthReviewClient(props: {
               <button
                 key={item.id}
                 type="button"
-                className={styles.inDepthListItem}
+                className={detailStyles.inDepthListItem}
                 aria-pressed={selected?.id === item.id}
                 onClick={() => void selectItem(item.id)}
               >
@@ -191,12 +192,12 @@ export function InDepthReviewClient(props: {
           })}
         </div>
 
-        <article className={styles.inDepthDetail}>
+        <article className={detailStyles.inDepthDetail}>
           {!selected ? (
             <p>Select a candidate to review.</p>
           ) : (
             <>
-              <div className={styles.inDepthDetailHeader}>
+              <div className={detailStyles.inDepthDetailHeader}>
                 <div>
                   <p className={styles.eyebrow}>Discovery · {capitalize(selected.discoveryPath)}</p>
                   <h2>
@@ -204,10 +205,10 @@ export function InDepthReviewClient(props: {
                   </h2>
                   <p>{selected.originalTitle}</p>
                 </div>
-                <span className={styles.inDepthBadge}>{capitalize(selected.reviewStatus)}</span>
+                <span className={detailStyles.inDepthBadge}>{capitalize(selected.reviewStatus)}</span>
               </div>
-              <div className={styles.inDepthBasicInfo}>
-                <dl className={styles.inDepthMeta}>
+              <div className={detailStyles.inDepthBasicInfo}>
+                <dl className={detailStyles.inDepthMeta}>
                   <dt>Author</dt>
                   <dd>{selected.author ?? 'Unknown'}</dd>
                   <dt>Source</dt>
@@ -286,7 +287,7 @@ export function InDepthReviewClient(props: {
                   </dd>
                   <dt>Tags</dt>
                   <dd>
-                    <div className={styles.inDepthTags}>
+                    <div className={detailStyles.inDepthTags}>
                       {contentMetadata.tags.length ? (
                         contentMetadata.tags.map((tag) => (
                           <span key={`${tag.zh}:${tag.en}`}>
@@ -295,12 +296,12 @@ export function InDepthReviewClient(props: {
                           </span>
                         ))
                       ) : (
-                        <span className={styles.inDepthNoTags}>No tags recorded.</span>
+                        <span className={detailStyles.inDepthNoTags}>No tags recorded.</span>
                       )}
                     </div>
                   </dd>
                 </dl>
-                <div className={styles.inDepthCover}>
+                <div className={detailStyles.inDepthCover}>
                   {cover ? (
                     // External source images remain unoptimized; no image proxy or upload service.
                     // eslint-disable-next-line @next/next/no-img-element
@@ -319,7 +320,7 @@ export function InDepthReviewClient(props: {
                 </div>
               </div>
 
-              <section className={styles.inDepthCopy}>
+              <section className={detailStyles.inDepthCopy}>
                 <h3>Summary</h3>
                 <p>{selected.summary ?? 'No summary provided.'}</p>
                 <h3>Why worth reading</h3>
@@ -341,7 +342,7 @@ export function InDepthReviewClient(props: {
                 {details?.decision ? <p>Agent evaluation: {details.decision}</p> : null}
               </section>
 
-              <div className={styles.inDepthEditor}>
+              <div className={detailStyles.inDepthEditor}>
                 <label>
                   Review notes
                   <textarea
@@ -351,7 +352,7 @@ export function InDepthReviewClient(props: {
                     rows={3}
                   />
                 </label>
-                <div className={styles.inDepthActions}>
+                <div className={detailStyles.inDepthActions}>
                   <button
                     type="button"
                     disabled={saving}
@@ -396,7 +397,7 @@ export function InDepthReviewClient(props: {
                 id={selected.id}
                 apiUrl={apiUrl}
               />
-              <div className={styles.inDepthActions}>
+              <div className={detailStyles.inDepthActions}>
                 <button
                   type="button"
                   disabled={saving}
@@ -412,7 +413,7 @@ export function InDepthReviewClient(props: {
                   Reject / unpublish
                 </button>
               </div>
-              <details className={styles.inDepthRaw}>
+              <details className={detailStyles.inDepthRaw}>
                 <summary>Raw diagnostic fields</summary>
                 <pre>
                   {JSON.stringify(

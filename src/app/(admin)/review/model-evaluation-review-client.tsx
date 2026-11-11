@@ -11,6 +11,7 @@ import { evaluationApiUrl } from "@/lib/evaluation-api-url.js";
 import type { EvaluationReviewData, EvaluationRunView, Stage1EvaluationItem } from "@/lib/evaluation-review.js";
 import type { EvaluationStage } from "@/lib/model-evaluation.js";
 import styles from "./review.module.css";
+import evaluationStyles from "./models/model-evaluation.module.css";
 
 const STAGES: Array<{ value: EvaluationStage; label: string }> = [
   { value: "stage1", label: "Understanding" },
@@ -102,8 +103,8 @@ export function ModelEvaluationReview(props: {
   const successfulRuns = data.runs.filter((run) => run.status === "success");
 
   return (
-    <section className={styles.evaluation}>
-      <div className={styles.evaluationControls}>
+    <section className={`${styles.reviewSection} ${evaluationStyles.evaluation}`}>
+      <div className={evaluationStyles.evaluationControls}>
         <label>Date<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
         <label>Stage<select value={stage} onChange={(event) => setStage(event.target.value as EvaluationStage)}>
           {STAGES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -116,7 +117,7 @@ export function ModelEvaluationReview(props: {
           </label>)}
         </fieldset>
         <button type="button" onClick={viewResults} disabled={running}>View</button>
-        <button className={styles.runButton} type="button" onClick={run} disabled={running || providers.length === 0}>
+        <button className={evaluationStyles.runButton} type="button" onClick={run} disabled={running || providers.length === 0}>
           {running ? "Running..." : "Run Evaluation"}
         </button>
       </div>
@@ -137,7 +138,7 @@ function RunStatuses(props: {
   cancellingRunId: string | null;
   onCancel: (runId: string) => void;
 }) {
-  return <div className={styles.runStatuses}>{props.runs.map((run) => <article key={run.id} className={styles.runStatus}>
+  return <div className={evaluationStyles.runStatuses}>{props.runs.map((run) => <article key={run.id} className={evaluationStyles.runStatus}>
     <strong>{providerLabel(run.provider)}</strong><span>{displayRunStatus(run.status)}</span>
     <small>{run.model} · {run.completedAt ? formatTime(run.completedAt) : "Running"}</small>
     {run.status === "running" ? <button type="button" onClick={() => props.onCancel(run.id)} disabled={props.cancellingRunId !== null}>
@@ -170,11 +171,11 @@ function Stage1Results(props: {
   const visible = props.mode === "disagreements"
     ? comparable.filter(disagrees)
     : props.items;
-  return <div className={styles.evaluationResults}>
-    <div className={styles.resultToolbar}><strong>Understanding</strong><label>Model A <select value={modelA} onChange={(event) => setModelA(event.target.value)}>{props.runs.map((run) => <option key={run.id} value={run.id}>{providerLabel(run.provider)} · {run.model}</option>)}</select></label><label>Model B <select value={modelB} onChange={(event) => setModelB(event.target.value)}>{props.runs.map((run) => <option key={run.id} value={run.id}>{providerLabel(run.provider)} · {run.model}</option>)}</select></label><small>Comparable: {comparable.length} · A only: {modelAOnly} · B only: {modelBOnly}</small><button type="button" onClick={() => props.onModeChange("disagreements")} disabled={props.mode === "disagreements"}>Disagreements</button><button type="button" onClick={() => props.onModeChange("all")} disabled={props.mode === "all"}>All</button></div>
-    {visible.length === 0 ? <p className={styles.empty}>No routing or category disagreements in this frozen input.</p> : visible.map((item) => <article className={styles.stage1Item} key={item.id}>
+  return <div className={evaluationStyles.evaluationResults}>
+    <div className={evaluationStyles.resultToolbar}><strong>Understanding</strong><label>Model A <select value={modelA} onChange={(event) => setModelA(event.target.value)}>{props.runs.map((run) => <option key={run.id} value={run.id}>{providerLabel(run.provider)} · {run.model}</option>)}</select></label><label>Model B <select value={modelB} onChange={(event) => setModelB(event.target.value)}>{props.runs.map((run) => <option key={run.id} value={run.id}>{providerLabel(run.provider)} · {run.model}</option>)}</select></label><small>Comparable: {comparable.length} · A only: {modelAOnly} · B only: {modelBOnly}</small><button type="button" onClick={() => props.onModeChange("disagreements")} disabled={props.mode === "disagreements"}>Disagreements</button><button type="button" onClick={() => props.onModeChange("all")} disabled={props.mode === "all"}>All</button></div>
+    {visible.length === 0 ? <p className={styles.empty}>No routing or category disagreements in this frozen input.</p> : visible.map((item) => <article className={evaluationStyles.stage1Item} key={item.id}>
       <header><strong>{item.title}</strong><small>{item.source}</small></header>
-      <div className={styles.modelColumns}>{pairRuns.map((run) => {
+      <div className={evaluationStyles.modelColumns}>{pairRuns.map((run) => {
         const result = item.results[run.id];
         return <section key={run.id}><h3>{providerLabel(run.provider)}</h3><p>Routing: {result?.routing ?? "—"}</p><p>Category: {result?.category ?? "—"}</p><p>Title ZH: {result?.titleZh ?? "—"}</p><p>Summary ZH: {result?.summaryZh ?? "—"}</p></section>;
       })}</div>
@@ -183,11 +184,11 @@ function Stage1Results(props: {
 
 function Stage2Results(props: { data: EvaluationReviewData }) {
   const models = props.data.stage2 ?? [];
-  return <div className={styles.evaluationResults}>
-    <div className={styles.resultToolbar}><strong>Event Merge</strong></div>
-    <div className={styles.modelColumns}>{models.map((model) => <section className={styles.groupColumn} key={model.runId}>
+  return <div className={evaluationStyles.evaluationResults}>
+    <div className={evaluationStyles.resultToolbar}><strong>Event Merge</strong></div>
+    <div className={evaluationStyles.modelColumns}>{models.map((model) => <section className={evaluationStyles.groupColumn} key={model.runId}>
       <h2>{providerLabel(model.provider)}</h2><p>{model.groupCount} groups · {model.singletonCount} singletons</p>
-      {model.groups.map((group, index) => <article className={styles.eventGroup} key={`${group.eventHint}-${index}`}><strong>{group.eventHint}</strong><small>{group.articles.length} sources</small>{group.articles.map((article) => <p key={article.id}>• {article.title}<br /><em>{article.source}</em></p>)}</article>)}
+      {model.groups.map((group, index) => <article className={evaluationStyles.eventGroup} key={`${group.eventHint}-${index}`}><strong>{group.eventHint}</strong><small>{group.articles.length} sources</small>{group.articles.map((article) => <p key={article.id}>• {article.title}<br /><em>{article.source}</em></p>)}</article>)}
     </section>)}</div>
   </div>;
 }
@@ -200,10 +201,10 @@ function Stage3Results(props: { data: EvaluationReviewData }) {
     const category = row.category ?? "All candidates";
     byCategory.set(category, [...(byCategory.get(category) ?? []), row]);
   }
-  return <div className={styles.evaluationResults}>{[...byCategory.entries()].map(([category, categoryRows]) => <section className={styles.rankingSection} key={category}>
-    <div className={styles.resultToolbar}><strong>{category}</strong></div>
-    <div className={styles.rankingTable}><div className={styles.rankingHead}><span>Item</span>{runs.map((run) => <span key={run.id}>{providerLabel(run.provider)}</span>)}<span>Δ</span></div>
-      {categoryRows.map((row) => <div className={styles.rankingRow} key={row.id}><span><strong>{row.title}</strong>{row.source ? <small>{row.source}</small> : null}{topCutoffLabel(row.topProviders, runs.length, row.topCutoff) ? <em>{topCutoffLabel(row.topProviders, runs.length, row.topCutoff)}</em> : null}</span>{runs.map((run) => <span key={run.id}>{row.ranks[run.id] ?? "—"}</span>)}<span>{row.delta ?? "—"}</span></div>)}
+  return <div className={evaluationStyles.evaluationResults}>{[...byCategory.entries()].map(([category, categoryRows]) => <section className={evaluationStyles.rankingSection} key={category}>
+    <div className={evaluationStyles.resultToolbar}><strong>{category}</strong></div>
+    <div className={evaluationStyles.rankingTable}><div className={evaluationStyles.rankingHead}><span>Item</span>{runs.map((run) => <span key={run.id}>{providerLabel(run.provider)}</span>)}<span>Δ</span></div>
+      {categoryRows.map((row) => <div className={evaluationStyles.rankingRow} key={row.id}><span><strong>{row.title}</strong>{row.source ? <small>{row.source}</small> : null}{topCutoffLabel(row.topProviders, runs.length, row.topCutoff) ? <em>{topCutoffLabel(row.topProviders, runs.length, row.topCutoff)}</em> : null}</span>{runs.map((run) => <span key={run.id}>{row.ranks[run.id] ?? "—"}</span>)}<span>{row.delta ?? "—"}</span></div>)}
     </div>
   </section>)}</div>;
 }

@@ -151,11 +151,15 @@ function RankingEditor<T extends { id: string; aiRank: number; displayRank: numb
   }
 
   if (items.length === 0) {
-    return <div className={styles.empty}>No ranked items are available for this date.</div>;
+    return (
+      <section className={styles.reviewSection}>
+        <div className={styles.empty}>No ranked items are available for this date.</div>
+      </section>
+    );
   }
 
   return (
-    <>
+    <section className={styles.reviewSection}>
       <div className={styles.saveBar}>
         <p>
           Changes stay local until saved. Only directly moved items create feedback.
@@ -194,7 +198,7 @@ function RankingEditor<T extends { id: string; aiRank: number; displayRank: numb
           </div>
         </SortableContext>
       </DndContext>
-    </>
+    </section>
   );
 }
 

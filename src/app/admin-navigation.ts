@@ -32,6 +32,7 @@ export const adminNavigation: readonly AdminNavigationGroup[] = [
     label: 'Review',
     items: [
       { label: 'Events', href: '/review/events', preserveDate: true },
+      { label: 'Event Consolidation', href: '/review/event_consolidation', preserveDate: true },
       { label: 'Long-form', href: '/review/long-form', preserveDate: true },
       { label: 'In-depth', href: '/review/in-depth' },
       { label: 'Ignored', href: '/review/ignored', preserveDate: true },
