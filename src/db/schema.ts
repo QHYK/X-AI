@@ -682,3 +682,42 @@ export const promptVersions = pgTable(
     check('prompt_versions_content_hash_check', sql`${table.contentHash} ~ '^[a-f0-9]{64}$'`),
   ],
 );
+
+/** Original Gmail MIME message, stored once; parser module bodies live only in raw_articles. */
+export const newsletterEmails = pgTable(
+  'newsletter_emails',
+  {
+    gmailMessageId: text('gmail_message_id').primaryKey(),
+    rawMessage: jsonb('raw_message').$type<Record<string, unknown>>().notNull(),
+    subject: text('subject'),
+    sender: text('sender'),
+    receivedAt: timestamp('received_at', { withTimezone: true }),
+    collectedAt: timestamp('collected_at', { withTimezone: true }).notNull().defaultNow(),
+    sourceId: uuid('source_id').references(() => sources.id),
+    sourceName: text('source_name'),
+    parseStatus: text('parse_status').notNull().default('collected'),
+    parserVersion: integer('parser_version'),
+    moduleMapping: jsonb('module_mapping')
+      .$type<{ unit_id: string; raw_id: string; fingerprint: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    errorStage: text('error_stage'),
+    errorMessage: text('error_message'),
+    parsedAt: timestamp('parsed_at', { withTimezone: true }),
+    importedAt: timestamp('imported_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('newsletter_emails_source_received_idx').on(table.sourceName, table.receivedAt),
+    index('newsletter_emails_status_idx').on(table.parseStatus),
+    check('newsletter_emails_raw_object_check', sql`jsonb_typeof(${table.rawMessage}) = 'object'`),
+    check(
+      'newsletter_emails_mapping_array_check',
+      sql`jsonb_typeof(${table.moduleMapping}) = 'array'`,
+    ),
+    check(
+      'newsletter_emails_status_check',
+      sql`${table.parseStatus} in ('collected','success','skipped','unsupported','conflict','failed')`,
+    ),
+  ],
+);

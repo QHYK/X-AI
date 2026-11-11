@@ -2,9 +2,9 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { createReviewStore, type ReviewMessage } from './review-data.js';
-import { saveJson } from './auth.js';
-import { digest } from './review-preview.js';
-import { SOURCE_RULE_VERSION } from './source-guided-selection.js';
+import { saveJson } from '../../src/collectors/gmail/auth.js';
+import { digest } from '../../src/collectors/gmail/preview.js';
+import { SOURCE_RULE_VERSION } from '../../src/collectors/gmail/source-guided-selection.js';
 const output = resolve('spikes/gmail/runtime/source-guided-v2');
 const previousRoot = resolve('spikes/gmail/runtime/source-annotations');
 const originalRoot = resolve('runtime/spikes/gmail/annotations');

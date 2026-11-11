@@ -204,6 +204,13 @@
       "when": 1794268800000,
       "tag": "0028_pipeline_run_details",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794300000000,
+      "tag": "0029_newsletter_emails",
+      "breakpoints": true
     }
   ]
 }

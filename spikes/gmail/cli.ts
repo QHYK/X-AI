@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { gmailAuth } from './auth.js';
+import { gmailAuth } from '../../src/collectors/gmail/auth.js';
 import {
   analyze,
   collect,

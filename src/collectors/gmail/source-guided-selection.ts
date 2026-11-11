@@ -1,6 +1,6 @@
-/** Local annotation assistance based on the user's source-specific instructions; NOT a production parser or ground truth. */
+/** Accepted source rules shared by collection and local review. Human annotations never participate. */
 import { JSDOM } from 'jsdom';
-import { digest, type Preview } from './review-preview.js';
+import { digest, type ContentReferences } from './html.js';
 import { linkEvidence } from './link-tools.js';
 
 export const SOURCE_RULE_VERSION = 2;
@@ -38,7 +38,7 @@ const normalize = (value: string) => value.replace(/[’‘]/g, "'").toLowerCase
 export function extractSourceSections(
   html: string,
   source: string,
-  preview: Preview,
+  preview: ContentReferences,
   plainText = '',
   context: SourceContext = {},
 ): SourceGuidance {
@@ -386,9 +386,43 @@ export function extractSourceSections(
             'standalone_content',
             'weekend_editorial',
           );
+      } else if (
+        exact('p', 'About AI Deep Dive').length &&
+        exact('td', 'Watch the episode').length &&
+        find('p', (t) => /produced in partnership with .+\. AI Deep Dive is supported by /i.test(t))
+          .length
+      ) {
+        result.template = 'information:episode_promotion';
+        result.warnings.push('已忽略节目推广邮件');
       } else {
-        result.template = 'information:unknown';
-        result.warnings.push('Information: 未识别的邮件模板，未猜测正文');
+        // Article teaser: introduction, one full-article CTA, then headline and byline.
+        // This is a separate template; do not include sponsors or Related articles.
+        const fullArticleCtas = ctas.filter((e) => /^read the full article$/i.test(text(e)));
+        const cta = fullArticleCtas.length === 1 ? fullArticleCtas[0] : undefined;
+        const headline = cta ? find('h1', (t) => !!t).find((e) => start(e) >= end(cta)) : undefined;
+        const byline = headline
+          ? find('p', (t) => /^By\s+\S/i.test(t)).find((e) => start(e) >= end(headline))
+          : undefined;
+        const introduction = cta ? find('p', (t) => !!t).filter((e) => end(e) <= start(cta)) : [];
+        const firstRelated = exact('h2', 'Related articles')[0];
+        const firstSponsor = find('p', (t) => /^A message from\s/i.test(t))[0];
+        const stop = Math.min(
+          firstRelated ? start(firstRelated) : html.length,
+          firstSponsor ? start(firstSponsor) : html.length,
+        );
+        if (cta && headline && byline && introduction.length && end(byline) <= stop) {
+          result.template = 'information:article_teaser';
+          add(
+            start(introduction[0]),
+            end(byline),
+            text(headline),
+            'standalone_content',
+            'article_teaser',
+          );
+        } else {
+          result.template = 'information:unknown';
+          result.warnings.push('Information: 未识别的邮件模板，未猜测正文');
+        }
       }
     } else if (source.startsWith('Superhuman')) {
       const allDaily = Array.from(doc.querySelectorAll('h5'));
@@ -496,9 +530,17 @@ export function extractSourceSections(
 export function createSourceGuidance(
   html: string,
   source: string,
-  preview: Preview,
+  preview: ContentReferences,
   plainText = '',
   context: SourceContext = {},
 ) {
   return extractSourceSections(html, source, preview, plainText, context);
+}
+
+/** Only templates explicitly identified as non-content may complete with zero modules. */
+export function isExplicitNewsletterSkip(guidance: SourceGuidance) {
+  return (
+    guidance.units.length === 0 &&
+    ['information:subscription_ad', 'information:episode_promotion'].includes(guidance.template)
+  );
 }

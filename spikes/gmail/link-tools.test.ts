@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { inspectUrl, plainAlternativeTarget } from './link-tools.js';
+import { inspectUrl, plainAlternativeTarget } from '../../src/collectors/gmail/link-tools.js';
 const target = 'https://publisher.example/story?utm_source=mail';
 assert.equal(
   inspectUrl(`https://track.example/click?url=${encodeURIComponent(target)}`)?.resolved_url,

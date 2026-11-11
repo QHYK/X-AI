@@ -1,0 +1,265 @@
+.page {
+  padding: 20px 28px;
+  min-width: 0;
+}
+.page h1 {
+  margin: 8px 0;
+  max-width: 100%;
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+}
+.page p {
+  max-width: 100%;
+  font-size: 0.9rem;
+  margin: 8px 0;
+}
+
+.toolbar {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 24px 0 8px;
+}
+.toolbar label {
+  display: grid;
+  gap: 8px;
+  min-width: 160px;
+  max-width: 100%;
+}
+.toolbar select {
+  max-width: 550px;
+  padding: 6px;
+  border: 1px solid var(--color-border, #999);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.preview {
+  position: sticky;
+  top: 16px;
+  border: 1px solid var(--color-border, #999);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.previewHeader {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px;
+  line-height: 1.2;
+}
+.preview iframe {
+  display: block;
+  border: 0;
+  width: 100%;
+  height: 74vh;
+  background: #fff;
+}
+.units {
+  min-width: 0;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.unit,
+.selected {
+  border: 1px solid var(--color-border, #999);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 14px;
+  overflow-wrap: anywhere;
+}
+.selected {
+  border-color: #b07832;
+}
+.units button {
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.body {
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+.muted {
+  opacity: 0.7;
+  font-size: 0.85rem;
+}
+.units dd {
+  margin: 4px 0 12px;
+  font-size: 0.85rem;
+}
+@media (max-width: 900px) {
+  .page {
+    padding: 16px;
+  }
+  .columns {
+    grid-template-columns: 1fr;
+  }
+  .preview {
+    position: static;
+  }
+  .preview iframe {
+    height: 55vh;
+  }
+  .units {
+    max-height: none;
+  }
+  .toolbar select {
+    width: 100%;
+  }
+}
+.editorToolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid var(--color-border, #999);
+}
+.units .editorToolbar button,
+.boundary button {
+  padding: 8px 12px;
+  border: 1px solid var(--color-border, #999);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.editorToolbar span {
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.65fr) minmax(0, 2fr);
+}
+.moduleList {
+  padding: 10px;
+  border-right: 1px solid var(--color-border, #999);
+}
+.moduleList button {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--color-border, #999);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.4;
+}
+.moduleList .selected {
+  border-color: #b07832;
+  background: rgb(255, 240, 215);
+}
+.editor {
+  padding: 0 16px 16px;
+  min-width: 0;
+}
+.editor h2 {
+  font-size: 1rem;
+  margin-bottom: 0;
+}
+.identifier {
+  overflow-wrap: anywhere;
+  opacity: 0.6;
+}
+.editor fieldset {
+  border: 0;
+  padding: 0;
+  margin-top: -10px;
+  min-width: 0;
+}
+.editor label {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0;
+  font-size: 0.9rem;
+}
+.editor input,
+.editor textarea,
+.editor select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 6px;
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--color-border, #999);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.85rem;
+}
+.editor textarea {
+  resize: vertical;
+}
+.boundary {
+  padding: 12px;
+  background: rgba(128, 128, 128, 0.08);
+}
+.editorNotice {
+  padding: 0 12px;
+}
+@media (max-width: 600px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+  .moduleList {
+    display: flex;
+    overflow: auto;
+    gap: 8px;
+    border-right: 0;
+  }
+  .moduleList button {
+    min-width: 140px;
+    max-width: 180px;
+  }
+}
+
+.problem {
+  color: var(--color-error, #c66a32);
+}
+
+.mailNavigation {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+}
+.mailNavigation button {
+  padding: 8px 12px;
+  border: 1px solid var(--color-border, #444);
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  margin-top: 1.8rem;
+}
+.mailNavigation button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.emailReview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+}
+.emailReview label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.emailReview input[type='text'] {
+  padding: 6px 10px;
+  border: 1px solid var(--color-border, #444);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}

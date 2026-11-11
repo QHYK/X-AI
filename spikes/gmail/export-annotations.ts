@@ -3,10 +3,10 @@ import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { JSDOM } from 'jsdom';
-import { digest } from './review-preview.js';
-import { inspectUrl, plainAlternativeTarget } from './link-tools.js';
+import { digest } from '../../src/collectors/gmail/preview.js';
+import { inspectUrl, plainAlternativeTarget } from '../../src/collectors/gmail/link-tools.js';
 import type { Annotation, SavedUnit } from './review-data.js';
-import type { GuidedUnit } from './source-guided-selection.js';
+import type { GuidedUnit } from '../../src/collectors/gmail/source-guided-selection.js';
 
 const knownSources = new Set([
   'The Information Briefing',

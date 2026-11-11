@@ -129,7 +129,16 @@
     "spike:gmail:collect-validation": "tsx spikes/gmail/collect-validation.ts",
     "test:gmail-review-ui": "tsx spikes/gmail/review-ui.test.ts",
     "test:gmail-pipeline": "tsx spikes/gmail/pipeline-integration.test.ts",
-    "test:gmail-links": "tsx spikes/gmail/link-tools.test.ts"
+    "test:gmail-links": "tsx spikes/gmail/link-tools.test.ts",
+    "collect:gmail": "tsx scripts/collect-gmail.ts",
+    "test:gmail-history": "tsx spikes/gmail/history-regression.test.ts",
+    "verify:gmail-postgres": "tsx scripts/verify-gmail-postgres.ts",
+    "test:gmail-collector": "tsx scripts/test-gmail-collector.ts",
+    "test:newsletter-parser": "tsx scripts/test-newsletter-parser.ts",
+    "test:newsletter-parser-ui": "tsx scripts/test-newsletter-parser-ui.ts",
+    "reparse:gmail": "tsx scripts/reparse-gmail.ts",
+    "test:gmail-information": "tsx scripts/test-gmail-information-templates.ts",
+    "test:daily-collection": "tsx scripts/test-daily-collection.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -1,22 +1,6 @@
-import { createHash } from 'node:crypto';
-import { JSDOM } from 'jsdom';
-
-export const digest = (value: string) => createHash('sha256').update(value).digest('hex');
-const text = (element: Element) => (element.textContent ?? '').replace(/\s+/g, ' ').trim();
-export type NodeReference = {
-  node_id: string;
-  tag: string;
-  node_path: number[];
-  start_offset: number | null;
-  end_offset: number | null;
-  text_sha256: string;
-  excerpt: string;
-};
-export type Preview = {
-  html: string;
-  html_sha256: string;
-  blocks: NodeReference[];
-};
+import { digest, prepareContentDocument, type ContentReferences } from './html.js';
+export { digest, type NodeReference } from './html.js';
+export type Preview = ContentReferences & { html: string };
 const properties = new Set(
   'color background-color font-family font-size font-weight font-style line-height text-align text-decoration text-transform letter-spacing white-space word-break overflow-wrap width max-width min-width height max-height margin margin-top margin-bottom margin-left margin-right padding padding-top padding-bottom padding-left padding-right border border-top border-bottom border-left border-right border-collapse border-spacing border-radius display vertical-align list-style-type table-layout'.split(
     ' ',
@@ -52,42 +36,9 @@ function safeRules(rules: CSSRuleList): string {
 
 /** References point into the original saved HTML, not a selector on a newly rendered document. */
 export function createPreview(html: string): Preview {
-  const dom = new JSDOM(html, { includeNodeLocations: true });
-  const doc = dom.window.document;
+  const { dom, doc, references, blockElements, styleSheets } = prepareContentDocument(html);
   try {
-    const references = new Map<Element, NodeReference>();
-    Array.from(doc.querySelectorAll('*')).forEach((element, index) => {
-      const path: number[] = [];
-      for (let n: Node | null = element; n?.parentNode; n = n.parentNode)
-        path.unshift(Array.from(n.parentNode.childNodes).indexOf(n as ChildNode));
-      const location = dom.nodeLocation(element);
-      references.set(element, {
-        node_id: `n${index}`,
-        tag: element.tagName.toLowerCase(),
-        node_path: path,
-        start_offset: location?.startOffset ?? null,
-        end_offset: location?.endOffset ?? null,
-        text_sha256: digest(text(element)),
-        excerpt: text(element).slice(0, 140),
-      });
-    });
-    const styles = Array.from(doc.styleSheets)
-      .map((sheet) => safeRules(sheet.cssRules))
-      .join('\n');
-    // Remove invisible and executable content before exposing selectable blocks.
-    doc
-      .querySelectorAll('script,style,noscript,[hidden],[aria-hidden="true"]')
-      .forEach((e) => e.remove());
-    doc.querySelectorAll('[style]').forEach((e) => {
-      if (/display:\s*none|mso-hide:\s*all/i.test(e.getAttribute('style') ?? '')) e.remove();
-    });
-    const blockElements = Array.from(
-      doc.body.querySelectorAll('p,li,h1,h2,h3,h4,h5,h6,blockquote,td,div'),
-    ).filter(
-      (e) =>
-        text(e) &&
-        (!e.matches('td,div') || !e.querySelector('p,li,h1,h2,h3,h4,h5,h6,blockquote,td,div')),
-    );
+    const styles = styleSheets.map((sheet) => safeRules(sheet.cssRules)).join('\n');
     const blockSet = new Set(blockElements);
     // Strict HTML/attribute allowlist. No links, forms, scripts, embedded documents or SVG.
     const allowed = new Set(

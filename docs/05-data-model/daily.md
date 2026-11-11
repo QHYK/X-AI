@@ -37,6 +37,28 @@ Source List 导入时将旧的 Economics / Business / Financial / Market 归一�
 
 - 除主键外无额外索引或唯一约束。
 
+## `newsletter_emails`
+
+单 Gmail 账户的原始采集结果，先于解析与 Raw 写入提交。Migration `0029_newsletter_emails`；迁移文件存在不代表正式库已部署。
+
+| 字段 | 类型 / 约束 | 用途 |
+|---|---|---|
+| `gmail_message_id` | text PK | Gmail 幂等身份 |
+| `raw_message` | jsonb NOT NULL；CHECK object | 唯一原始邮件副本，保留足以离线 MIME 解码的 Gmail Message Payload；不下载附件、不含 OAuth 凭据 |
+| `subject`, `sender` | nullable text | 邮件索引信息 |
+| `received_at` | nullable timestamptz | Gmail internalDate；无法取得时不猜日期，不进入自动窗口 |
+| `collected_at` | timestamptz NOT NULL DEFAULT now() | 首次采集时间 |
+| `source_id` | nullable uuid FK → sources.id | 已识别并映射的 Email Source |
+| `source_name` | nullable text | Newsletter 模板 / 来源名称，未知来源可保留 |
+| `parse_status` | text NOT NULL DEFAULT collected；CHECK 枚举 | collected / success / skipped / unsupported / conflict / failed |
+| `parser_version` | nullable integer | 最近处理使用的规则版本 |
+| `module_mapping` | jsonb NOT NULL DEFAULT []；CHECK array | `{unit_id, raw_id, fingerprint}[]`；无完整模块正文，Raw ID 为应用关联而非 JSONB 外键 |
+| `error_stage`, `error_message` | nullable text | MIME / 来源 / Parser / Raw 持久化的失败阶段及脱敏诊断 |
+| `parsed_at`, `imported_at` | nullable timestamptz | 最近处理 / 成功导入时间；零模块明确跳过也记录完成时间 |
+| `updated_at` | timestamptz NOT NULL DEFAULT now() | 应用更新 |
+
+索引：`newsletter_emails_source_received_idx` (`source_name`, `received_at`)、`newsletter_emails_status_idx` (`parse_status`)；主键保证单账户 Message ID 唯一。Raw 模块仍使用下节 Origin ID 和 `metadata.newsletter.gmail_message_id` 追溯；不重复存模块正文、人工标注或 MIME 的额外 HTML 副本。原始 MIME 保存后不覆盖，Admin 解码该副本作隔离预览。状态转换、72 小时重试和冲突保护见 [Collection](../06-workflow-spec/daily.md#33-collection-level-exact-dedup)。
+
 ## `raw_articles`
 
 保存标准化原始内容：

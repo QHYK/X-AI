@@ -3,7 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { gmailAuth, saveJson } from './auth.js';
+import { gmailAuth, saveJson } from '../../src/collectors/gmail/auth.js';
 import { collect, gmailReader, errorType } from './collector.js';
 import { loadPipelineEnvironment } from '../../src/lib/pipeline-env.js';
 export const validationRoot = resolve('spikes/gmail/runtime/validation');

@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from 'node:fs/promi
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { exportAnnotations, sanitizeUrl, createRedactor } from './export-annotations.js';
-import { createPreview, digest } from './review-preview.js';
+import { createPreview, digest } from '../../src/collectors/gmail/preview.js';
 import type { Annotation } from './review-data.js';
 
 assert.equal(

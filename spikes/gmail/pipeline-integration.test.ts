@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import { newsletterRawArticles } from './pipeline-adapter.js';
-import type { NewsletterMail } from './newsletter-source.js';
+import { newsletterRawArticles } from '../../src/collectors/gmail/adapter.js';
+import type { NewsletterMail } from '../../src/collectors/gmail/newsletter-source.js';
 import { createReviewStore } from './review-data.js';
 import { persistNewsletterArticles } from '../../src/collectors/newsletter.js';
 import type { NormalizedRawArticle } from '../../src/collectors/raw-articles.js';
@@ -28,15 +28,7 @@ import {
   type Stage1ArticleRow,
 } from '../../src/processing/stage1-contract.js';
 
-const samples = [
-  ['Reuters Daily Briefing', '1a1a144bae103cc0', 4, 4, 0, 0],
-  ['Reuters One Essential Read', '1a1a78189ebceb5e', 1, 1, 0, 0],
-  ['Superhuman', '1a1a153cc2968a37', 5, 4, 0, 1],
-  ['The Associated Press', '1a1a14654d41a712', 3, 3, 0, 0],
-  ['The Daily Upside', '1a1a1e8d325a9634', 3, 3, 0, 0],
-  ['The Information AM', '1a1a1491e75ee2e9', 14, 10, 4, 0],
-  ['The Information Briefing', '1a1ae61a55ece80e', 9, 3, 6, 0],
-] as const;
+import { GMAIL_BASELINE as samples } from '../../scripts/fixtures/gmail-baseline.js';
 const scope = { startAt: '2026-10-01T00:00:00Z', endAt: '2026-12-01T00:00:00Z' };
 type Source = { id: string; name: string; method: string; enabled: boolean };
 type Row = NormalizedRawArticle & { id: string; sourceId: string; status: string };

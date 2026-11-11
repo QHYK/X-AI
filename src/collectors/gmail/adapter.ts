@@ -1,7 +1,7 @@
-/** Offline/explicit ingestion adapter. No Gmail, database connection, annotations or model calls here. */
-import type { NormalizedRawArticle } from '../../src/collectors/raw-articles.js';
-import { createPreview } from './review-preview.js';
-import { createSourceGuidance } from './source-guided-selection.js';
+/** Source-guided Newsletter units to the shared Collector boundary. No annotations or model calls. */
+import type { NormalizedRawArticle } from '../raw-articles.js';
+import { createContentReferences } from './html.js';
+import { createSourceGuidance, isExplicitNewsletterSkip } from './source-guided-selection.js';
 import { newsletterSource, type NewsletterMail } from './newsletter-source.js';
 import { safeHttpUrl } from './mail.js';
 
@@ -14,13 +14,14 @@ export function newsletterRawArticles(mail: NewsletterMail): NormalizedRawArticl
   const guidance = createSourceGuidance(
     mail.html,
     source,
-    createPreview(mail.html),
+    createContentReferences(mail.html),
     mail.plainText ?? '',
     {
       subject: mail.subject ?? undefined,
       senderName: mail.from[0]?.name,
     },
   );
+  if (isExplicitNewsletterSkip(guidance)) return [];
   if (!guidance.units.length)
     throw new Error(`No source-guided units: ${source}; ${guidance.warnings.join('; ')}`);
   return guidance.units.map((unit) => {

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gmailAuth, GMAIL_SCOPE, loadClient, saveJson } from './auth.js';
-import { parseMessage, type MimePart } from './mail.js';
+import { gmailAuth, GMAIL_SCOPE, loadClient, saveJson } from '../../src/collectors/gmail/auth.js';
+import { parseMessage, type MimePart } from '../../src/collectors/gmail/mail.js';
 import {
   analyze,
   collect,

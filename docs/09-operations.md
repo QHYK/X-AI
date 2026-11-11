@@ -172,6 +172,21 @@ Put Back 部署需通过 `npm run db:migrate` 应用 `0020_digest_put_back.sql` 
 
 ## 3. Production Processing 命令
 
+`collect:rss` 仅采集 RSS，`collect:gmail` 仅采集 Gmail，`daily` 联合编排；状态及 Warning 规则见 [Daily Workflow](06-workflow-spec/daily.md#1-workflow-overview)。运行结果在 `runtime/daily/<run>/run.json` 和 Daily `pipeline_runs.metrics`，分别查看 `collection.rss` / `collection.gmail`；`warning_count` / `warnings` 提供待处理邮件数量、ID 和原因。
+
+### Gmail Newsletter 手动采集
+
+```bash
+npm run collect:gmail -- --dry-run --limit=1
+npm run collect:gmail -- --query 'label:news-letter' --limit=20
+npm run reparse:gmail -- --id <saved-gmail-message-id>
+```
+
+- 默认 Query 为 `label:news-letter newer_than:3d`，`--limit` 默认 20、范围 1–200；始终限制最近 72 小时的接收时间，详见 [Collection](06-workflow-spec/daily.md#3-collection)。
+- 正常采集与 reparse 会写当前 DATABASE_URL。`--dry-run` 不写业务数据库，但 OAuth 刷新可能保存本机 Token。窗口外邮件用 `reparse:gmail -- --id` 单独恢复，可重复传入 ID，`--limit` 默认 20；不访问 Gmail，不覆盖 success / skipped，也不解决 conflict。
+- OAuth 使用 Desktop loopback / gmail.readonly。`GMAIL_OAUTH_CLIENT_PATH` 默认 `gmail-oauth-client.json`；`GMAIL_OAUTH_TOKEN_PATH` 默认 `runtime/spikes/gmail/oauth-token.json`。
+- 在 `/ai/newsletter-parser` 按状态检查待处理邮件；标注与导出操作见 [Admin API](04-technical-spec/admin-api.md#newsletter-parser)。
+
 ### 3.1 完整 workflow
 
 ```bash
@@ -180,7 +195,7 @@ npm run daily -- --date=2026-09-14
 DAILY_DATE=2026-09-14 npm run daily
 ```
 
-`daily` 依次启动固定的 collection、exact duplicate filter、content completion 与 Stage 1–4 CLI。完整 workflow 需要相应数据库、Provider 与 Firecrawl 配置。日期和各步骤行为见 [Workflow Overview](02-workflow-overview.md)。
+`daily` 先调用 RSS / Gmail Collector，再依次启动 exact duplicate filter、content completion 与 Stage 1–4 CLI。完整 workflow 需要相应数据库、Provider 与 Firecrawl 配置。日期和各步骤行为见 [Workflow Overview](02-workflow-overview.md)。
 
 ### 3.2 独立步骤
 
@@ -415,6 +430,7 @@ Stage 1 的逻辑 Batch 1–15 使用已有 Codex 配置；Codex retry 耗尽后
 
 ```bash
 npm run test:daily-scope
+npm run test:daily-collection
 npm run test:pre-stage1-duplicates
 npm run test:rss-image-enrichment
 npm run test:content-completion-runtime
@@ -429,10 +445,13 @@ npm run test:stage4-dedup
 npm run test:daily-llm-usage
 ```
 
-本地 Newsletter 接入边界可用以下离线测试验证；它需要现有七封固定邮件样本位于 `runtime/spikes/gmail/parsed/`（样本不随 Git 分发），使用事务 Pool Mock 验证模块入库、并发幂等、Email 跳过 Completion 和 Stage 1 输入过滤。不读取数据库连接配置、不调用 Gmail / Firecrawl / LLM；不代表真实 PostgreSQL 锁与事务已验收。
+Newsletter 接入与共享 Parser 可用以下离线测试验证；七封基线与 API 测试需要本地 Raw / Parsed，history 测试还需要 62 封历史样本（包括 `spikes/gmail/runtime/validation`）；七封固定邮件样本位于 `runtime/spikes/gmail/parsed/`（样本不随 Git 分发），使用事务 Pool Mock 验证模块入库、并发幂等、Email 跳过 Completion 和 Stage 1 输入过滤。不读取数据库连接配置、不调用 Gmail / Firecrawl / LLM；不代表真实 PostgreSQL 锁与事务已验收。
 
 ```bash
 npm run test:gmail-pipeline
+npm run test:gmail-collector
+npm run test:gmail-history
+npm run test:gmail-information
 npm run test:gmail-selections
 npm run test:gmail-review-ui
 ```
@@ -462,6 +481,8 @@ npm run test:discovery-presentation
 ```bash
 npm run test:admin-auth
 npm run test:admin-navigation
+npm run test:newsletter-parser
+npm run test:newsletter-parser-ui
 npm run test:memories
 npm run test:memories-ui
 npm run test:ranking-review

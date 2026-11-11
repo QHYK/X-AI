@@ -1,0 +1,374 @@
+[
+  {
+    "id": "1a19ef081b3523db",
+    "source": "The Information Briefing",
+    "count": 5,
+    "sha256": "a3c9f78cc1f48a06153ff013edd2876d74ba186eed7d184f3adb29efd204791f"
+  },
+  {
+    "id": "1a1a144bae103cc0",
+    "source": "Reuters Daily Briefing",
+    "count": 4,
+    "sha256": "f8650a158e35a4603da357d4155920657a607418d38b61ab3db8e0e325682ff1"
+  },
+  {
+    "id": "1a1a14654d41a712",
+    "source": "The Associated Press",
+    "count": 3,
+    "sha256": "627b9bac17a3cb5750a0d77c35b2652c86b8bbcd927b91c631d3e13c7eec0943"
+  },
+  {
+    "id": "1a1a1491e75ee2e9",
+    "source": "The Information AM",
+    "count": 14,
+    "sha256": "fdf24f3309dd747194d16b9f8897a0ac9260f6d306e62a16a2433ed3cd60760a"
+  },
+  {
+    "id": "1a1a153cc2968a37",
+    "source": "Superhuman",
+    "count": 5,
+    "sha256": "9aaf609b91ffe609a8ab3d52717c3a968d3b80dc615cadb4df75e9096aa75a6d"
+  },
+  {
+    "id": "1a1a1e8d325a9634",
+    "source": "The Daily Upside",
+    "count": 3,
+    "sha256": "867eb56aed1def8e71892e4b712def83568304f479c257ab0952fa7c9f62386e"
+  },
+  {
+    "id": "1a1a414a50f3788c",
+    "source": "The Information Briefing",
+    "count": 7,
+    "sha256": "ee4d3465c772fb49e8142c97b43d2290ba37df3b106f33b090b3ac9c1cb00977"
+  },
+  {
+    "id": "1a1a664bcc6481d7",
+    "source": "The Associated Press",
+    "count": 3,
+    "sha256": "eee9f40ad560f46b08acb8d8b6f052fabe0fad9f35d39ac80b01e7a06f2f9734"
+  },
+  {
+    "id": "1a1a66a06188a3ea",
+    "source": "Reuters Daily Briefing",
+    "count": 5,
+    "sha256": "c05e4c191533949167801d7561f7fd688ca1c9391b202dd749a7d3afdb76d41c"
+  },
+  {
+    "id": "1a1a66f71aed8210",
+    "source": "The Information AM",
+    "count": 13,
+    "sha256": "e6f87c1d8ed65954a7fae2b4ec6fc6ca7cd61507c919736f18e2890e0dc16c99"
+  },
+  {
+    "id": "1a1a6ad686babc64",
+    "source": "The Daily Upside",
+    "count": 3,
+    "sha256": "94455808f37b69d9da91af16f83da0b81e72ada313c077875f4c79e73a5fd912"
+  },
+  {
+    "id": "1a1a6e9b65bf4dbf",
+    "source": "Superhuman",
+    "count": 5,
+    "sha256": "e0b40d9523bb38fa60a43c31ddd3fb8e3e3c11a1ea094ee15e73568bddaa107e"
+  },
+  {
+    "id": "1a1a78189ebceb5e",
+    "source": "Reuters One Essential Read",
+    "count": 1,
+    "sha256": "5cc4087c44a1f64f184205a0c00f7a5527ff3668bd10f22ded90deab3bb1ef53"
+  },
+  {
+    "id": "1a1a93d0324eb485",
+    "source": "The Information Briefing",
+    "count": 8,
+    "sha256": "16447be165d34828e33b731d8f8e83831618e4f522c0169758840b96f67f38c2"
+  },
+  {
+    "id": "1a1ab8f068aa3276",
+    "source": "The Associated Press",
+    "count": 3,
+    "sha256": "17cfe9790c9cfb79bfecbf65f1f06c9a901f9ede4f73c020f3099300989ab25a"
+  },
+  {
+    "id": "1a1ab95a905023af",
+    "source": "The Information AM",
+    "count": 14,
+    "sha256": "1addca2fe4c086129cff24af0ca11cbf891d166024a596197da16e1fa7db0e0d"
+  },
+  {
+    "id": "1a1aba16ec84fedf",
+    "source": "Reuters Daily Briefing",
+    "count": 4,
+    "sha256": "60b0e31ffd6c8f78ad55cfdb3153c084e8665c63aa2309df80c2f7dda064b642"
+  },
+  {
+    "id": "1a1abd23d535a5d7",
+    "source": "The Daily Upside",
+    "count": 3,
+    "sha256": "06587a883120237fbdcd17e304a8d1b45f8cf46974ebc6db3a00bfe8a12e01f7"
+  },
+  {
+    "id": "1a1ac0bfee4539a9",
+    "source": "Superhuman",
+    "count": 5,
+    "sha256": "0175ed88d9918ff6dd16cfc0cbdc0431836cce91b413d28474932b84d6fc7789"
+  },
+  {
+    "id": "1a1ae61a55ece80e",
+    "source": "The Information Briefing",
+    "count": 9,
+    "sha256": "97e93abafd8af10da928e508e9f7601944c3e68ce03d0bec21f75e042ad144e5"
+  },
+  {
+    "id": "1a17d7de78bdae46",
+    "source": "Superhuman",
+    "count": 5,
+    "sha256": "7fb4187ca5e05308419ad4f3f395adf24fbc345aaf47999fbd7fd1f5a7f383e5"
+  },
+  {
+    "id": "1a17fdef20830a96",
+    "source": "The Information Briefing",
+    "count": 5,
+    "sha256": "d18128ec6263c69340c185ca6efcdba58b107eb540a6cafb64684654be1836f1"
+  },
+  {
+    "id": "1a1822c96e3036d9",
+    "source": "The Information AM",
+    "count": 10,
+    "sha256": "14ee7bd9deface1bdf93566453dfbc10ecddb3dfc0e84b60b6ea11efb98d57b3"
+  },
+  {
+    "id": "1a1822e2e0ee84a6",
+    "source": "Reuters Daily Briefing",
+    "count": 3,
+    "sha256": "f33281d0569f413be82476d00d3868648a43eb5db95d3399ffcd4bcaccc6c00a"
+  },
+  {
+    "id": "1a1823240bf78613",
+    "source": "Superhuman",
+    "count": 5,
+    "sha256": "4bdb3af5f3694daa35535b55246ce6bb5d602f169c635004f78545b5190b50cd"
+  },
+  {
+    "id": "1a18235b84504896",
+    "source": "The Associated Press",
+    "count": 3,
+    "sha256": "a6512b495e89489c88d79716360cbabb1ccd95b76d5e64d812dbef2d9b36ca0a"
+  },
+  {
+    "id": "1a182698d2f55693",
+    "source": "The Daily Upside",
+    "count": 3,
+    "sha256": "a33a77ea67ebb057193fb72f4e7b527bbc236bfc2beb01d054e30a9aedaea4f4"
+  },
+  {
+    "id": "1a18344757f4b8eb",
+    "source": "Reuters One Essential Read",
+    "count": 1,
+    "sha256": "f27762e4b080080677fec70ce929c98eb3841121837123c89af4349e2b07911e"
+  },
+  {
+    "id": "1a184fb76f23f290",
+    "source": "The Information Briefing",
+    "count": 6,
+    "sha256": "720f4240a13c0454c5273080a7c125d90189a95ca13d368c2a083b605a4f0f14"
+  },
+  {
+    "id": "1a187525fa6b4b9f",
+    "source": "The Information AM",
+    "count": 14,
+    "sha256": "7db12acd75b8c3505b8e69fae7f58724147e2de347ad7861b06c4044cfcb5772"
+  },
+  {
+    "id": "1a18755d57a5139e",
+    "source": "The Associated Press",
+    "count": 3,
+    "sha256": "28ed1e5d6c5a3348597866ad18e8d4089a227ec080eff2e2716376dd72a5bb95"
+  },
+  {
+    "id": "1a1875a07b024443",
+    "source": "Reuters Daily Briefing",
+    "count": 3,
+    "sha256": "57c196a75e7d71ea38b11affc83fb099c2eb0028b1e073e2ad96e4158a0c024d"
+  },
+  {
+    "id": "1a187932f933de2e",
+    "source": "The Daily Upside",
+    "count": 3,
+    "sha256": "e861155ca8953f0a1e0c8e03898233974cc5343ec31340b59dce64e364fa6d5e"
+  },
+  {
+    "id": "1a187c6eadbe80dc",
+    "source": "Superhuman",
+    "count": 5,
+    "sha256": "af96da3cc7c1e6f87b999f6bd1b3caa6fbbcc95f27e2c818c9bba39061b6c384"
+  },
+  {
+    "id": "1a18a1d9f9995278",
+    "source": "The Information Briefing",
+    "count": 3,
+    "sha256": "743358ee0224cffa442b9eec7f0521568602bc7112515bc985e4c98ee8fa08db"
+  },
+  {
+    "id": "1a18c75b5e3a74aa",
+    "source": "Reuters Daily Briefing",
+    "count": 3,
+    "sha256": "2dc976c8e23090ee439e7e3f741c659d341337b07de8c895982b2ce8e3f4600e"
+  },
+  {
+    "id": "1a18c760124ff0f7",
+    "source": "The Associated Press",
+    "count": 3,
+    "sha256": "4aeea6b69d81d849f3b792c3fd62c1b9d4a6a83bf20ad3151c65d60ba4b08614"
+  },
+  {
+    "id": "1a18c7902d65b126",
+    "source": "The Information AM",
+    "count": 14,
+    "sha256": "32d131d262803d4a4b07d89039bf733716b96778fe08a68558fb2e1c5c18e5b8"
+  },
+  {
+    "id": "1a18cbba8a7c6731",
+    "source": "The Daily Upside",
+    "count": 3,
+    "sha256": "da0d9dbef6774994348dde546f9c9acd2e8f01db273098ee3fe3377b3edf2196"
+  },
+  {
+    "id": "1a18cee8996ba47d",
+    "source": "Superhuman",
+    "count": 5,
+    "sha256": "838a0d5c137b40486590e38e4eac8b03175c67fce3e9611b17f398a5fbba1bae"
+  },
+  {
+    "id": "1a18d1e04680f7b0",
+    "source": "Reuters Daily Briefing",
+    "count": 4,
+    "sha256": "55c1bf356d17f476784cf0a8d2549e8412ef6068b1bf048ce787d67c9c55c171"
+  },
+  {
+    "id": "1a18d8b36df479ca",
+    "source": "Reuters One Essential Read",
+    "count": 1,
+    "sha256": "e1bbbf2c87ca8924731bc4a05d4b3ae4e575b506e3ca0a38cbdb66d819456ee9"
+  },
+  {
+    "id": "1a18e9dcd6b1dccc",
+    "source": "The Information AM",
+    "count": 0,
+    "expected_skip": "subscription_promotion"
+  },
+  {
+    "id": "1a1919fce0427c38",
+    "source": "Reuters Daily Briefing",
+    "count": 4,
+    "sha256": "740b93e36ea402b1e38410a356aa5a926bc4dc18a6f0dcd02ec22100411f2085"
+  },
+  {
+    "id": "1a1927c702673b06",
+    "source": "The Information AM",
+    "count": 1,
+    "sha256": "d6e77a01286fb40457e23b0f485b3e085e0974093d298e1f2401dadc626e156c"
+  },
+  {
+    "id": "1a192810035518bb",
+    "source": "Superhuman",
+    "count": 5,
+    "sha256": "c359297f8d9fe4781c1149048e2cdd1fd938c88046239b907892e8c7a4090371"
+  },
+  {
+    "id": "1a197dd105dd7915",
+    "source": "Superhuman",
+    "count": 4,
+    "sha256": "eefc421afc94794c3c7ce43413b8188baec30d1ab29006039997dd05c3b99c28"
+  },
+  {
+    "id": "1a197ddabdb4a428",
+    "source": "The Daily Upside",
+    "count": 1,
+    "sha256": "28dfa116efafb4fbcff887ab74b2d3f10143f677cddfbee9484d0f07a3f032dc"
+  },
+  {
+    "id": "1a197fcd9fbd267d",
+    "source": "The Associated Press",
+    "count": 2,
+    "sha256": "391eab7113561e744f725934db9f761de251d56f020a06c467ab3b1b57f5f6c4"
+  },
+  {
+    "id": "1a1995998da18c16",
+    "source": "The Information Briefing",
+    "count": 6,
+    "sha256": "4e398ff7bc11f16ff9c9dfd2deddab53fc97c08d869263529b3fae3edf596ca6"
+  },
+  {
+    "id": "1a1998f4ebad70bc",
+    "source": "The Information AM",
+    "count": 1,
+    "sha256": "a874de9107b09055e3e32c1c58f0c0f20671e4449589bb7a4eec30f2c5f78a8b"
+  },
+  {
+    "id": "1a19c213b1ab07d3",
+    "source": "Reuters Daily Briefing",
+    "count": 3,
+    "sha256": "6f8844b8ba66494853458e84963101eb9f9f610d4455a16ccb83b5c5d461147e"
+  },
+  {
+    "id": "1a19c2327ac52c91",
+    "source": "The Information AM",
+    "count": 13,
+    "sha256": "55b87bb53146939daefe78552f66312fc2bb10760a1fe46f17399af0ce503d7b"
+  },
+  {
+    "id": "1a19c24bfba5c249",
+    "source": "The Associated Press",
+    "count": 3,
+    "sha256": "34631b96582c04e22116e72c54e8287f30c188a4e1a3529a2a563c478df9de29"
+  },
+  {
+    "id": "1a19c2a6642a238b",
+    "source": "Superhuman",
+    "count": 5,
+    "sha256": "08ad7e20be8ca395c0ed9e9a398c5e1e91275719d1c0d3bc5fab82f1f76ce958"
+  },
+  {
+    "id": "1a19c60ee200a76b",
+    "source": "The Daily Upside",
+    "count": 3,
+    "sha256": "48086cb13bf75f4a85b20fd40c5e8154b855e29ed43ab5f837f713ed766d0be7"
+  },
+  {
+    "id": "1a19d358c298825c",
+    "source": "Reuters One Essential Read",
+    "count": 1,
+    "sha256": "eeb7a58290664e16041ce11c17de178058d21e584ba21b8507cf52fb982702fe"
+  },
+  {
+    "id": "1a1b0bc11e2748ca",
+    "source": "The Information AM",
+    "count": 12,
+    "sha256": "a1e8e9c3af5bb2da9d45676b578c22cdcc852a5a3e50178222260ec60313895f"
+  },
+  {
+    "id": "1a1b0c08202cb97d",
+    "source": "The Associated Press",
+    "count": 3,
+    "sha256": "74f952fc05ff841cac5e47e167240c3b0a9caa32924830949b7ceafcc032330e"
+  },
+  {
+    "id": "1a1b0c33a200d506",
+    "source": "Reuters Daily Briefing",
+    "count": 3,
+    "sha256": "7d7db3b82ab53d772acd764b247391238d98f304d6d2a968f95632278606ece8"
+  },
+  {
+    "id": "1a1b0f9c331e2ec8",
+    "source": "The Daily Upside",
+    "count": 3,
+    "sha256": "b2ef6cdde441ff7dc81b97be3e5a93b13e3f1f037c9586bbdc911f9ab7035b75"
+  },
+  {
+    "id": "1a1b134b92bfe69d",
+    "source": "Superhuman",
+    "count": 5,
+    "sha256": "947cb3a9d3f093bd76750dd71beef8336e069e1ffe2608b8a57bd2b257148114"
+  }
+]

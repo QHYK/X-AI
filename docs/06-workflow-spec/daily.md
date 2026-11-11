@@ -53,7 +53,7 @@ npm run process:stage3
 npm run process:stage4
 ```
 
-Daily Workflow 不引入独立 Workflow Engine、Message Queue 或多套定时器。后一步只在前一步成功完成后继续执行。
+Daily Workflow 不引入独立 Workflow Engine、Message Queue 或多套定时器。Collection 内依次执行 RSS、Gmail，两者独立捕获结果。任一 Collector 整体失败时，将 Daily 标为 failed，不进入后续步骤。已安全保存原始邮件、仅来源 / 模板尚未支持的 unsupported 记录 Warning（邮件 ID、原因及 warning_count），不导致 partial；skipped 为正常完成。MIME、Source 配置、模块校验、持久化等真实失败及 conflict、RSS 部分来源失败仍标记 Collection partial，保留成功数据并继续下游；若下游完成，Daily 最终仍为 partial 且 CLI 非零退出，不误报 success。下游步骤整体失败仍立即停止。
 
 ---
 
@@ -192,7 +192,11 @@ Email module identity
 
 确定为同一 Source Item 的内容不再次插入 `raw_articles`。
 
-Newsletter 以人工验收的 Source-guided Selection 为唯一切分规则；人工标注不参与解析。同一邮件的各模块分别入库，模块身份见 [Raw Article](../05-data-model/daily.md#source_item_origin_id)。Email 写入入口在同一事务中锁定已有 Source 行、检查模块身份并插入，不按 URL 合并模块；该串行化要求并发写入者均通过此入口，数据库没有对应 UNIQUE 约束。解析规则或原文改变可能改变模块 ID，不自动覆盖既有记录。当前仅提供显式写入边界与离线验证，未接入 Gmail 定时采集。
+Newsletter 以人工验收的 Source-guided Selection 为唯一规则；生产与 Review 调用 `src/collectors/gmail/`，人工标注不参与解析。手动 Collector 先按 Gmail Message ID 独立提交原始邮件到 [newsletter_emails](../05-data-model/daily.md#newsletter_emails)，再从已保存邮件解析并将全部结构类型写入 Raw；Daily Collection 与手动命令复用同一正式入口。
+
+Gmail 自身的滚动窗口为执行时刻前 72 小时，按 `received_at`，与 Stage 1 catch-up 独立。每次采集同时重试库内窗口内的 collected / unsupported / failed，跳过 success、明确允许零模块的 skipped 和 conflict；无接收时间或窗口外邮件保留，仅显式 Message ID 手动重跑。success / skipped / conflict 在获得邮件行锁后再次检查，避免并发重复处理。
+
+原始邮件获取、解析、模块入库是不同结果：未知来源或不支持格式记 unsupported，Raw 失败记 failed；明确允许的广告零模块记 skipped。模块及成功映射、success 状态在同一事务提交。邮件行锁及既有 Source 行锁保护模块写入，不按 URL 合并。已有 Raw 时按实际标题、正文、URL、接收时间、结构类型、原文边界和 Source 一对一比较；相同内容复用原记录，不仅因 Parser 版本变化判冲突；集合或内容不同则 conflict，不新增、覆盖或删除。success 不自动重解析，conflict 暂停自动处理。Origin 约定见 [Raw Article](../05-data-model/daily.md#source_item_origin_id)；运行及手动恢复入口见 [Operations](../09-operations.md#gmail-newsletter-手动采集)。
 
 ---
 

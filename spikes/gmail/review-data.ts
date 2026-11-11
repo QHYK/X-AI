@@ -12,65 +12,27 @@ import { resolve, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { JSDOM } from 'jsdom';
-import { createPreview, digest, type NodeReference, type Preview } from './review-preview.js';
-import { createSourceGuidance, type SourceGuidance } from './source-guided-selection.js';
-import { newsletterSource } from './newsletter-source.js';
+import { createPreview, digest, type Preview } from '../../src/collectors/gmail/preview.js';
+import {
+  createSourceGuidance,
+  type SourceGuidance,
+} from '../../src/collectors/gmail/source-guided-selection.js';
+import { newsletterSource } from '../../src/collectors/gmail/newsletter-source.js';
 
 const idPattern = /^[a-zA-Z0-9_-]{1,128}$/;
-const nullableText = z.string().max(30_000).nullable();
-const httpUrl = z
-  .string()
-  .max(30_000)
-  .refine((s) => {
-    try {
-      const u = new URL(s);
-      return ['http:', 'https:'].includes(u.protocol) && !u.username && !u.password;
-    } catch {
-      return false;
-    }
-  }, 'URL 必须为无凭据的 HTTP(S) 地址')
-  .nullable();
-export const statuses = ['unreviewed', 'accepted', 'rejected', 'uncertain'] as const;
-export const contentTypes = ['external_reference', 'standalone_content', 'non_content'] as const;
-const unitSchema = z
-  .object({
-    manual_id: z.uuid().nullable(),
-    status: z.enum(statuses),
-    content_type: z.enum(contentTypes).nullable(),
-    corrections: z
-      .object({
-        title: nullableText.optional(),
-        summary: nullableText.optional(),
-        original_url: httpUrl.optional(),
-      })
-      .strict(),
-    boundary: z
-      .object({
-        start_node_id: z.string().regex(/^n\d+$/),
-        end_node_id: z.string().regex(/^n\d+$/),
-      })
-      .strict()
-      .nullable(),
-    text_evidence: z.string().max(5000),
-    notes: z.string().max(5000),
-  })
-  .strict();
-export type EditableUnit = z.infer<typeof unitSchema>;
-export type SavedUnit = EditableUnit & {
-  boundary_references: { start: NodeReference; end: NodeReference } | null;
-  source_guidance?: { version: number; review_label: string } | null;
-};
-export type SourceBaseline = {
-  html_sha256: string;
-  blocks_sha256: string;
-};
-export type Annotation = {
-  schema_version: 1;
-  gmail_message_id: string;
-  source: SourceBaseline;
-  added_units: SavedUnit[];
-  updated_at: string;
-};
+import {
+  unitSchema,
+  type EditableUnit,
+  type SavedUnit,
+  type SourceBaseline,
+  type Annotation,
+} from '../../src/collectors/gmail/annotation.js';
+export {
+  type EditableUnit,
+  type SavedUnit,
+  type SourceBaseline,
+  type Annotation,
+} from '../../src/collectors/gmail/annotation.js';
 export type ReviewMessage = {
   gmail_message_id: string;
   source: string;

@@ -85,7 +85,11 @@ async function authorize(clientId: string, clientSecret: string) {
   }
 }
 
-export async function gmailAuth(clientPath: string, tokenPath: string) {
+export async function gmailAuth(
+  clientPath: string,
+  tokenPath: string,
+  options: { interactive?: boolean } = {},
+) {
   const config = await loadClient(clientPath);
   let client = new OAuth2Client({
     clientId: config.client_id,
@@ -113,7 +117,10 @@ export async function gmailAuth(clientPath: string, tokenPath: string) {
       stored = null;
     }
   }
-  if (!stored) client = await authorize(config.client_id, config.client_secret);
+  if (!stored) {
+    if (options.interactive === false) throw new Error('oauth_authorization_required');
+    client = await authorize(config.client_id, config.client_secret);
+  }
   const save = () =>
     saveJson(tokenPath, {
       clientId: config.client_id,

@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { request } from 'node:http';
 import { JSDOM, requestInterceptor, VirtualConsole } from 'jsdom';
-import { createPreview, digest } from './review-preview.js';
+import { createPreview, digest } from '../../src/collectors/gmail/preview.js';
 import { createReviewStore, type EditableUnit } from './review-data.js';
 import { createReviewServer } from './review-server.js';
 const html = `<html><head><style>@import url('https://never.test/css');p{background-image:url(https://never.test/image);color:navy}</style></head><body><script>window.pwned=1</script><p hidden>Hidden</p><h5>TUTORIAL</h5><h2>A synthetic workflow guide</h2><table><tr><td><p>${'Original synthetic evidence and instructions. '.repeat(6)}</p><p>A second original paragraph.</p><img src="https://never.test/pixel" onerror="window.pwned=2"></td></tr></table><h5>PROMPT STATION</h5><form action="https://never.test/post"><input></form><iframe src="https://never.test/frame"></iframe></body></html>`;

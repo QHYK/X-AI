@@ -103,6 +103,14 @@ Publish 不改变生产 Active；Activate / 回滚确认起止版本，不影响
 
 Dashboard 不是 Production Source of Truth。它读取 Production 数据与 Runtime Artifacts，并调用已有 Application Services，不应在 UI 层复制 Processing、Review 或 Evaluation 的业务逻辑。
 
+### Newsletter Parser
+
+`/newsletter-parser`（浏览器 `/ai/newsletter-parser`）。`GET /api/admin/newsletter-parser` 从 PostgreSQL `newsletter_emails` 列出邮件，支持 `source` / `status` 筛选；按接收时间降序返回每个来源符合筛选条件的最新 5 封（全部来源也分别限 5 封）；`?id=<Gmail Message ID>` 读取已采集邮件并使用正式 `src/collectors/gmail/` Source-guided Selection 生成当前代码预览。不调用 Gmail，不读取 Spike 样本，不直接返回完整 Gmail JSON。缺少迁移返回 503；非法筛选 / ID 返回 400，邮件不存在返回 404。
+
+左侧原 HTML 从已保存的 MIME 解码，经共享白名单处理后以无脚本 sandbox iframe / 严格 CSP 展示，禁止远程资源、链接导航和表单。右侧显示当前 Parser 模块、原文边界、链接及采集 / 解析错误；选择模块定位并高亮。历史 `unsupported` / `conflict` 不阻断当前代码预览；当前结果与已入库内容不一致时明确提示，不更新 Raw。成功邮件展示映射中的实际 Raw 模块数。
+
+邮件未下载的修改会提示确认。邮件级 Skip 是人工建议，下载为可选 `email_review: {skip, notes}`。人工标注复用 Spike schema v1：可修正状态、字段、边界或新增遗漏单元，下载 `<Gmail Message ID>.json`，并可载入匹配原文 / 块 Hash 的本机标注文件。标注格式由共享 `annotation.ts` 定义，包含原节点路径、偏移和文本 Hash；不会写数据库、修改 Parser 或 Raw。浏览器刷新前需下载，下载文件不会自动同步到开发者本机的 Spike runtime。邮件持久层见 [数据模型](../05-data-model/daily.md#newsletter_emails)，采集和重跑命令见 [Operations](../09-operations.md#gmail-newsletter-手动采集)。
+
 ### 7.1 最近 7 天 Overview
 
 展示最近 7 天 Daily Processing 状态与关键运行指标。
