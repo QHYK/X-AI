@@ -287,7 +287,7 @@ Do not manufacture significance. Straightforward Events whose significance is al
 ### Guidelines
 - Accurately describe what happened and extract common facts across the provided reports.
 - Preserve meaningful added details, perspectives, uncertainty, and conflicts across sources.
-- `source_perspectives[].summary` must be faithful to that specific source and based only on the provided source candidates.
+- 每篇输入文章分别生成一条忠实的 `source_perspectives`，即使多篇来自同一媒体也不得合并或省略；Event 综合摘要基于全部输入内容。
 - `event_tags` / `event_tags_zh` ≤ 5.
 - `event_entities` / `event_entities_zh` ≤ 3. 只保留识别该 Event 最重要的核心实体。
 - `event_summary_zh` normally about 150–300 Chinese characters; complex important Events may use up to about 400 Chinese characters when the additional context is genuinely useful.

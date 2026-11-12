@@ -21,6 +21,10 @@ Stage1 / Stage3 复用 [Memory Runtime](discovery.md#memory-runtime)。Stage1、
 
 Memory 不写入 Published Prompt，也不保存历史 Snapshot。重新执行时允许读取当前 Memory。Evaluation 复用调用层时不自动查询 Memory。
 
+### Stage4 来源覆盖
+
+Stage4 使用选中 Group 的完整文章输入。生成预算随来源数增长（4,000–16,000 output tokens）。失败继续按既有 Retry / Resume 处理；成功历史 Event 不会因此自动重新生成。具体字段见 [Stage4 Prompt Contract](../07-prompt-spec/daily.md#stage-4--selected-event-enrichment)。
+
 ## 2. Event Group、Review 与最终 Event
 
 ```text

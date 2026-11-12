@@ -276,7 +276,7 @@ Topic 本身重要，不代表文章自动值得阅读全文；知名媒体、Op
 **AI Decision**
 - 准确说明发生了什么，并提取多个来源共同支持的事实。
 - 保留有意义的 source differences、added details、uncertainty 或 conflicting claims。
-- Source Perspective 必须忠于对应 source candidate。
+- 每篇输入报道均生成一条 Source Perspective，忠于对应 source candidate；同媒体的多篇报道不合并或省略。
 - 当来源包含不同数字或不确定信息时，保留差异，不把未确认信息升级为确认事实。
 - 判断是否需要 background、preceding developments、significance 或 first-party confirmation 来帮助理解当前 Event。
 - 对简单且意义已经清楚的 Event 保持简洁；对复杂或重要 Event，在确有帮助时补充必要上下文。
@@ -289,7 +289,7 @@ Topic 本身重要，不代表文章自动值得阅读全文；知名媒体、Op
 **Output**
 - Final bilingual Event
 - Event summary
-- Meaningful source perspectives
+- Source perspectives 覆盖全部输入报道
 - Optional verified external context
 
 **Definition of Done**

@@ -10,7 +10,7 @@ import {
 import { createLlmClient, resolveStageLlmModel, resolveStageLlmProvider } from './llm-client.js';
 import {
   parseAndValidateStage4EventEnrichmentOutput,
-  stage4EventEnrichmentOutputJsonSchema,
+  createStage4EnrichmentSchema,
   type Stage4EventEnrichmentOutput,
 } from './stage4-contract.js';
 import { resolveStageLlmRuntimeConfig } from './stage-llm-runtime-config.js';
@@ -137,7 +137,7 @@ export async function runStage4EventEnrichmentLlm(
               ],
             },
           ],
-          max_output_tokens: 4_000,
+          max_output_tokens: Math.min(16_000, Math.max(4_000, 2_000 + input.sources.length * 240)),
           ...(useWebSearch
             ? { tools: [{ type: 'web_search' }], tool_choice: 'auto' as const }
             : {}),
@@ -147,7 +147,7 @@ export async function runStage4EventEnrichmentLlm(
               type: 'json_schema',
               name: 'stage4_event_enrichment',
               description: 'Structured Stage 4 selected event enrichment output.',
-              schema: stage4EventEnrichmentOutputJsonSchema,
+              schema: createStage4EnrichmentSchema(input.sources.length),
               strict: true,
             },
           },
@@ -161,8 +161,12 @@ export async function runStage4EventEnrichmentLlm(
       llmDurationMs += Date.now() - requestStartedAt;
       tokenUsage = sumStage4TokenUsage(tokenUsage, normalizeUsage(response.usage));
       const validation = parseAndValidateStage4EventEnrichmentOutput(rawOutputText);
-      if (!validation.success) {
-        lastError = `Structured output validation failed: ${validation.errors.join('; ')}`;
+      const countError =
+        validation.success && validation.output.source_perspectives.length !== input.sources.length
+          ? `Expected ${input.sources.length} source perspectives, received ${validation.output.source_perspectives.length}.`
+          : null;
+      if (!validation.success || countError) {
+        lastError = `Structured output validation failed: ${validation.success ? countError : validation.errors.join('; ')}`;
         if (attempt <= maxRetries) {
           await sleep(runtimeConfig.retryDelayMs * attempt);
           continue;

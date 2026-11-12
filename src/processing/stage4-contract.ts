@@ -104,6 +104,21 @@ export const stage4EventEnrichmentOutputJsonSchema = {
   },
 } as const;
 
+/** Match the perspective count to this request, keeping the original item shape. */
+export function createStage4EnrichmentSchema(sourceCount: number) {
+  return {
+    ...stage4EventEnrichmentOutputJsonSchema,
+    properties: {
+      ...stage4EventEnrichmentOutputJsonSchema.properties,
+      source_perspectives: {
+        ...stage4EventEnrichmentOutputJsonSchema.properties.source_perspectives,
+        minItems: sourceCount,
+        maxItems: sourceCount,
+      },
+    },
+  };
+}
+
 export function parseAndValidateStage4EventEnrichmentOutput(
   rawText: string,
 ): Stage4ValidationResult {

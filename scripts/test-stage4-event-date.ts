@@ -6,7 +6,10 @@ import {
 import assert from 'node:assert/strict';
 import type { Pool } from 'pg';
 import { buildStage4EventEnrichmentUserPrompt } from '../src/prompts/stage4-event-enrichment.js';
-import { validateStage4EventEnrichmentOutput } from '../src/processing/stage4-contract.js';
+import {
+  validateStage4EventEnrichmentOutput,
+  createStage4EnrichmentSchema,
+} from '../src/processing/stage4-contract.js';
 
 type Check = {
   name: string;
@@ -150,4 +153,54 @@ assert.deepEqual(
 );
 console.log(
   'Stage4 recent_events: business-date SQL window, published-only filter, minimal fields, empty context and unchanged current event passed.',
+);
+
+// 19 articles remain 19 perspectives, including multiple articles from the same publisher.
+const ids = Array.from(
+  { length: 19 },
+  (_, i) => `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
+);
+const full = prepareStage4Event(
+  {
+    eventGroupId: 'group',
+    eventReviewItemId: 'review',
+    eventHint: 'Event',
+    aiRank: 1,
+    displayRank: 1,
+    processedContentIds: ids,
+  },
+  new Map(
+    ids.map((id, index) => [
+      id,
+      {
+        processedContentId: id,
+        title: `Article ${index}`,
+        summary: `Facts ${index}`,
+        entities: [],
+        source: 'Same publisher',
+        url: null,
+        publishedAt: null,
+      },
+    ]),
+  ),
+  new Date(),
+  '2026-11-12',
+);
+const fullInput = JSON.parse(buildStage4EventEnrichmentUserPrompt(full.input));
+assert.equal(fullInput.sources.length, 19);
+assert.deepEqual(fullInput.sources, full.input.sources);
+assert.ok(fullInput.sources.every((source: object) => !('id' in source)));
+assert.equal(
+  fullInput.sources[18].summary,
+  'Facts 18',
+  'The final article is also in the summary-generation input',
+);
+const schema = createStage4EnrichmentSchema(19).properties.source_perspectives;
+assert.equal(schema.minItems, 19);
+assert.equal(schema.maxItems, 19);
+assert.deepEqual(schema.items.required, ['source', 'summary']);
+assert.ok(!('source_id' in schema.items.properties));
+assert.equal(createStage4EnrichmentSchema(0).properties.source_perspectives.maxItems, 0);
+console.log(
+  'Stage4: all 19 source articles retained; count-only schema with original item shape passed.',
 );

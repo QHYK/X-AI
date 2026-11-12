@@ -13,6 +13,8 @@ import { pathToFileURL } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import ts from 'typescript';
 import type { Pool } from 'pg';
+import { getDailyBriefForDailyDate } from '../src/lib/daily-brief.js';
+import type { createStage4EnrichmentSchema } from '../src/processing/stage4-contract.js';
 import { getActiveMemories, formatMemories } from '../src/lib/memories.js';
 import { preparePromptPreview, displayPromptRequest, parsePreviewArgs } from './preview-prompt.js';
 import { PromptMemory } from './fixtures/prompt-runtime.js';
@@ -195,6 +197,198 @@ try {
         }
       }
     }
+  }
+  // Capture the production Stage4 SDK calls with all 19 article inputs and mock model summaries.
+  const stage4 = (await moduleFromSource(
+    'src/processing/stage4-llm.ts',
+    await readFile('src/processing/stage4-llm.ts', 'utf8'),
+  )) as Pick<typeof import('../src/processing/stage4-llm.js'), 'runStage4EventEnrichmentLlm'>;
+  const sourceInput = {
+    event_hint: 'One event described by 19 reports',
+    sources: Array.from({ length: 19 }, (_, i) => ({
+      title: `Article ${i}`,
+      summary: `Original facts ${i}`,
+      entities: [],
+      source: `Publisher ${i % 3}`,
+      url: `https://example.test/${i}`,
+    })),
+  };
+  const savedClient = globals.__promptWireClient;
+  let mode: 'complete' | 'partial-first' | 'partial' | 'repeated' = 'complete';
+  let enrichmentCalls = 0;
+  type CoverageRequest = {
+    input: string | Array<{ content: Array<{ text: string }> }>;
+    max_output_tokens: number;
+    text: { format: { name: string; schema: ReturnType<typeof createStage4EnrichmentSchema> } };
+  };
+  const stage4Requests: CoverageRequest[] = [];
+  globals.__promptWireClient = () => {
+    const create = async (args: CoverageRequest) => {
+      stage4Requests.push(args);
+      const decision = args.text.format.name === 'stage4_external_context_decision';
+      let response: unknown;
+      if (decision) response = { need_external_context: search };
+      else {
+        enrichmentCalls++;
+        assert.ok(Array.isArray(args.input));
+        const input = JSON.parse(args.input[0]!.content[0]!.text);
+        assert.deepEqual(
+          input,
+          sourceInput,
+          'Actual enrichment SDK input includes every original article',
+        );
+        const schema = args.text.format.schema.properties.source_perspectives;
+        assert.equal(schema.minItems, 19);
+        assert.equal(schema.maxItems, 19);
+        assert.deepEqual(schema.items.required, ['source', 'summary']);
+        assert.ok(!('source_id' in schema.items.properties));
+        assert.ok(
+          args.max_output_tokens > 4000,
+          'Output budget must accommodate 19 generated summaries',
+        );
+        let perspectives = sourceInput.sources
+          .map((source, index) => ({
+            source: source.source,
+            summary: `Generated summary ${index}`,
+          }))
+          .reverse();
+        if (mode === 'partial' || (mode === 'partial-first' && enrichmentCalls === 1))
+          perspectives = perspectives.slice(0, 7);
+        if (mode === 'repeated') perspectives[0] = { ...perspectives[1]! };
+        response = {
+          event_title: 'Generated event title',
+          event_title_zh: '生成的事件标题',
+          event_summary: 'Synthesis from all 19 reports',
+          event_summary_zh: '基于全部十九篇报道的综合摘要',
+          event_tags: [],
+          event_tags_zh: [],
+          event_entities: [],
+          event_entities_zh: [],
+          source_perspectives: perspectives,
+          external_context: { performed: false, sources: [], sources_summary: '' },
+        };
+      }
+      return {
+        id: 'stage4-mock',
+        output_text: JSON.stringify(response),
+        output: [],
+        usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 },
+      };
+    };
+    return { structured: { create }, responses: { create }, close: async () => {} };
+  };
+  try {
+    for (const withSearch of [false, true]) {
+      search = withSearch;
+      mode = 'complete';
+      enrichmentCalls = 0;
+      stage4Requests.length = 0;
+      const result = await withPromptBindings(
+        memory.db,
+        databasePromptBinder(memory.db, 'discovery', `coverage-${withSearch}`),
+        () => stage4.runStage4EventEnrichmentLlm(sourceInput, { maxRetries: 0 }),
+      );
+      assert.ok(result.success, result.success ? 'Expected Stage4 success' : result.error);
+      assert.equal(enrichmentCalls, 1);
+      assert.deepEqual(
+        JSON.parse(stage4Requests[0]!.input as string),
+        sourceInput,
+        'Context decision also sees all 19 sources',
+      );
+      assert.deepEqual(
+        result.output.source_perspectives,
+        sourceInput.sources
+          .map((source, index) => ({
+            source: source.source,
+            summary: `Generated summary ${index}`,
+          }))
+          .reverse(),
+      );
+      assert.ok(
+        result.output.source_perspectives.every(
+          (item: object) => Object.keys(item).sort().join(',') === 'source,summary',
+        ),
+        'Public/persisted item shape stays unchanged',
+      );
+      const brief = await getDailyBriefForDailyDate(
+        {
+          query: async (sql: string) => {
+            if (sql.includes('join stage4_runs on stage4_runs.id = events.stage4_run_id'))
+              return {
+                rows: [
+                  {
+                    id: 'generated-event',
+                    rank: 1,
+                    event_date: '2026-11-12',
+                    created_at: new Date(),
+                    title: result.output.event_title,
+                    title_zh: result.output.event_title_zh,
+                    summary: result.output.event_summary,
+                    summary_zh: result.output.event_summary_zh,
+                    tags: [],
+                    tags_zh: [],
+                    entities: [],
+                    entities_zh: [],
+                    source_perspectives: result.output.source_perspectives,
+                    external_context: null,
+                  },
+                ],
+              };
+            if (sql.includes('events.id as event_id'))
+              return {
+                rows: sourceInput.sources.map((source) => ({
+                  event_id: 'generated-event',
+                  source: source.source,
+                  title: source.title,
+                  url: source.url,
+                })),
+              };
+            return { rows: [] };
+          },
+        } as unknown as Pool,
+        '2026-11-12',
+      );
+      assert.equal(brief.events[0]!.sources.length, 19);
+      assert.deepEqual(
+        brief.events[0]!.source_perspectives,
+        result.output.source_perspectives,
+        'Brief preserves all 19 generated summaries instead of replacing them with stored input facts',
+      );
+    }
+    search = false;
+    mode = 'partial-first';
+    enrichmentCalls = 0;
+    const recovered = await withPromptBindings(
+      memory.db,
+      databasePromptBinder(memory.db, 'discovery', 'coverage-retry'),
+      () => stage4.runStage4EventEnrichmentLlm(sourceInput, { maxRetries: 1 }),
+    );
+    assert.ok(
+      recovered.success,
+      recovered.success ? 'Expected Stage4 retry success' : recovered.error,
+    );
+    assert.equal(enrichmentCalls, 2, 'Seven-of-nineteen output must retry rather than persist');
+    assert.equal(recovered.output.source_perspectives.length, 19);
+    mode = 'partial';
+    enrichmentCalls = 0;
+    const failed = await withPromptBindings(
+      memory.db,
+      databasePromptBinder(memory.db, 'discovery', 'coverage-failed'),
+      () => stage4.runStage4EventEnrichmentLlm(sourceInput, { maxRetries: 1 }),
+    );
+    assert.ok(!failed.success);
+    assert.match(failed.error, /Expected 19 source perspectives, received 7/);
+    assert.equal(enrichmentCalls, 2);
+    assert.ok(!('output' in failed), 'Invalid coverage cannot reach normal persistence');
+    mode = 'repeated';
+    const countOnly = await withPromptBindings(
+      memory.db,
+      databasePromptBinder(memory.db, 'discovery', 'coverage-count-only'),
+      () => stage4.runStage4EventEnrichmentLlm(sourceInput, { maxRetries: 0 }),
+    );
+    assert.ok(countOnly.success, 'Count equality adds no ID, ordering or dedup validation');
+  } finally {
+    globals.__promptWireClient = savedClient;
   }
   // New semantic matching request uses the actual Registry and structured client, with no legacy Prompt copy.
   const consolidationModule = await moduleFromSource(
