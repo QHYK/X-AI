@@ -26,6 +26,14 @@ const SOURCE_RULES: Record<string, { feed: string; articleHost: string }> = {
     feed: 'https://www.technologyreview.com/feed/',
     articleHost: 'www.technologyreview.com',
   },
+  'ScienceDaily: Science': {
+    feed: 'https://www.sciencedaily.com/rss/top/science.xml',
+    articleHost: 'www.sciencedaily.com',
+  },
+  'Scientific American 科学美国人': {
+    feed: 'https://www.scientificamerican.com/platform/syndication/rss/',
+    articleHost: 'www.scientificamerican.com',
+  },
 };
 
 const PAGE_TIMEOUT_MS = 12_000;

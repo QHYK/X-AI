@@ -94,7 +94,7 @@
 }
 
 .detailSummaryGrid {
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
   margin-bottom: 16px;
 }
 
@@ -111,7 +111,7 @@
 }
 
 .summaryCard {
-  padding: 22px 24px;
+  padding: 16px 20px;
 }
 
 .summaryCard p,

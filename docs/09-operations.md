@@ -381,7 +381,7 @@ Scope 的时间含义和 current/historical 行为在 [Workflow Overview](02-wor
 | `CONTENT_COMPLETION_FIRECRAWL_TIMEOUT_MS` | `30000` ms | 单次 Firecrawl timeout |
 | `CONTENT_COMPLETION_FIRECRAWL_MAX_RETRIES` | `2` | 单次 Firecrawl 最大重试数 |
 
-`npm run collect:rss` 完成 Feed 插入和去重后，会对 TechCrunch、CNBC: World Top News & Analysis、MIT Technology Review 本次 Feed 涉及且仍无图的 Raw Article 尝试网页 `<head>` 图片补全。单页 12 秒、最多读取 1 MiB，并发总量最多 3、同域名最多 1；失败仅写统计日志，不使已成功的 RSS 采集失败。只读抽样诊断可运行 `npm run audit:rss-images -- --per-source=1`（每 Source 允许 1–5）；它读取最近七天的无图文章并请求网页，不写库，也不执行 RSS Collector。
+`npm run collect:rss` 完成 Feed 插入和去重后，会对 TechCrunch、CNBC: World Top News & Analysis、MIT Technology Review、ScienceDaily: Science、Scientific American 科学美国人本次 Feed 涉及且仍无图的 Raw Article 尝试网页 `<head>` 图片补全。单页 12 秒、最多读取 1 MiB，并发总量最多 3、同域名最多 1；失败仅写统计日志，不使已成功的 RSS 采集失败。只读抽样诊断可运行 `npm run audit:rss-images -- --per-source=1`（每 Source 允许 1–5）；它读取最近七天的无图文章并请求网页，不写库，也不执行 RSS Collector。
 
 ### 5.4 Stage 执行与 LLM 调用
 

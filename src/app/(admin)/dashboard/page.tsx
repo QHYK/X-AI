@@ -209,13 +209,13 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 title="Digest by Category"
                 counts={data.details.digestByCategory}
               />
-            </div>
-
-            <div className={styles.stageGrid}>
               <ContentCompletionCard
                 metrics={data.details.contentCompletion}
                 dailyDate={data.detailDate}
               />
+            </div>
+
+            <div className={styles.stageGrid}>
               <DuplicateFilterCard
                 metrics={data.details.duplicateFilter}
                 dailyDate={data.detailDate}

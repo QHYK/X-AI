@@ -31,6 +31,56 @@ assert.equal(
 );
 assert.equal(imageEnrichmentHost({ ...techCrunch, url: 'https://example.com/feed' }), null);
 
+const newSources = [
+  {
+    name: 'ScienceDaily: Science',
+    feed: 'https://www.sciencedaily.com/rss/top/science.xml',
+    article: 'https://www.sciencedaily.com/releases/2026/11/261111005901.htm',
+    host: 'www.sciencedaily.com',
+    image: 'https://www.sciencedaily.com/images/1920/dark-matter-cosmology-measurement.webp',
+  },
+  {
+    name: 'Scientific American 科学美国人',
+    feed: 'https://www.scientificamerican.com/platform/syndication/rss/',
+    article: 'https://www.scientificamerican.com/article/can-spacex-catch-its-starship/',
+    host: 'www.scientificamerican.com',
+    image: 'https://static.scientificamerican.com/dam/asset/story/StarshipFlight15.png?w=1200',
+  },
+];
+for (const source of newSources) {
+  const configured = { id: source.name, name: source.name, url: source.feed };
+  assert.equal(imageEnrichmentHost(configured), source.host);
+  assert.equal(imageEnrichmentHost({ ...configured, url: 'https://example.com/rss' }), null);
+  assert.equal(trustedArticleUrl(source.article, source.host)?.href, source.article);
+  assert.equal(trustedArticleUrl(source.article, 'example.com'), null);
+  assert.equal(
+    trustedArticleUrl(source.article.replace(source.host, `${source.host}.evil.test`), source.host),
+    null,
+  );
+  assert.equal(
+    extractArticleHeadImage(
+      `<html><head><link rel="canonical" href="${source.article}"><meta property="og:url" content="${source.article}"><meta property="og:image" content="${source.image}"></head></html>`,
+      new URL(source.article),
+    ).image,
+    source.image,
+  );
+  assert.equal(
+    extractArticleHeadImage(
+      `<html><head><link rel="canonical" href="https://${source.host}/other-article"><meta property="og:image" content="${source.image}"></head></html>`,
+      new URL(source.article),
+    ).reason,
+    'canonical_mismatch',
+  );
+}
+assert.equal(
+  imageEnrichmentHost({
+    id: 'nature-chemistry',
+    name: 'Nature: Chemistry',
+    url: 'https://www.nature.com/subjects/chemistry.rss',
+  }),
+  null,
+);
+
 function head(meta: string, url = article): string {
   return `<html><head><link rel="canonical" href="${url}"><meta property="og:url" content="${url}">${meta}</head><body>ignored</body></html>`;
 }

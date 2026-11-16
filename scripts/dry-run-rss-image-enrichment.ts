@@ -25,7 +25,15 @@ try {
   const sources = await pool.query<ImageEnrichmentSource>(
     `select id, name, url from sources where enabled = true and collection_method = 'RSS'
        and name = any($1::text[]) order by name`,
-    [['TechCrunch', 'CNBC: World Top News & Analysis', 'MIT Technology Review']],
+    [
+      [
+        'TechCrunch',
+        'CNBC: World Top News & Analysis',
+        'MIT Technology Review',
+        'ScienceDaily: Science',
+        'Scientific American 科学美国人',
+      ],
+    ],
   );
   for (const source of sources.rows) {
     if (!imageEnrichmentHost(source)) continue;
