@@ -8,16 +8,24 @@ import {
 } from './contracts.js';
 import { getActivePrompt, getPromptVersion } from './registry.js';
 
+const snapshotSchema = z
+  .object({
+    'xfield.identity': z.uuid(),
+    'daily_brief.editorial': z.uuid(),
+    'discover.editorial': z.uuid(),
+  })
+  .strict();
+
 export function readSystemFragmentSnapshot(value: unknown): SystemFragmentSnapshot | undefined {
   if (value === undefined) return undefined; // Historical Runs remain historical.
-  return z
-    .object({
-      'xfield.identity': z.uuid(),
-      'daily_brief.editorial': z.uuid(),
-      'discover.editorial': z.uuid(),
-    })
-    .strict()
-    .parse(value);
+  return snapshotSchema.parse(value);
+}
+/** Compare the three pinned UUIDs, independent of JSON object property order. */
+export function sameSystemFragmentSnapshot(left: unknown, right: unknown): boolean {
+  if (left == null || right == null) return left == null && right == null;
+  const a = snapshotSchema.safeParse(left);
+  const b = snapshotSchema.safeParse(right);
+  return a.success && b.success && ACTIVE_FRAGMENT_KEYS.every((key) => a.data[key] === b.data[key]);
 }
 /** One SQL snapshot of all three Active pointers; all versions are immutable. */
 export async function captureSystemFragments(

@@ -1,4 +1,8 @@
-import { captureSystemFragments, readSystemFragmentSnapshot } from './system-fragments.js';
+import {
+  captureSystemFragments,
+  readSystemFragmentSnapshot,
+  sameSystemFragmentSnapshot,
+} from './system-fragments.js';
 import { mkdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -178,7 +182,14 @@ export async function inheritRunPrompt(
 ) {
   const previous = await readRun(priorPath);
   const prior = readBindings(previous)[key];
-  if (!prior) return; // Legacy artifacts have no provable version; never invent one for reused output.
+  if (!prior) return false; // Legacy artifacts have no provable version; never invent one for reused output.
+  if (
+    !sameSystemFragmentSnapshot(
+      previous.systemFragmentVersions,
+      (await readRun(path)).systemFragmentVersions,
+    )
+  )
+    return false;
   let label = readLabels(previous)[key];
   if (!label && db) {
     const version = await getPromptVersion(db, prior);
@@ -186,15 +197,13 @@ export async function inheritRunPrompt(
       throw new Error('Invalid resumed Prompt binding.');
     label = `v${version.version}`;
   }
+  let compatible = false;
   await updateRunFile(path, (old) => {
-    if (
-      previous.systemFragmentVersions &&
-      old.systemFragmentVersions &&
-      JSON.stringify(previous.systemFragmentVersions) !== JSON.stringify(old.systemFragmentVersions)
-    )
-      throw new Error(
-        'Cannot reuse ranking from a different System Fragment snapshot. Start a fresh ranking attempt.',
-      );
+    compatible = sameSystemFragmentSnapshot(
+      previous.systemFragmentVersions,
+      old.systemFragmentVersions,
+    );
+    if (!compatible) return old;
     return mergeBindings(old, {
       ...old,
       ...(previous.systemFragmentVersions
@@ -204,6 +213,7 @@ export async function inheritRunPrompt(
       promptVersions: { ...readLabels(old), ...(label ? { [key]: label } : {}) },
     });
   });
+  return compatible;
 }
 export function runPath(stage: string, startedAt: Date, root = process.cwd()) {
   return join(

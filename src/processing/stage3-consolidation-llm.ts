@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { productionPrompt } from '../lib/prompts/runtime.js';
+import { stage3MaxRetries, waitForStage3Retry } from './stage3-http-retry.js';
 import { createLlmClient, resolveStageLlmModel, resolveStageLlmProvider } from './llm-client.js';
 import { resolveStageLlmRuntimeConfig } from './stage-llm-runtime-config.js';
 import {
@@ -98,7 +99,8 @@ export async function runStage3Consolidation(
     },
   };
   try {
-    for (let i = 0; i <= config.maxRetries; i++) {
+    const maxRetries = stage3MaxRetries(config.maxRetries);
+    for (let i = 0; i <= maxRetries; i++) {
       calls++;
       let received = false;
       try {
@@ -128,8 +130,7 @@ export async function runStage3Consolidation(
         if (!received) usage = mergeLlmTokenUsage(usage, missingLlmTokenUsage());
         error = stage3Error(caught);
         if (/401|invalid_api_key|Incorrect API key/i.test(error)) break;
-        if (i < config.maxRetries)
-          await new Promise((r) => setTimeout(r, config.retryDelayMs * (i + 1)));
+        await waitForStage3Retry(caught, i + 1, maxRetries, config.retryDelayMs);
       }
     }
     throw new ConsolidationCallError(error, {

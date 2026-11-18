@@ -71,9 +71,15 @@ export async function consolidateDigestCategory(
     return { success: true, error: null, metrics: zero };
   }
   // Hash the remaining input as well: successful routing changes remove matched candidates from future reads.
+  const currentSnapshot = await readSystemFragmentFile(options.path);
   for (const prior of await stage3Checkpoints(pool, dailyDate, 'consolidation', input.category)) {
     const d = prior.detail;
-    if (d.event_review_run_id !== reviewRunId || d.remaining_hash !== stage3Hash(input)) continue;
+    if (
+      d.event_review_run_id !== reviewRunId ||
+      d.remaining_hash !== stage3Hash(input) ||
+      !sameFragmentSnapshot(currentSnapshot, d.system_fragment_versions)
+    )
+      continue;
     let output: ConsolidationOutput;
     try {
       output = validateConsolidation(

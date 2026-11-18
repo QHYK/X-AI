@@ -403,7 +403,7 @@ Scope 的时间含义和 current/historical 行为在 [Workflow Overview](02-wor
 
 Stage2 关闭 SDK 自动重试，使用自己的 retry loop；`STAGE2_LLM_MAX_RETRIES` 是单次 Stage2 execution 中额外 LLM request 的最大次数。每次 attempt 的脱敏诊断写入 `runtime/stage2/<run-id>/run.json` 的 `llm_attempts`；Dashboard 的 Retries 表示实际 LLM retry 数，不包含整个 Stage2 的再次运行。
 | `STAGE3_LLM_TIMEOUT_MS` | `240000` ms | Stage3 Event/Consolidation/Digest/Long-form 单 request timeout |
-| `STAGE3_LLM_MAX_RETRIES` | `2` | Stage3 Event/Consolidation/Digest/Long-form 最大重试数 |
+| `STAGE3_LLM_MAX_RETRIES` | `2` | Stage3 Event/Consolidation/Digest/Long-form 单请求额外重试数，上限 2（总请求最多 3）；HTTP 503 每次重试等待至少 60 秒，若有效 `Retry-After` 更长则按其等待；SDK 自动重试为 0 |
 | `STAGE3_LLM_RETRY_DELAY_MS` | `1000` ms | Stage3 Event/Consolidation/Digest/Long-form retry delay |
 
 Stage 1 的逻辑 Batch 1–15 使用已有 Codex 配置；Codex retry 耗尽后回退当前 `STAGE1_LLM_PROVIDER`（未设置时使用项目默认）。每个 Batch 的实际 provider、retry、fallback 与脱敏错误见 `runtime/stage1/<run-id>/attempts.jsonl`。
@@ -440,6 +440,7 @@ npm run test:stage1-codex-rollout
 npm run test:stage2-retry
 npm run test:stage3-persistence
 npm run test:stage3-category-recovery
+npm run test:stage3-http-retry
 npm run test:stage3-consolidation
 npm run test:stage4-event-date
 npm run test:stage4-dedup

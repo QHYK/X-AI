@@ -17,6 +17,8 @@ import { runStage3Consolidation } from './stage3-consolidation-llm.js';
 import { resolveStageLlmProvider } from './llm-client.js';
 import { productionPrompt } from '../lib/prompts/runtime.js';
 import { readSystemFragmentFile } from '../lib/prompts/run-file.js';
+import { sameSystemFragmentSnapshot } from '../lib/prompts/system-fragments.js';
+import type { SystemFragmentSnapshot } from '../lib/prompts/contracts.js';
 import {
   correctInvalidDigestCategories,
   stableDigestHash,
@@ -284,6 +286,8 @@ async function processStage3Bound(
   const model = resolveStageLlmModel('stage3', options.model);
   const publishedWithinHours = options.publishedWithinHours ?? DEFAULT_LOOKBACK_HOURS;
   const dailyDate = options.dailyDate ?? resolveDailyScope(undefined, startedAt).dailyDate;
+  const currentFragmentSnapshot = await readSystemFragmentFile(join(runDir, 'run.json'));
+  if (!currentFragmentSnapshot) throw new Error('Stage3 requires a System Fragment snapshot.');
 
   await mkdir(eventsDir, { recursive: true });
   await mkdir(digestDir, { recursive: true });
@@ -384,8 +388,14 @@ async function processStage3Bound(
       eventHash,
       eventBundle.input,
       eventBundle.idMap,
+      currentFragmentSnapshot,
     );
-    let resume = await findStage3ResumeArtifact(rootDir, dailyDate, eventHash);
+    let resume = await findStage3ResumeArtifact(
+      rootDir,
+      dailyDate,
+      eventHash,
+      currentFragmentSnapshot,
+    );
     if (databaseEvent && resume?.eventReviewRunId !== databaseEvent.reviewRunId) resume = null;
     if (databaseEvent)
       await restoreStage3Prompt(
@@ -586,7 +596,10 @@ async function processStage3Bound(
     for (const category of Object.keys(digestInputs)) {
       const hash = stableDigestHash(digestInputs[category], idMap.digest[category] ?? {});
       const previous = (await stage3Checkpoints(pool, dailyDate, 'digest_ranking', category)).find(
-        (r) => r.detail.input_hash === hash && typeof r.detail.prompt_version_id === 'string',
+        (r) =>
+          r.detail.input_hash === hash &&
+          typeof r.detail.prompt_version_id === 'string' &&
+          sameSystemFragmentSnapshot(r.detail.system_fragment_versions, currentFragmentSnapshot),
       );
       if (previous) {
         await restoreStage3Prompt(
@@ -894,7 +907,18 @@ async function processStage3Bound(
       dailyDate,
       inputSnapshotHashes.longForm,
       idMap.long_form,
+      currentFragmentSnapshot,
     );
+    const longFormResume = databaseLongForm
+      ? null
+      : await findStage3ResumeArtifact(
+          rootDir,
+          dailyDate,
+          null,
+          currentFragmentSnapshot,
+          inputSnapshotHashes.longForm,
+          'daily.stage3.long_form_ranking',
+        );
     if (databaseLongForm)
       await restoreStage3Prompt(
         pool,
@@ -902,10 +926,10 @@ async function processStage3Bound(
         'daily.stage3.long_form_ranking',
         databaseLongForm.detail,
       );
-    if (!databaseLongForm && resume && resume.hashes.longForm === inputSnapshotHashes.longForm)
+    if (longFormResume)
       await inheritRunPrompt(
         join(runDir, 'run.json'),
-        join(resume.runDir, 'run.json'),
+        join(longFormResume.runDir, 'run.json'),
         'daily.stage3.long_form_ranking',
         pool,
       );
@@ -918,13 +942,13 @@ async function processStage3Bound(
           tokenUsage: null,
           warnings: emptyRankingWarnings(),
         }
-      : resume &&
+      : longFormResume &&
           canReuseStage3Ranking(
             inputSnapshotHashes.longForm,
-            resume.hashes.longForm,
-            resume.statuses.long_form,
+            longFormResume.hashes.longForm,
+            longFormResume.statuses.long_form,
           )
-        ? await loadReusableLongFormRanking(resume, longFormInput)
+        ? await loadReusableLongFormRanking(longFormResume, longFormInput, idMap.long_form)
         : null;
     const longPrompt = longFormInput.candidates.length
       ? await productionPrompt('daily.stage3.long_form_ranking', JSON.stringify(longFormInput))
@@ -2174,7 +2198,10 @@ export function canReuseStage3Ranking(
 async function findStage3ResumeArtifact(
   rootDir: string,
   dailyDate: string,
-  eventHash: string,
+  eventHash: string | null,
+  fragmentSnapshot: SystemFragmentSnapshot,
+  longFormHash?: string,
+  requiredPromptKey?: string,
 ): Promise<Stage3ResumeArtifact | null> {
   const root = join(rootDir, 'runtime/stage3');
   let entries;
@@ -2194,7 +2221,15 @@ async function findStage3ResumeArtifact(
         Partial<Record<keyof Stage3RankingStatuses, unknown>> | undefined;
       if (
         run.daily_date !== dailyDate ||
-        hashes?.event !== eventHash ||
+        !hashes ||
+        typeof hashes.event !== 'string' ||
+        (eventHash !== null && hashes.event !== eventHash) ||
+        (longFormHash !== undefined && hashes.long_form !== longFormHash) ||
+        !sameSystemFragmentSnapshot(run.systemFragmentVersions, fragmentSnapshot) ||
+        (requiredPromptKey &&
+          typeof (run.promptVersionIds as Record<string, unknown> | undefined)?.[
+            requiredPromptKey
+          ] !== 'string') ||
         typeof run.event_review_run_id !== 'string'
       )
         continue;
@@ -2299,8 +2334,11 @@ async function hasMatchingDigestCategory(
 async function loadReusableLongFormRanking(
   resume: Stage3ResumeArtifact,
   input: Stage3LongFormRankingInput,
+  idMap: Record<string, string>,
 ): Promise<Awaited<ReturnType<typeof rankLongForm>> | null> {
   try {
+    const previousMap = await readJson<Stage3IdMap>(join(resume.runDir, 'id-map.json'));
+    if (stage3Hash(previousMap.long_form) !== stage3Hash(idMap)) return null;
     const output = await readJson<Stage3RankingOutput>(
       join(resume.runDir, 'long-form/ranking-output.json'),
     );

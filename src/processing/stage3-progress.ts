@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readBindings, updateRunFile, readSystemFragmentFile } from '../lib/prompts/run-file.js';
 import { getPromptVersion } from '../lib/prompts/registry.js';
 import type { PromptKey, SystemFragmentSnapshot } from '../lib/prompts/contracts.js';
-import { isDeepStrictEqual as sameFragmentSnapshot } from 'node:util';
+import { sameSystemFragmentSnapshot as sameFragmentSnapshot } from '../lib/prompts/system-fragments.js';
 
 type Queryable = Pick<Pool | PoolClient, 'query'>;
 export type Stage3Section =
@@ -71,15 +71,11 @@ export async function restoreStage3Prompt(
       throw new Error('Stage3 recovery conflicts with the parent Daily Fragment snapshot.');
   }
   await updateRunFile(path, (old) => {
+    if (!sameFragmentSnapshot(old.systemFragmentVersions, step.system_fragment_versions))
+      throw new Error('Conflicting Stage3 Fragment recovery snapshot.');
     const bindings = readBindings(old);
     if (bindings[key] && bindings[key] !== prompt.id)
       throw new Error('Conflicting Stage3 Request binding.');
-    if (
-      Object.keys(bindings).length &&
-      step.system_fragment_versions &&
-      !sameFragmentSnapshot(old.systemFragmentVersions, step.system_fragment_versions)
-    )
-      throw new Error('Conflicting Stage3 Fragment recovery snapshot.');
     return {
       ...old,
       ...(step.system_fragment_versions

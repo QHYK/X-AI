@@ -1,6 +1,7 @@
 import type { Stage3Step } from '../src/processing/stage3-progress.js';
 import assert from 'node:assert/strict';
 import { formatMemories } from '../src/lib/memories.js';
+import { sameSystemFragmentSnapshot } from '../src/lib/prompts/system-fragments.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, writeFile, rm, cp, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -70,6 +71,7 @@ class Store {
   calls: string[] = [];
   eventCalls = 0;
   longCalls = 0;
+  longFails = false;
   generalFails = false;
   correctionFails = false;
   persistFails = false;
@@ -499,6 +501,15 @@ class Store {
     ) => {
       this.memoryContexts.push(options.memoryContext);
       this.longCalls++;
+      if (this.longFails)
+        throw new Stage3RankingFailureError('Long-form', {
+          success: false,
+          input,
+          attempts: 1,
+          elapsedMs: 2,
+          error: 'Mock HTTP 503',
+          assignment: null,
+        } as never);
       return {
         ...this.metrics,
         warnings: this.warnings,
@@ -970,6 +981,72 @@ try {
   assert.equal(memoryFailure.status, 'failed');
   assert.match(memoryFailure.error!, /Mock Memory read failure/);
   assert.equal(failedMemory.memoryContexts.length, 0, 'No ranking on Memory DB failure');
+  const failedLong = new Store();
+  failedLong.longFails = true;
+  const failedLongRoot = join(root, 'failed-long');
+  const failedLongFirst = await failedLong.run(failedLongRoot);
+  assert.equal(failedLongFirst.status, 'partial');
+  assert.equal(failedLongFirst.rankingStatuses.long_form, 'failed');
+  const oldRunPath = join(failedLongFirst.runDir, 'run.json');
+  const oldRun = JSON.parse(await readFile(oldRunPath, 'utf8'));
+  const originalSnapshot = oldRun.systemFragmentVersions;
+  oldRun.systemFragmentVersions = {
+    'discover.editorial': originalSnapshot['discover.editorial'],
+    'xfield.identity': originalSnapshot['xfield.identity'],
+    'daily_brief.editorial': originalSnapshot['daily_brief.editorial'],
+  };
+  await writeFile(oldRunPath, JSON.stringify(oldRun));
+  assert.ok(sameSystemFragmentSnapshot(originalSnapshot, oldRun.systemFragmentVersions));
+  const failedLongSecond = await failedLong.run(failedLongRoot);
+  assert.equal(failedLongSecond.status, 'partial');
+  assert.equal(failedLongSecond.rankingStatuses.event, 'skipped');
+  assert.equal(failedLongSecond.rankingStatuses.digest, 'skipped');
+  assert.equal(failedLongSecond.rankingStatuses.long_form, 'failed');
+  const secondRunPath = join(failedLongSecond.runDir, 'run.json');
+  const secondRun = JSON.parse(await readFile(secondRunPath, 'utf8'));
+  delete secondRun.promptVersionIds['daily.stage3.long_form_ranking'];
+  delete secondRun.promptVersions['daily.stage3.long_form_ranking'];
+  await writeFile(secondRunPath, JSON.stringify(secondRun));
+  failedLong.longFails = false;
+  const failedLongThird = await failedLong.run(failedLongRoot);
+  assert.equal(failedLongThird.status, 'success');
+  assert.equal(failedLongThird.rankingStatuses.event, 'skipped');
+  assert.equal(failedLongThird.rankingStatuses.digest, 'skipped');
+  assert.equal(failedLongThird.rankingStatuses.long_form, 'success');
+  assert.equal(failedLong.longCalls, 3, 'Failed Long-form is reranked, never reused');
+  assert.equal(failedLong.eventCalls, 1, 'Successful Event checkpoint is reused');
+  assert.equal(
+    failedLong.calls.length,
+    categories.length,
+    'Successful Digest checkpoints are reused',
+  );
+  const thirdRun = JSON.parse(await readFile(join(failedLongThird.runDir, 'run.json'), 'utf8'));
+  assert.equal(
+    thirdRun.promptVersionIds['daily.stage3.long_form_ranking'],
+    oldRun.promptVersionIds['daily.stage3.long_form_ranking'],
+    'The earlier compatible failed attempt retains its valid Prompt binding',
+  );
+  const changedFragment = failedLong.prompts.active.get('xfield.identity')!;
+  const oldFragment = failedLong.prompts.versions.get(changedFragment)!;
+  const newFragment = { ...oldFragment, id: randomUUID(), version: oldFragment.version + 1 };
+  failedLong.prompts.versions.set(newFragment.id, newFragment);
+  failedLong.prompts.active.set('xfield.identity', newFragment.id);
+  assert.equal(
+    sameSystemFragmentSnapshot(originalSnapshot, {
+      ...originalSnapshot,
+      'xfield.identity': newFragment.id,
+    }),
+    false,
+  );
+  const beforeChangedCalls = failedLong.calls.length;
+  const changedRun = await failedLong.run(failedLongRoot);
+  assert.equal(changedRun.status, 'success');
+  assert.equal(changedRun.rankingStatuses.event, 'success');
+  assert.equal(changedRun.rankingStatuses.long_form, 'success');
+  assert.equal(failedLong.eventCalls, 2, 'Different Fragment requires fresh Event ranking');
+  assert.equal(failedLong.longCalls, 4, 'Different Fragment requires fresh Long-form ranking');
+  assert.equal(failedLong.calls.length - beforeChangedCalls, categories.length);
+  assert.ok(Object.values(changedRun.digestCategories).every((category) => !category.reused));
   console.log(
     'PASS Stage3 category recovery: scoped correction, partial independent commits, precise Retry/hash invalidation, durable atomic markers, strict ranks, Event/Long-form reuse and human rank protection',
   );

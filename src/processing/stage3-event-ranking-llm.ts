@@ -23,6 +23,7 @@ import {
 } from './stage3-contract.js';
 import { buildStage3EventRankingUserPrompt } from '../prompts/stage3-event-ranking.js';
 import { resolveStageLlmRuntimeConfig } from './stage-llm-runtime-config.js';
+import { stage3MaxRetries, waitForStage3Retry, type Stage3Wait } from './stage3-http-retry.js';
 import {
   emptyLlmTokenUsage,
   mergeLlmTokenUsage,
@@ -37,6 +38,7 @@ export type Stage3EventRankingLlmOptions = {
   timeoutMs?: number;
   maxRetries?: number;
   memoryContext?: string;
+  wait?: Stage3Wait;
 };
 
 export type Stage3EventRankingTokenUsage = LlmTokenUsage;
@@ -120,7 +122,7 @@ export async function runStage3EventRankingLlm(
     (options.provider ? resolveLlmModel(undefined, provider) : resolveStageLlmModel('stage3'));
   const runtimeConfig = resolveStageLlmRuntimeConfig('stage3');
   const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
-  const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
+  const maxRetries = stage3MaxRetries(options.maxRetries ?? runtimeConfig.maxRetries);
   const { request, prompt } = await prepareStage3EventRequest(input, model, options.memoryContext);
   const client = createLlmClient({ provider, timeoutMs, maxRetries: 0 });
   const startedAt = Date.now();
@@ -183,8 +185,15 @@ export async function runStage3EventRankingLlm(
           break;
         }
 
-        if (attempt <= maxRetries) {
-          await sleep(runtimeConfig.retryDelayMs * attempt);
+        if (
+          await waitForStage3Retry(
+            error,
+            attempt,
+            maxRetries,
+            runtimeConfig.retryDelayMs,
+            options.wait,
+          )
+        ) {
           continue;
         }
       }

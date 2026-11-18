@@ -122,6 +122,7 @@
     "test:fragment-key-references": "tsx scripts/test-fragment-key-references.ts",
     "test:stage3-consolidation": "tsx scripts/test-stage3-consolidation.ts",
     "test:stage3-category-recovery": "tsx scripts/test-stage3-category-recovery.ts",
+    "test:stage3-http-retry": "tsx scripts/test-stage3-http-retry.ts",
     "spike:gmail:review": "tsx spikes/gmail/review-server.ts",
     "test:gmail-review": "tsx spikes/gmail/review.test.ts",
     "spike:gmail:selections": "tsx spikes/gmail/export-source-guidance.ts",

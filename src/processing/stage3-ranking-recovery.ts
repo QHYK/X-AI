@@ -1,6 +1,8 @@
 import type { Pool } from 'pg';
 import { stage3Checkpoints, stage3Hash } from './stage3-progress.js';
 import type { Stage3EventRankingInput, Stage3RankingOutput } from './stage3-contract.js';
+import { sameSystemFragmentSnapshot } from '../lib/prompts/system-fragments.js';
+import type { SystemFragmentSnapshot } from '../lib/prompts/contracts.js';
 
 export async function reusableEventCheckpoint(
   pool: Pool,
@@ -8,10 +10,12 @@ export async function reusableEventCheckpoint(
   hash: string,
   input: Stage3EventRankingInput,
   idMap: Record<string, string[]>,
+  snapshot: SystemFragmentSnapshot,
 ) {
   for (const prior of await stage3Checkpoints(pool, date, 'event_ranking')) {
     const d = prior.detail;
     if (
+      !sameSystemFragmentSnapshot(d.system_fragment_versions, snapshot) ||
       d.input_hash !== hash ||
       d.id_map_hash !== stage3Hash(idMap) ||
       typeof d.review_run_id !== 'string' ||
@@ -58,10 +62,12 @@ export async function reusableLongFormCheckpoint(
   date: string,
   hash: string,
   idMap: Record<string, string>,
+  snapshot: SystemFragmentSnapshot,
 ) {
   for (const prior of await stage3Checkpoints(pool, date, 'long_form_ranking')) {
     const d = prior.detail;
     if (
+      !sameSystemFragmentSnapshot(d.system_fragment_versions, snapshot) ||
       d.input_hash !== hash ||
       d.id_map_hash !== stage3Hash(idMap) ||
       !Array.isArray(d.ranked_ids)

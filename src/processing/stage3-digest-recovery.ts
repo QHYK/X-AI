@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { DIGEST_CATEGORY_KEYS } from '../lib/daily-brief.js';
 import type { SystemFragmentSnapshot } from '../lib/prompts/contracts.js';
+import { sameSystemFragmentSnapshot } from '../lib/prompts/system-fragments.js';
 import type { Stage3DigestRankingInput } from '../prompts/stage3-digest-ranking.js';
 import { validateStage3RankingIntegrity, type Stage3RankingOutput } from './stage3-contract.js';
 import {
@@ -67,13 +68,7 @@ export function stableDigestHash(input: Stage3DigestRankingInput, idMap: Record<
     )
     .digest('hex');
 }
-export function sameFragmentSnapshot(a: unknown, b: unknown) {
-  const keys = ['xfield.identity', 'daily_brief.editorial', 'discover.editorial'];
-  if (!a || !b) return !a && !b;
-  return keys.every(
-    (key) => (a as Record<string, unknown>)[key] === (b as Record<string, unknown>)[key],
-  );
-}
+export const sameFragmentSnapshot = sameSystemFragmentSnapshot;
 // Digest ordered_ids is already converted into id/rank pairs; reason is optional in that stored form.
 const StoredDigestRanking = z.object({
   rankings: z.array(

@@ -25,6 +25,7 @@ import {
   type Stage3DigestRankingInput,
 } from '../prompts/stage3-digest-ranking.js';
 import { resolveStageLlmRuntimeConfig } from './stage-llm-runtime-config.js';
+import { stage3MaxRetries, waitForStage3Retry, type Stage3Wait } from './stage3-http-retry.js';
 
 export type Stage3DigestRankingLlmOptions = {
   provider?: LlmProvider;
@@ -32,6 +33,7 @@ export type Stage3DigestRankingLlmOptions = {
   timeoutMs?: number;
   maxRetries?: number;
   memoryContext?: string;
+  wait?: Stage3Wait;
 };
 
 export type Stage3DigestLlmUsage = {
@@ -129,7 +131,7 @@ export async function runStage3DigestRankingLlm(
     (options.provider ? resolveLlmModel(undefined, provider) : resolveStageLlmModel('stage3'));
   const runtimeConfig = resolveStageLlmRuntimeConfig('stage3');
   const timeoutMs = options.timeoutMs ?? runtimeConfig.timeoutMs;
-  const maxRetries = options.maxRetries ?? runtimeConfig.maxRetries;
+  const maxRetries = stage3MaxRetries(options.maxRetries ?? runtimeConfig.maxRetries);
   const prompt = await productionPrompt(
     'daily.stage3.digest_ranking',
     buildStage3DigestRankingUserPrompt(input, options.memoryContext),
@@ -240,8 +242,15 @@ export async function runStage3DigestRankingLlm(
           break;
         }
 
-        if (attempt <= maxRetries) {
-          await sleep(runtimeConfig.retryDelayMs * attempt);
+        if (
+          await waitForStage3Retry(
+            error,
+            attempt,
+            maxRetries,
+            runtimeConfig.retryDelayMs,
+            options.wait,
+          )
+        ) {
           continue;
         }
       }
