@@ -1,4 +1,12 @@
-import { selectReadMoreSourceText } from './read-more-eligibility.js';
+import {
+  READ_MORE_CONTENT_TEXT_MIN_LENGTH,
+  readMoreTextLength,
+  selectReadMoreSourceText,
+} from './read-more-eligibility.js';
+import { canFetchReadMoreArticle } from './read-more-whitelist.js';
+import { getOrFetchArticle, type ArticleDocument } from './article-fetch-cache.js';
+import { fetchDiscoveryArticle } from '../discovery/fetch-content.js';
+import { extractFirecrawlContent } from '../processing/content-completion.js';
 import { productionPrompt, withPromptBindings, databasePromptBinder } from './prompts/runtime.js';
 /**
  * Read More 的按需服务：优先复用已验证的持久化摘要；缓存未命中时才读取正文并调用 LLM。
@@ -11,10 +19,17 @@ import { createLlmClient, resolveLlmModel, resolveLlmProvider } from '../process
 export type ReadMoreResponse =
   { status: 'success'; summary_zh: string } | { status: 'not_available' };
 type CachedSummaryRow = { summaryZh: string | null };
-type ContentRow = { rawId?: string; fullContentText: string | null; contentText: string | null };
+type ContentRow = {
+  rawId?: string;
+  fullContentText: string | null;
+  contentText: string | null;
+  sourceName?: string | null;
+  url?: string | null;
+};
 export type ReadMoreGenerator = (sourceText: string, signal?: AbortSignal) => Promise<string>;
 
 const READ_MORE_TIMEOUT_MS = Number(process.env.READ_MORE_LLM_TIMEOUT_MS ?? 120_000);
+const READ_MORE_WAIT_TIMEOUT_MS = 180_000;
 
 const readMoreOutputJsonSchema = {
   type: 'object',
@@ -27,7 +42,11 @@ const readMoreOutputJsonSchema = {
 export async function generateReadMoreSummary(
   pool: Pool,
   contentId: string,
-  options: { generate?: ReadMoreGenerator; waitTimeoutMs?: number } = {},
+  options: {
+    generate?: ReadMoreGenerator;
+    fetchDocument?: (url: string) => Promise<ArticleDocument>;
+    waitTimeoutMs?: number;
+  } = {},
 ): Promise<ReadMoreResponse> {
   contentId = contentId.trim().toLowerCase();
   const cachedSummary = await readCachedSummary(pool, contentId);
@@ -40,12 +59,52 @@ export async function generateReadMoreSummary(
       const cachedSummary = await readCachedSummary(client, contentId);
       if (cachedSummary) return { status: 'success', summary_zh: cachedSummary };
       const result = await client.query<ContentRow>(
-        `select ra.id as "rawId", ra.full_content_text as "fullContentText", ra.content_text as "contentText"
+        `select ra.id as "rawId", ra.full_content_text as "fullContentText", ra.content_text as "contentText",
+                ra.url, s.name as "sourceName"
        from processed_contents pc join raw_articles ra on ra.id = pc.raw_article_id
+       join sources s on s.id = ra.source_id
       where pc.id = $1::uuid and pc.routing in ('digest', 'long_form') limit 1`,
         [contentId],
       );
-      const sourceText = result.rows[0] ? selectReadMoreSourceText(result.rows[0]) : null;
+      const row = result.rows[0];
+      let sourceText = row ? selectReadMoreSourceText(row) : null;
+      if (!sourceText && row && canFetchReadMoreArticle(row.sourceName ?? null, row.url ?? null)) {
+        signal.throwIfAborted();
+        const article = await getOrFetchArticle(
+          {
+            query: client.query.bind(client),
+            connect: async () => client,
+          },
+          row.url!,
+          {
+            session: client,
+            sourceContentId: contentId,
+            fetchDocument: () =>
+              options.fetchDocument
+                ? options.fetchDocument(row.url!)
+                : fetchDiscoveryArticle(row.url!, { maxRetries: 0 }),
+          },
+        );
+        signal.throwIfAborted();
+        if (article.status !== 'success')
+          throw new Error(`Read More article fetch failed: ${article.error ?? 'unknown error'}`);
+        if (article.cacheWarning) console.warn('Read More Fetch Cache:', article.cacheWarning);
+        if (
+          article.isComplete &&
+          canFetchReadMoreArticle(row.sourceName ?? null, article.finalUrl)
+        ) {
+          const extraction = extractFirecrawlContent(article.markdown, null);
+          const body = extraction.fullContentText ?? extraction.contentText;
+          const minimumLength =
+            article.origin === 'daily' ? 200 : READ_MORE_CONTENT_TEXT_MIN_LENGTH;
+          if (
+            extraction.contentType === 'article_body' &&
+            body &&
+            readMoreTextLength(body.trim()) >= minimumLength
+          )
+            sourceText = body.trim();
+        }
+      }
       if (!sourceText) return { status: 'not_available' };
 
       const summaryZh = await (options.generate
@@ -60,7 +119,7 @@ export async function generateReadMoreSummary(
                   ({ query: client.query.bind(client), release() {} }) as PoolClient,
               },
               'raw',
-              result.rows[0]!.rawId!,
+              row!.rawId!,
               { fresh: true },
             ),
             () => generateReadMoreWithLlm(sourceText, signal),
@@ -78,7 +137,7 @@ export async function generateReadMoreSummary(
         throw new Error('Read More cache upsert did not return a valid summary.');
       return { status: 'success', summary_zh: persistedSummary };
     },
-    options.waitTimeoutMs,
+    options.waitTimeoutMs ?? READ_MORE_WAIT_TIMEOUT_MS,
   );
 }
 

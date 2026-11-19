@@ -460,6 +460,7 @@ function toBriefContentItem(row: ContentRow): BriefContentItem {
     url: row.url,
     published_at: toIsoString(row.published_at),
     created_at: toIsoString(row.created_at) ?? '',
+    // Legacy API name: this is Read More eligibility, including allowlisted on-demand fetching.
     has_full_content: row.hasFullContent,
     contentLength: row.contentLength,
   };

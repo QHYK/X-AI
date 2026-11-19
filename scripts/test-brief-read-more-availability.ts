@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readMoreAvailabilitySql } from '../src/lib/read-more-eligibility.js';
+import { readMoreFetchWhitelistSql } from '../src/lib/read-more-whitelist.js';
 import type { Pool } from 'pg';
 import { getDailyBriefForDailyDate } from '../src/lib/daily-brief.js';
 
@@ -79,6 +80,9 @@ assert.equal(digestQuery.length, 1, 'Images must not cause per-article queries')
 assert.ok(digestQuery[0].includes('ra.image_url'));
 assert.ok(digestQuery[0].includes('ra.id = pc.raw_article_id'));
 const contentQueries = queries.filter((query) => query.includes('content_read_more'));
+assert.ok(
+  contentQueries.every((query) => query.includes(readMoreFetchWhitelistSql('s.name', 'ra.url'))),
+);
 const contentLengthSql =
   "char_length(coalesce(nullif(ra.full_content_text, ''), nullif(ra.content_text, ''), '')) as \"contentLength\"";
 assert.ok(contentQueries.every((query) => query.includes(contentLengthSql)));

@@ -61,6 +61,7 @@ GET /api/brief?date=YYYY-MM-DD
 ```
 Daily Brief API 按指定日期提供 publish-ready 内容。它读取 Production 数据，不额外创建 `daily_briefs` snapshot 层，并作为 X-AI-field 与 X-field 之间的 Presentation Boundary。
 Digest 和 Long-form 条目包含 `contentLength: number`，优先计算 `raw_articles.full_content_text` 的字符数，否则计算 `raw_articles.content_text` 的字符数；两者均为空时为 `0`，API 不返回正文。
+兼容字段 `has_full_content` 表示可使用 Read More：已有导读或合格正文，以及白名单来源可在点击后按需抓取的文章。因此 `true` 不保证数据库已保存全文，`contentLength` 仍只反映已存文本。
 
 Daily membership、Ranking 与 Composition 的执行语义见 `../06-workflow-spec/daily.md`。
 
@@ -81,7 +82,7 @@ Read More 是匿名按需生成能力，不返回原始正文。缓存唯一键�
 | 生成、数据库或保存失败 | 200，`{status: "temporarily_unavailable"}`，服务端记录错误 |
 | 生成互斥等待超时 | 同上，并含 `reason: "generation_wait_timeout"` |
 
-等待预算默认 130 秒；LLM 使用 `READ_MORE_LLM_TIMEOUT_MS`（默认 120 秒），禁止自动重试。Route 为 Node.js，未声明 `maxDuration`；自托管 Next.js 的代理 / 上游超时须覆盖等待后可能执行的生成与数据库操作，不能将模型超时当作整个 HTTP 的截止时间。跨进程互斥要求所有 Web 实例连接同一数据库并使用直连或 Session Pooling；当前代码不支持 Transaction Pooling。
+等待预算默认 180 秒，以覆盖按需抓取与模型生成；LLM 使用 `READ_MORE_LLM_TIMEOUT_MS`（默认 120 秒），禁止自动重试。Route 为 Node.js，未声明 `maxDuration`；自托管 Next.js 的代理 / 上游超时须覆盖等待后可能执行的生成与数据库操作，不能将模型超时当作整个 HTTP 的截止时间。跨进程互斥要求所有 Web 实例连接同一数据库并使用直连或 Session Pooling；当前代码不支持 Transaction Pooling。
 
 ### 6.3 管理端点边界
 

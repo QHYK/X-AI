@@ -1,4 +1,5 @@
 /** Shared Read More eligibility; no model, database connection or Prompt dependency. */
+import { readMoreFetchWhitelistSql } from './read-more-whitelist.js';
 export const READ_MORE_CONTENT_TEXT_MIN_LENGTH = 3_000;
 
 export type ReadMoreContent = { fullContentText: string | null; contentText: string | null };
@@ -32,5 +33,6 @@ export function readMoreAvailabilitySql(): string {
     ${clean('crm.summary_zh')} <> ''
     or ${clean('ra.full_content_text')} <> ''
     or char_length(${clean('ra.content_text')}) >= ${READ_MORE_CONTENT_TEXT_MIN_LENGTH}
+    or ${readMoreFetchWhitelistSql('s.name', 'ra.url')}
   )`;
 }

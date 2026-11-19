@@ -1,4 +1,4 @@
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { normalizeArticleUrl } from '../processing/url-normalization.js';
 import {
   DiscoveryCoverSchema,
@@ -139,13 +139,17 @@ export async function getOrFetchArticle(
     fetchDocument: () => Promise<ArticleDocument>;
     candidateArticle?: ArticleDocument | null;
     sourceContentId?: string | null;
+    session?: PoolClient;
   },
 ): Promise<ArticleDocument> {
   const normalized = normalizedFetchUrl(url);
   const stored = await readStoredArticle(db, url, options);
   if (stored) return stored;
 
-  const client = await db.connect();
+  // Read More already owns a session-level Singleflight lock. Reuse that session
+  // instead of waiting for a second Pool connection while the first is held.
+  const ownsClient = !options.session;
+  const client = options.session ?? (await db.connect());
   let fetched: ArticleDocument | undefined;
   let releaseError: Error | undefined;
   // Checked-out pg clients have no Pool idle-error handler. An idle transaction can
@@ -210,6 +214,7 @@ export async function getOrFetchArticle(
     throw error; // Cache lookup/lock failures must not trigger an unprotected paid fetch.
   } finally {
     client.off?.('error', connectionLost);
-    client.release(releaseError);
+    if (ownsClient) client.release(releaseError);
+    else if (releaseError) throw releaseError;
   }
 }

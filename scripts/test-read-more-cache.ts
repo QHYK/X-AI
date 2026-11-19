@@ -4,6 +4,11 @@ import { ReadMoreWaitTimeoutError } from '../src/lib/read-more-singleflight.js';
 import type { Pool } from 'pg';
 import { generateReadMoreSummary } from '../src/lib/read-more.js';
 import {
+  canFetchReadMoreArticle,
+  readMoreFetchWhitelistSql,
+} from '../src/lib/read-more-whitelist.js';
+import type { ArticleDocument } from '../src/lib/article-fetch-cache.js';
+import {
   READ_MORE_CONTENT_TEXT_MIN_LENGTH,
   readMoreTextLength,
   selectReadMoreSourceText,
@@ -53,6 +58,22 @@ function lockable(db: { query: (text: string, values?: unknown[]) => Promise<unk
 }
 
 assert.equal(READ_MORE_CONTENT_TEXT_MIN_LENGTH, 3000, 'Formal Spec boundary must not drift');
+assert.equal(
+  canFetchReadMoreArticle('The Guardian 卫报', 'https://www.theguardian.com/world/article'),
+  true,
+);
+assert.equal(
+  canFetchReadMoreArticle('The Guardian 卫报', 'https://eviltheguardian.com/article'),
+  false,
+);
+assert.equal(canFetchReadMoreArticle('The Guardian 卫报', 'https://-bad.theguardian.com/a'), false);
+assert.equal(canFetchReadMoreArticle('Other', 'https://www.theguardian.com/world/article'), false);
+assert.equal(
+  canFetchReadMoreArticle('The Guardian 卫报', 'https://theguardian.com.evil.test/a'),
+  false,
+);
+assert.equal(canFetchReadMoreArticle('The Guardian 卫报', 'https://user@theguardian.com/a'), false);
+assert.ok(readMoreFetchWhitelistSql('s.name', 'ra.url').includes("s.name = 'The Guardian 卫报'"));
 assert.equal(readMoreTextLength('😀'), 1, 'Count code points, not UTF-16 code units');
 const whitespace =
   '\t\n\r\v\f \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
@@ -167,6 +188,201 @@ assert.deepEqual(await generateReadMoreSummary(missingDb, '00000000-0000-4000-80
 });
 console.log(
   'Read More: Spec 3000 boundary, Unicode, whitespace, source priority, partial text, cache and unavailable paths passed.',
+);
+
+// Fetch is available only after a click. The current Singleflight client also performs
+// URL cache reads/writes, so a one-connection Pool never waits for itself.
+const guardianUrl = 'https://www.theguardian.com/world/2026/nov/19/example';
+const fullArticle = `# Guardian article\n\n${'Complete reporting with context. '.repeat(125)}`;
+const guideCache = new Map<string, string>();
+let fetchedCache: {
+  original_url: string;
+  final_url: string;
+  fetched_at: string;
+  markdown: string;
+  is_complete: boolean;
+  metadata: Record<string, unknown>;
+} | null = null;
+let sourceRow = {
+  rawId: '00000000-0000-4000-8000-0000000000d1',
+  fullContentText: null as string | null,
+  contentText: 'Short feed excerpt',
+  sourceName: 'The Guardian 卫报',
+  url: guardianUrl,
+};
+const fetchDb = lockable({
+  query: async (text: string, values?: unknown[]) => {
+    if (text.includes('select summary_zh')) {
+      const summaryZh = guideCache.get(String(values?.[0]));
+      return { rows: summaryZh ? [{ summaryZh }] : [] };
+    }
+    if (text.includes('from raw_articles ra join sources')) return { rows: [] };
+    if (text.includes('from processed_contents')) return { rows: [sourceRow] };
+    if (text.includes('from discovery_fetch_cache'))
+      return { rows: fetchedCache?.is_complete ? [fetchedCache] : [] };
+    if (
+      text === 'begin' ||
+      text === 'commit' ||
+      text === 'rollback' ||
+      text.startsWith('set local')
+    )
+      return { rows: [] };
+    if (text.includes('pg_advisory_xact_lock')) return { rows: [] };
+    if (text.includes('insert into discovery_fetch_cache')) {
+      fetchedCache = {
+        original_url: String(values?.[2]),
+        final_url: String(values?.[3]),
+        fetched_at: String(values?.[4]),
+        markdown: String(values?.[5]),
+        is_complete: values?.[6] === true,
+        metadata: JSON.parse(String(values?.[7])),
+      };
+      return { rows: [] };
+    }
+    if (text.includes('insert into content_read_more')) {
+      guideCache.set(String(values?.[0]), String(values?.[1]));
+      return { rows: [{ summaryZh: values?.[1] }] };
+    }
+    throw new Error(`Unexpected Read More fetch SQL: ${text}`);
+  },
+});
+const fetchedDocument = (complete = true): ArticleDocument => ({
+  url: guardianUrl,
+  finalUrl: guardianUrl,
+  fetchedAt: new Date().toISOString(),
+  status: 'success',
+  markdown: fullArticle,
+  isComplete: complete,
+  metadata: {},
+  coverImage: null,
+  error: null,
+  origin: 'fetch',
+});
+let fetchCalls = 0;
+let generatedCalls = 0;
+const newId = (suffix: string) => `00000000-0000-4000-8000-0000000000${suffix}`;
+const fetched = await generateReadMoreSummary(fetchDb, newId('d2'), {
+  fetchDocument: async () => {
+    fetchCalls++;
+    assert.equal(fetchDb.sessions.size, 1, 'Fetch must reuse the Singleflight session');
+    return fetchedDocument();
+  },
+  generate: async (text) => {
+    generatedCalls++;
+    assert.ok(text.includes('Complete reporting with context.'));
+    return 'Guardian detailed guide';
+  },
+});
+assert.deepEqual(fetched, { status: 'success', summary_zh: 'Guardian detailed guide' });
+assert.equal(fetchCalls, 1);
+assert.equal(generatedCalls, 1);
+assert.deepEqual(
+  await generateReadMoreSummary(fetchDb, newId('d2'), {
+    fetchDocument: async () => {
+      throw new Error('Cached guide must not fetch');
+    },
+    generate: async () => {
+      throw new Error('Cached guide must not generate');
+    },
+  }),
+  fetched,
+);
+assert.equal(fetchCalls, 1);
+assert.equal(generatedCalls, 1);
+assert.equal(
+  (
+    await generateReadMoreSummary(fetchDb, newId('d3'), {
+      fetchDocument: async () => {
+        throw new Error('The URL cache must prevent another fetch');
+      },
+      generate: async () => 'Second guide',
+    })
+  ).status,
+  'success',
+);
+sourceRow = { ...sourceRow, fullContentText: 'Already stored full text' };
+assert.equal(
+  (
+    await generateReadMoreSummary(fetchDb, newId('d4'), {
+      fetchDocument: async () => {
+        throw new Error('Stored body must prevent fetch');
+      },
+      generate: async (text) => {
+        assert.equal(text, 'Already stored full text');
+        return 'Stored guide';
+      },
+    })
+  ).status,
+  'success',
+);
+sourceRow = { ...sourceRow, fullContentText: null };
+fetchedCache = null;
+assert.deepEqual(
+  await generateReadMoreSummary(fetchDb, newId('d5'), {
+    fetchDocument: async () => {
+      fetchCalls++;
+      return fetchedDocument(false);
+    },
+    generate: async () => {
+      throw new Error('Incomplete body must not generate');
+    },
+  }),
+  { status: 'not_available' },
+);
+fetchedCache = null;
+assert.deepEqual(
+  await generateReadMoreSummary(fetchDb, newId('d8'), {
+    fetchDocument: async () => ({
+      ...fetchedDocument(),
+      finalUrl: 'https://other.example/article',
+    }),
+    generate: async () => {
+      throw new Error('Off-host redirect must not generate');
+    },
+  }),
+  { status: 'not_available' },
+);
+fetchedCache = null;
+assert.deepEqual(
+  await generateReadMoreSummary(fetchDb, newId('d9'), {
+    fetchDocument: async () => ({
+      ...fetchedDocument(),
+      markdown: `# Summary\n\n${'Excerpt. '.repeat(500)}`,
+    }),
+    generate: async () => {
+      throw new Error('Summary section must not become a full article');
+    },
+  }),
+  { status: 'not_available' },
+);
+fetchedCache = null;
+await assert.rejects(
+  generateReadMoreSummary(fetchDb, newId('d6'), {
+    fetchDocument: async () => {
+      fetchCalls++;
+      return { ...fetchedDocument(), status: 'error', error: 'HTTP 503' };
+    },
+    generate: async () => {
+      throw new Error('Failed fetch must not generate');
+    },
+  }),
+  /Read More article fetch failed: HTTP 503/,
+);
+sourceRow = { ...sourceRow, sourceName: 'Other source' };
+assert.deepEqual(
+  await generateReadMoreSummary(fetchDb, newId('d7'), {
+    fetchDocument: async () => {
+      throw new Error('Non-whitelisted source must not fetch');
+    },
+    generate: async () => {
+      throw new Error('No sufficient body');
+    },
+  }),
+  { status: 'not_available' },
+);
+assert.equal(fetchDb.sessions.size, 0);
+console.log(
+  'Read More allowlist: cache, stored body, on-demand fetch, incomplete/error and source isolation passed.',
 );
 
 const id = '00000000-0000-4000-8000-00000000000a';
