@@ -1,3 +1,4 @@
+import { StandaloneOpenContextSchema, type OpenDiscoveryContext } from './open-context.js';
 import { captureSystemFragments } from '../lib/prompts/system-fragments.js';
 // D2-5
 // 管理 Discovery Run 的创建、状态更新、恢复及数据库操作
@@ -53,18 +54,23 @@ export type CreateRegularDiscoveryRunResult = {
   missingDailyDates: string[];
 };
 
-/** Creates an isolated, manually requested Open Discovery child Run. */
+/** Creates an isolated, manually requested Open Discovery Run. */
 export async function createOpenDiscoveryRun(
   pool: Pick<Pool, 'query'>,
   input: {
-    parentRunId: string;
+    parentRunId?: string;
+    openContext?: OpenDiscoveryContext;
     manualContext?: string;
     triggerSource: 'manual';
     configSnapshot?: Record<string, unknown>;
   },
 ): Promise<DiscoveryRunRecord> {
-  const parent = await getDiscoveryRun(pool, input.parentRunId);
-  if (!parent || parent.runType !== 'regular') {
+  const standalone = input.openContext?.kind === 'standalone';
+  if (standalone) StandaloneOpenContextSchema.parse(input.openContext);
+  const parentId =
+    input.openContext?.kind === 'linked' ? input.openContext.parentRunId : input.parentRunId;
+  const parent = !standalone && parentId ? await getDiscoveryRun(pool, parentId) : null;
+  if (!standalone && (!parent || parent.runType !== 'regular')) {
     throw new Error('Manual Open Discovery requires an existing Regular parent Run.');
   }
   const context = input.manualContext?.trim() || null;
@@ -75,15 +81,16 @@ export async function createOpenDiscoveryRun(
         $1::uuid, 'open', $2, 'pending', $3::jsonb, $4::date, $5::date
       ) returning ${DISCOVERY_RUN_COLUMNS}`,
     [
-      input.parentRunId,
+      standalone ? null : parentId,
       input.triggerSource,
       JSON.stringify({
         ...input.configSnapshot,
+        ...(standalone ? { openContext: input.openContext } : {}),
         systemFragmentVersions: await captureSystemFragments(pool),
         ...(context ? { manualOpen: { context } } : {}),
       }),
-      parent.windowStartDate,
-      parent.windowEndDate,
+      parent?.windowStartDate ?? null,
+      parent?.windowEndDate ?? null,
     ],
   );
   const row = result.rows[0];

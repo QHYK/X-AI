@@ -602,3 +602,9 @@ Discovery Run 的正式恢复边界见 `06-workflow-spec/discovery.md` §8.3。�
 
 
 Dashboard Runtime 查看要求 Web 与 CLI 能访问同一项目的 `runtime/` 文件系统（部署时须保留或共享对应目录）。只有数据库中的 `runtime_dir` 不能恢复已删除或另一台机器上的文件。升级后新 Attempt 记录路径；旧 Attempt 的定位限制与只读接口见 [Runtime Files](04-technical-spec/admin-api.md#runtime-files)。无 Migration、无需回填历史数据。上述 Runtime 回归使用临时文件、Mock DB 和 JSDOM，不访问远程数据库或模型。
+
+### 独立 Content Discovery 部署与恢复
+
+部署前通过既有 `npm run db:migrate` 应用 `0031_standalone_discovery.sql`，仅更新 Run 关系 CHECK；不需要回填。部署 Web 与 Discovery Worker 后访问 `/ai/content-discovery`。独立任务使用既有 `npm run discovery:worker`，多个主题排队串行执行。
+
+失败 / partial Run 使用 `npm run discovery -- --run-id=UUID --confirm-paid` 显式恢复；CLI 遗留 running Run 使用同一命令增加 `--recover-interrupted`。先确认 Run ID 与原始输入；Resume 读取原 Run 快照，不使用页面当前输入。Worker 遗留 running 会在重新取得执行锁后标为 failed，不自动付费重试。

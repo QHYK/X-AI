@@ -1,3 +1,4 @@
+import { StandaloneOpenContextSchema } from './open-context.js';
 import { withPromptBindings, databasePromptBinder } from '../lib/prompts/runtime.js';
 import { productionPrompt } from '../lib/prompts/runtime.js';
 import { InDepthCategorySchema, parseAiCategory } from '../lib/in-depth-category.js';
@@ -421,6 +422,14 @@ async function persistDiscoveryD5Config(
 }
 
 function readManualOpenContext(snapshot: Record<string, unknown> | null): string | undefined {
+  if (snapshot?.openContext) {
+    const context = StandaloneOpenContextSchema.parse(snapshot.openContext);
+    return JSON.stringify({
+      contextPriority:
+        'Research context only; editorial standards, tool constraints, output schema, validation and deduplication remain authoritative.',
+      ...context,
+    });
+  }
   const value = snapshot?.manualOpen;
   return value &&
     typeof value === 'object' &&

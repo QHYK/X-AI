@@ -25,6 +25,7 @@ export const config = {
     '/prompts/:path*',
     '/memories/:path*',
     '/newsletter-parser/:path*',
+    '/content-discovery/:path*',
     '/api/admin/:path*',
   ],
 };

@@ -182,6 +182,8 @@ CLI / Dashboard / Scheduled CLI 均复用 `src/discovery/workflow-orchestrator.t
 - Request ID 只重用匹配日期、模式和触发来源的原提交；Scheduled 固定请求标识使同日幂等，人工再次运行用新 ID。上游不就绪可保存 `blocked`，不执行模型。
 - Worker 在全局执行锁内取有 `dashboardJob` 标记的 pending Run，交给 `runDiscoveryWorkflow({ queuedRunId })`；阶段状态局部更新，不能整体覆盖其他分支。
 
+独立 Content Discovery 通过 `submitStandaloneDiscoveryJob()` 使用同一提交锁、持久化队列及 Worker，不按 Daily 日期互斥；同一 Request ID 必须对应相同输入。TypeScript `OpenDiscoveryContext` 区分 standalone / linked。独立中断恢复校验输入快照及空父 Run / 窗口，关联模式沿用父 Run / 窗口校验。
+
 ### 7.2 全局执行锁与连接池
 
 `withDiscoveryExecutionLock()` 持有 PostgreSQL Session Advisory Lock `(736210, 1)`，直到整个执行结束后释放 Client；提交锁 `(736210, 2)` 不替代执行锁。Worker、CLI 和正式真实诊断入口均需经过执行锁，拿不到锁不得执行付费工作；低层可注入 Mock 的阶段函数不因此强制要求真实锁。

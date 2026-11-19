@@ -10,6 +10,7 @@ import ts from 'typescript';
 import type { Pool } from 'pg';
 import {
   submitDiscoveryJob,
+  submitStandaloneDiscoveryJob,
   processNextDiscoveryJob,
   withDiscoveryExecutionLock,
 } from '../src/discovery/background-jobs.js';
@@ -467,3 +468,57 @@ assert.equal(
 );
 assert.equal(databaseAccesses, 3, 'Unauthorized handlers do not acquire a database Pool.');
 console.log('Dashboard Retry/Polling shared Pool lifetime and server auth passed.');
+
+const standaloneServices = {
+  ...services,
+  createOpenDiscoveryRun: (async (
+    _db: unknown,
+    input: { openContext: Record<string, unknown>; configSnapshot: Record<string, unknown> },
+  ) => {
+    const result = create('open', [null, null] as never, {
+      ...input.configSnapshot,
+      openContext: input.openContext,
+    });
+    return result;
+  }) as never,
+};
+const standaloneInput = {
+  requestId: 'standalone-1',
+  researchTopic: '独立研究',
+  referenceUrl: 'https://example.com',
+  instructions: '研究背景',
+};
+const results = await Promise.all(
+  Array.from({ length: 4 }, () =>
+    submitStandaloneDiscoveryJob(db, standaloneInput, standaloneServices),
+  ),
+);
+assert.equal(new Set(results.map((r) => r.id)).size, 1);
+assert.equal(results[0].parentRunId, null);
+assert.equal(results[0].windowEndDate, null);
+await assert.rejects(
+  submitStandaloneDiscoveryJob(
+    db,
+    { ...standaloneInput, researchTopic: 'changed' },
+    standaloneServices,
+  ),
+  /Request ID/,
+);
+const independent = await submitStandaloneDiscoveryJob(
+  db,
+  {
+    ...standaloneInput,
+    requestId: 'standalone-2',
+    researchTopic: '另一个主题',
+    instructions: null,
+  },
+  standaloneServices,
+);
+assert.notEqual(independent.id, results[0].id);
+assert.equal(
+  (independent.configSnapshot?.openContext as { instructions: unknown }).instructions,
+  null,
+);
+console.log(
+  'Standalone no-parent submission, concurrent idempotency, queued different topics and isolated inputs passed.',
+);

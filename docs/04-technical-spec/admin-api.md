@@ -218,3 +218,11 @@ Dashboard 的具体 UI Layout 与交互细节以实现为准，不在 Technical 
 - 新增行默认值由共享 Schema 定义；新增 / 编辑可以取消，失败保留输入。非编辑状态的 Enabled Checkbox 禁用；Edit 后与其他字段一起修改，Submit 一起保存，Cancel 放弃全部修改，提交失败保留全部输入。请求期间禁用重复提交；保存成功重新读取当前筛选列表，以数据库排序为准。保存已成功但列表刷新失败时明确提示刷新，不误报为未保存。
 
 无删除、批量操作或版本管理。实现入口为 `src/lib/memory-contracts.ts`、`src/lib/memories.ts` 与 `src/app/(admin)/memories/`；部署前提见 [Operations](../09-operations.md#25-memory-管理部署)。
+
+### Content Discovery
+
+Administration 下 `/content-discovery`提供独立 D5 表单、运行状态、阶段与用量、候选及现有审核入口、分页历史。沿用管理员 Session、同源校验及付费确认。
+
+`POST /api/admin/discovery` 增加 `{mode:"standalone", researchTopic, referenceUrl:null|string, instructions:null|string, requestId, confirmPaid:true}`。主题 1–16000 字符，指令最多 8000 字符，参考 URL 最多 2048 字符且仅 HTTP(S)。提交返回 202；Request ID 输入冲突为 409。旧模式契约保留。
+
+`GET ?id=UUID` 增加 executionState、endReason、candidates、input；`GET ?history=standalone&offset=0` 每页最多 20 条独立记录，按创建时间与 ID 倒序，不依赖业务日期。均为管理端只读查询，无模型调用。

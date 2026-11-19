@@ -24,6 +24,7 @@ export const adminNavigation: readonly AdminNavigationGroup[] = [
     label: 'Administration',
     items: [
       { label: 'Prompt Management', href: '/prompts' },
+      { label: 'Content Discovery', href: '/content-discovery' },
       { label: 'Memory', href: '/memories' },
       { label: 'Newsletter Parser', href: '/newsletter-parser' },
     ],

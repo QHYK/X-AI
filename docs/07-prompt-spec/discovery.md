@@ -283,7 +283,7 @@ Key：`discovery.d5.open_discovery`；Shared Fragments：`shared.discovery.edito
 }
 ```
 
-`memory` 使用当次 Run 配置中的显式 Memory，缺省为 `null`；`manualContext` 去除首尾空白后传入，未提供或为空时为 `null`。不传 Topic Lead、窗口或父 Run ID，这些关联由执行层管理。
+`memory` 使用当次 Run 配置中的显式 Memory，缺省为 `null`；独立研究时 `manualContext` 为原 Run 的 `openContext` JSON 序列化字符串，包含 `kind`、`researchTopic`、`referenceUrl`、`instructions` 和低优先级研究上下文说明，不改变 Prompt 核心编辑标准与输出 Schema。`manualContext` 去除首尾空白后传入，未提供或为空时为 `null`。不传 Topic Lead、窗口或父 Run ID，这些关联由执行层管理。
 
 编辑标准、适用的显式 Memory，以及仅人工 Open 适用的可选补充方向；不要求 Knowledge Question。自动 / 人工触发、父子 Run 关联和候选保留规则见 `../06-workflow-spec/discovery.md` §6、§8，本节不重新定义触发条件。
 

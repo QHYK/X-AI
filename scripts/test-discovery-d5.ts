@@ -83,7 +83,16 @@ async function testD5Persistence() {
   };
   const run = async (db: D5Database, output = [candidate], fetches = [fetch]) =>
     runDiscoveryD5(db as unknown as import('pg').Pool, db.run.id, {
-      runtime: async () => {
+      runtime: async (input) => {
+        const context = (db.run.config_snapshot as Record<string, unknown>).openContext as
+          { researchTopic: string; referenceUrl: string; instructions: string } | undefined;
+        if (context) {
+          const passed = JSON.parse(input.manualContext!);
+          assert.equal(passed.researchTopic, context.researchTopic);
+          assert.equal(passed.referenceUrl, context.referenceUrl);
+          assert.equal(passed.instructions, context.instructions);
+          assert.equal(input.memory, null);
+        }
         db.calls++;
         return {
           output: { candidates: output },
@@ -95,6 +104,22 @@ async function testD5Persistence() {
         };
       },
     });
+  const standalone = new D5Database();
+  Object.assign(standalone.run, {
+    parent_run_id: null,
+    window_start_date: null,
+    window_end_date: null,
+  });
+  Object.assign(standalone.run.config_snapshot, {
+    openContext: {
+      kind: 'standalone',
+      researchTopic: '研究',
+      referenceUrl: 'https://example.com',
+      instructions: '补充',
+    },
+  });
+  await run(standalone);
+  assert.equal(standalone.review.size, 1);
   const db = new D5Database();
   const good = await run(db);
   assert.equal(good.selectedCount, 1);

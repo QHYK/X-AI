@@ -1,3 +1,4 @@
+import { StandaloneOpenContextSchema } from './open-context.js';
 import { canRetryDiscoveryD2 } from '../lib/discovery-d2-retry.js';
 import type { Pool } from 'pg';
 import { discoveryDatesForEndDate } from '../lib/discovery-window.js';
@@ -247,7 +248,16 @@ async function recoverInterruptedRun(pool: Pool, runId: string): Promise<void> {
         'Cannot recover malformed persisted D2 leads; inspect this Run before making paid requests.',
       );
   }
-  if (!run.windowStartDate || !run.windowEndDate || (run.runType === 'open' && !run.parentRunId)) {
+  const standalone =
+    run.runType === 'open' &&
+    !run.parentRunId &&
+    StandaloneOpenContextSchema.safeParse(run.configSnapshot?.openContext).success &&
+    !run.windowStartDate &&
+    !run.windowEndDate;
+  if (
+    !standalone &&
+    (!run.windowStartDate || !run.windowEndDate || (run.runType === 'open' && !run.parentRunId))
+  ) {
     throw new Error(
       'Interrupted Run is missing its execution context; inspect stored Run data before recovery.',
     );
@@ -301,4 +311,69 @@ export async function processNextDiscoveryJob(
     return true;
   });
   return result ?? false;
+}
+
+/** Independent submissions queue behind the same global Worker execution lock. */
+export async function submitStandaloneDiscoveryJob(
+  pool: Pool,
+  input: {
+    requestId: string;
+    researchTopic: string;
+    referenceUrl: string | null;
+    instructions: string | null;
+  },
+  services = submissionServices,
+) {
+  const context = {
+    kind: 'standalone' as const,
+    researchTopic: input.researchTopic,
+    referenceUrl: input.referenceUrl,
+    instructions: input.instructions,
+  };
+  const client = await pool.connect();
+  let releaseError: Error | undefined;
+  try {
+    await client.query('begin');
+    await client.query("set local lock_timeout = '5s'");
+    await client.query('select pg_advisory_xact_lock(736210, 2)');
+    const repeated = await client.query<{ id: string }>(
+      `select id from discovery_runs where config_snapshot->'dashboardJob'->>'requestId' = $1`,
+      [input.requestId],
+    );
+    if (repeated.rows[0]) {
+      const run = await services.getDiscoveryRun(client, repeated.rows[0].id);
+      const old = run?.configSnapshot?.openContext as typeof context | undefined;
+      if (
+        !run ||
+        run.runType !== 'open' ||
+        run.parentRunId ||
+        !old ||
+        old.kind !== context.kind ||
+        old.researchTopic !== context.researchTopic ||
+        old.referenceUrl !== context.referenceUrl ||
+        old.instructions !== context.instructions
+      )
+        throw new DiscoveryJobConflict('Request ID already belongs to another request.');
+      await client.query('commit');
+      return run;
+    }
+    const run = await services.createOpenDiscoveryRun(client, {
+      triggerSource: 'manual',
+      openContext: context,
+      configSnapshot: { dashboardJob: { requestId: input.requestId } },
+    });
+    await client.query('commit');
+    return run;
+  } catch (error) {
+    try {
+      await client.query('rollback');
+    } catch (rollbackError) {
+      releaseError =
+        rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+      throw new AggregateError([error, rollbackError], 'Standalone submission rollback failed.');
+    }
+    throw error;
+  } finally {
+    client.release(releaseError);
+  }
 }

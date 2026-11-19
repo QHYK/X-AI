@@ -379,7 +379,7 @@ export const discoveryRuns = pgTable(
       sql`(
         (${table.runType} = 'regular' and ${table.parentRunId} is null and ${table.sourceLeadId} is null)
         or (${table.runType} = 'single_lead' and ${table.parentRunId} is not null and ${table.sourceLeadId} is not null)
-        or (${table.runType} = 'open' and ${table.parentRunId} is not null and ${table.sourceLeadId} is null)
+        or (${table.runType} = 'open' and ${table.sourceLeadId} is null)
       )`,
     ),
     check(

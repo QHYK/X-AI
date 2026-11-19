@@ -218,6 +218,13 @@
       "when": 1794355200000,
       "tag": "0030_event_memory",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795046400000,
+      "tag": "0031_standalone_discovery",
+      "breakpoints": true
     }
   ]
 }

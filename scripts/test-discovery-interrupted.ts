@@ -234,3 +234,28 @@ assert.ok(released >= 8);
 console.log(
   'Explicit CLI interrupted recovery: lock refusal/release, completed-step reuse, Open Resume and ambiguous-state rejection passed.',
 );
+
+stored = row();
+stored.run_type = 'open';
+stored.parent_run_id = null;
+Object.assign(stored, { window_start_date: null, window_end_date: null });
+stored.selection_output = null;
+stored.execution_state = { d5: state('running') };
+stored.config_snapshot.openContext = {
+  kind: 'standalone',
+  researchTopic: '原始研究',
+  referenceUrl: null,
+  instructions: null,
+};
+await invoke(args);
+assert.equal(stored.status, 'completed');
+assert.equal(
+  (stored.config_snapshot.openContext as { researchTopic: string }).researchTopic,
+  '原始研究',
+);
+stored.status = 'running';
+stored.config_snapshot.openContext = { kind: 'standalone', researchTopic: '' };
+const beforeInvalidStandalone = paidSteps;
+await assert.rejects(invoke(args), /missing its execution context/);
+assert.equal(paidSteps, beforeInvalidStandalone);
+console.log('Standalone interrupted recovery preserves inputs and rejects malformed snapshots.');

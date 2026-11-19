@@ -1,0 +1,44 @@
+.page {
+  max-width: 1100px;
+  padding: 32px;
+  color: var(--foreground, #222);
+}
+.form {
+  display: grid;
+  gap: 18px;
+  margin: 24px 0;
+}
+.form label {
+  display: grid;
+  gap: 8px;
+}
+.form textarea,
+.form input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font: inherit;
+  box-sizing: border-box;
+}
+.page button {
+  cursor: pointer;
+  padding: 8px 14px;
+}
+.page button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.page pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #f4f4f4;
+  padding: 16px;
+}
+.page section {
+  margin-top: 32px;
+}
+.page article {
+  border-top: 1px solid #ddd;
+  padding: 16px 0;
+}

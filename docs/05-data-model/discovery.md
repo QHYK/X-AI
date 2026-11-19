@@ -4,12 +4,12 @@ Run、Trace、候选、审核队列与正文 Cache 均已有 Schema / Migration�
 
 ## `discovery_runs`
 
-每次独立执行创建 Run；人工补充 Open Discovery 创建子 Run，并通过 `parent_run_id` 关联原 Regular Run。Planned 的单条 Lead 执行沿用该父子设计，当前没有执行入口。自动 Fallback Open 若属于 Regular Run 的内部执行阶段，不额外创建子 Run。相同输入允许不同输出。
+每次独立执行创建 Run；关联式人工 Open 通过 `parent_run_id` 关联原 Regular Run，独立 Content Discovery 无父 Run。Planned 的单条 Lead 执行沿用该父子设计，当前没有执行入口。自动 Fallback Open 若属于 Regular Run 的内部执行阶段，不额外创建子 Run。相同输入允许不同输出。
 
 | Field | Type | Constraint / Notes |
 |---|---|---|
 | `id` | uuid | Primary Key |
-| `parent_run_id` | uuid | nullable, FK → `discovery_runs.id`；`single_lead` 或人工补充 `open` 时指向原 `regular` Run；不得等于自身 `id` |
+| `parent_run_id` | uuid | nullable, FK → `discovery_runs.id`；`single_lead` 或关联式 `open` 时指向原 `regular` Run；不得等于自身 `id` |
 | `source_lead_id` | text | nullable；仅 `single_lead` 填写，引用父 Run 的 `selection_output.leads[].leadId`（应用层校验） |
 | `run_type` | text | NOT NULL；`regular` / `single_lead` / `open` |
 | `trigger_source` | text | NOT NULL；`schedule` / `manual` |
@@ -31,7 +31,7 @@ Run、Trace、候选、审核队列与正文 Cache 均已有 Schema / Migration�
   - `regular`：`parent_run_id` 与 `source_lead_id` 均为 NULL；独立重新执行即使输入窗口相同也创建新的无父 Run，不自动建立父子关系。
   - `single_lead`：`parent_run_id` 与 `source_lead_id` 均为 NOT NULL；父 Run 类型及 Lead 归属是应用约束，不是该组合 CHECK 的验证内容。
   - `open`：`source_lead_id` 为 NULL；人工补充执行时 `parent_run_id` 为 NOT NULL，并由应用确认指向原 `regular` Run，并保存继承的 `window_start_date` / `window_end_date`。自动 Fallback Open 作为 `regular` Run 的内部阶段执行，不创建 `run_type = 'open'` 的子 Run。
-- 使用 CHECK 约束上述空值组合：`regular` 只能是无父 Run，`single_lead` 必须同时提供父 Run 和 Lead，独立的 `open` Run 必须提供父 Run 且不能提供 Lead。
+- 使用 CHECK 约束上述空值组合：`regular` 只能是无父 Run，`single_lead` 必须同时提供父 Run 和 Lead，`open` Run 不得提供 Lead，允许无父 Run 的独立研究执行。
 - `CHECK(parent_run_id IS NULL OR parent_run_id <> id)` 防止 Run 自引用；父 Run 的类型与 Lead 归属由应用层验证。
 - 日期字段记录**计划输入窗口**，不从实际执行时间推导；`input_content_ids` 记录当次选入的 Event / Digest / Long-form 内容成员 ID，避免复制 Daily 正文。当前没有 `input_snapshot`，不得将成员 ID 记录视为完整模型输入文本快照。
 - 上游 Daily 未就绪可记录 `blocked` 和 `upstream_not_ready`，不冒充已完成 Discovery。
@@ -52,6 +52,8 @@ Run、Trace、候选、审核队列与正文 Cache 均已有 Schema / Migration�
 
 `status` / `end_reason` 的允许值分别有 CHECK，但数据库不强制二者组合、Lead 数量或父 Run 类型，也没有同窗口唯一索引。
 
+独立 Content Discovery 使用 `run_type=open`、NULL 父 Run / 日期窗口 / D2 输入，`config_snapshot.openContext` 保存 `{kind: standalone, researchTopic, referenceUrl, instructions}`。
+
 ### 索引与数据库约束
 
 - `discovery_runs_parent_run_id_idx`：INDEX (`parent_run_id`)。
@@ -70,7 +72,7 @@ CHECK ("status" in ('pending', 'running', 'completed', 'partial', 'failed', 'blo
 -- discovery_runs_end_reason_check
 CHECK ("end_reason" is null or "end_reason" in ('candidates_found', 'no_candidates', 'timeout', 'budget_exhausted', 'upstream_not_ready', 'error'));
 -- discovery_runs_relationship_check
-CHECK (( ("run_type" = 'regular' and "parent_run_id" is null and "source_lead_id" is null) or ("run_type" = 'single_lead' and "parent_run_id" is not null and "source_lead_id" is not null) or ("run_type" = 'open' and "parent_run_id" is not null and "source_lead_id" is null) ));
+CHECK (( ("run_type" = 'regular' and "parent_run_id" is null and "source_lead_id" is null) or ("run_type" = 'single_lead' and "parent_run_id" is not null and "source_lead_id" is not null) or ("run_type" = 'open' and "source_lead_id" is null) ));
 -- discovery_runs_parent_not_self_check
 CHECK ("parent_run_id" is null or "parent_run_id" <> "id");
 -- discovery_runs_window_check
