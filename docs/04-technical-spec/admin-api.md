@@ -146,6 +146,8 @@ Analytics 的 Ignored Articles 提供 Put Back，调用 `POST /api/admin/dashboa
 - 调整 Display Order；
 - 保存 Ranking Feedback。
 
+提供 Load more / 失败重试按钮。首屏及 `GET /api/admin/review/in-depth?status=...&cursor=...` 每批最多返回 20 篇及 `nextCursor`。
+
 In-depth Review 区分客观元数据、Agent 诊断与可编辑 Editorial；Discovery Path、处理阶段、Candidate ID 与 Run ID 不混用。Tags / Cover 缺失保持历史兼容，不影响审核。字段见 [Data Model](../05-data-model/discovery.md#discovery_candidates)，Source 规则见 [Discovery §5.1](discovery.md#51-candidate-source-归一化)；具体布局以页面实现为准。
 
 #### Event Publish

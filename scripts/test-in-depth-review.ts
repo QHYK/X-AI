@@ -1,3 +1,5 @@
+import './test-in-depth-review-scroll.js';
+import './test-in-depth-review-pagination.js';
 import assert from 'node:assert/strict';
 import { readDiscoveryContentEvidence } from '../src/lib/discovery-content-metadata.js';
 import type { Pool } from 'pg';

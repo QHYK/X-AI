@@ -295,3 +295,34 @@
   max-height: 32rem;
   overflow-y: auto;
 }
+
+/* Review-only scroll panes; shared cards elsewhere keep their natural height. */
+.inDepthGrid {
+  height: max(420px, calc(100dvh - 260px));
+  align-items: stretch;
+}
+.inDepthListPane,
+.inDepthGrid > .inDepthDetail {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+}
+.inDepthListPane {
+  min-width: 0;
+}
+.inDepthListPane .inDepthActions {
+  margin-top: 12px;
+}
+@media (max-width: 800px) {
+  .inDepthGrid {
+    height: auto;
+  }
+  .inDepthListPane {
+    max-height: 45dvh;
+  }
+  .inDepthGrid > .inDepthDetail {
+    max-height: 75dvh;
+  }
+}

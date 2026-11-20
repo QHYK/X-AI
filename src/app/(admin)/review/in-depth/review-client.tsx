@@ -9,7 +9,7 @@ import {
 import { ManualCandidateForm, SavedArticleContent } from './manual-candidate-form.js';
 
 import { resolveDiscoveryPublication, discoveryEvidenceMetadata } from '@/lib/discovery-source.js';
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation.js';
 import {
   readDiscoveryContentMetadata,
@@ -26,6 +26,7 @@ const STATUSES: InDepthReviewStatus[] = ['pending', 'approved', 'rejected'];
 
 export function InDepthReviewClient(props: {
   initialItems: InDepthReviewItem[];
+  initialNextCursor?: string | null;
   status: InDepthReviewStatus;
 }) {
   const [items, setItems] = useState(props.initialItems);
@@ -40,6 +41,63 @@ export function InDepthReviewClient(props: {
   const selectionRequest = useRef(0);
   const selectedId = useRef(selected?.id);
 
+  const [nextCursor, setNextCursor] = useState(props.initialNextCursor ?? null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const listPane = useRef<HTMLDivElement>(null);
+  const sentinel = useRef<HTMLDivElement>(null);
+  const loadingLock = useRef(false);
+  const detailPane = useRef<HTMLElement>(null);
+
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingLock.current) return;
+    loadingLock.current = true;
+    setLoadingMore(true);
+    setLoadError(null);
+    try {
+      const response = await fetch(
+        `${apiUrl()}?status=${props.status}&cursor=${encodeURIComponent(nextCursor)}`,
+        { cache: 'no-store' },
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? 'Failed to load candidates.');
+      setItems((current) => {
+        const ids = new Set(current.map((item) => item.id));
+        return [
+          ...current,
+          ...data.items.filter((item: InDepthReviewItem) => {
+            if (ids.has(item.id)) return false;
+            ids.add(item.id);
+            return true;
+          }),
+        ];
+      });
+      setNextCursor(data.nextCursor);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Failed to load candidates.');
+    } finally {
+      loadingLock.current = false;
+      setLoadingMore(false);
+    }
+  }, [nextCursor, props.status]);
+  useEffect(() => {
+    if (
+      !nextCursor ||
+      loadError ||
+      !sentinel.current ||
+      typeof IntersectionObserver === 'undefined'
+    )
+      return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void loadMore();
+      },
+      { root: listPane.current, rootMargin: '120px' },
+    );
+    observer.observe(sentinel.current);
+    return () => observer.disconnect();
+  }, [nextCursor, loadError, loadMore]);
+
   async function selectItem(id: string) {
     if (requestLock.current) return;
     const requestId = ++selectionRequest.current;
@@ -53,6 +111,7 @@ export function InDepthReviewClient(props: {
       if (requestId !== selectionRequest.current) return;
       selectedId.current = payload.item.id;
       setSelected(payload.item);
+      detailPane.current?.scrollTo?.({ top: 0 });
       setNotes(payload.item.editorialNotes ?? '');
       setMessage(null);
     } catch (reason) {
@@ -150,49 +209,83 @@ export function InDepthReviewClient(props: {
       </nav>
       <div className={detailStyles.inDepthGrid}>
         <div
-          className={detailStyles.inDepthList}
+          className={detailStyles.inDepthListPane}
+          ref={listPane}
+          tabIndex={0}
           aria-label={`${props.status} candidates`}
         >
-          {items.length === 0 ? (
-            <p className={styles.empty}>No {props.status} candidates.</p>
-          ) : null}
-          {items.map((item) => {
-            const fields = {
-              title: item.titleZh ?? item.originalTitle ?? 'Untitled work',
-              author: item.author,
-            };
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className={detailStyles.inDepthListItem}
-                aria-pressed={selected?.id === item.id}
-                onClick={() => void selectItem(item.id)}
+          <div className={detailStyles.inDepthList}>
+            {items.length === 0 ? (
+              <p className={styles.empty}>No {props.status} candidates.</p>
+            ) : null}
+            {items.map((item) => {
+              const fields = {
+                title: item.titleZh ?? item.originalTitle ?? 'Untitled work',
+                author: item.author,
+              };
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={detailStyles.inDepthListItem}
+                  aria-pressed={selected?.id === item.id}
+                  onClick={() => void selectItem(item.id)}
+                >
+                  <strong>{fields.title}</strong>
+                  <span>
+                    {fields.author ?? 'Author unknown'} ·{' '}
+                    {resolveDiscoveryPublication({
+                      url: item.url,
+                      metadata: discoveryEvidenceMetadata(item.evidence),
+                      publication: item.publication,
+                    })}
+                  </span>
+                  <small>{item.url}</small>
+                  <small>
+                    {capitalize(item.discoveryPath)} · {item.contentType ?? 'Unknown type'} ·{' '}
+                    {formatDate(item.candidateCreatedAt)}
+                  </small>
+                  <small>
+                    {capitalize(item.reviewStatus)} · {item.estimatedDurationMinutes ?? '—'} min
+                  </small>
+                  <small>{item.runId ? `Run ${item.runId}` : 'Manual · No Discovery Run'}</small>
+                </button>
+              );
+            })}
+          </div>
+          <div
+            ref={sentinel}
+            className={detailStyles.inDepthActions}
+          >
+            {loadError && (
+              <p
+                className={styles.error}
+                role="alert"
               >
-                <strong>{fields.title}</strong>
-                <span>
-                  {fields.author ?? 'Author unknown'} ·{' '}
-                  {resolveDiscoveryPublication({
-                    url: item.url,
-                    metadata: discoveryEvidenceMetadata(item.evidence),
-                    publication: item.publication,
-                  })}
-                </span>
-                <small>{item.url}</small>
-                <small>
-                  {capitalize(item.discoveryPath)} · {item.contentType ?? 'Unknown type'} ·{' '}
-                  {formatDate(item.candidateCreatedAt)}
-                </small>
-                <small>
-                  {capitalize(item.reviewStatus)} · {item.estimatedDurationMinutes ?? '—'} min
-                </small>
-                <small>{item.runId ? `Run ${item.runId}` : 'Manual · No Discovery Run'}</small>
+                {loadError}
+              </p>
+            )}
+            {nextCursor && (
+              <button
+                type="button"
+                disabled={loadingMore}
+                onClick={() => void loadMore()}
+              >
+                {loadingMore ? 'Loading…' : loadError ? 'Retry loading' : 'Load more'}
               </button>
-            );
-          })}
+            )}
+            {!nextCursor && items.length > 0 && (
+              <p className={styles.snapshot}>All candidates loaded.</p>
+            )}
+          </div>
         </div>
 
-        <article className={detailStyles.inDepthDetail}>
+        <article
+          tabIndex={0}
+          aria-label="Candidate details"
+          ref={detailPane}
+          className={detailStyles.inDepthDetail}
+        >
           {!selected ? (
             <p>Select a candidate to review.</p>
           ) : (
@@ -205,7 +298,9 @@ export function InDepthReviewClient(props: {
                   </h2>
                   <p>{selected.originalTitle}</p>
                 </div>
-                <span className={detailStyles.inDepthBadge}>{capitalize(selected.reviewStatus)}</span>
+                <span className={detailStyles.inDepthBadge}>
+                  {capitalize(selected.reviewStatus)}
+                </span>
               </div>
               <div className={detailStyles.inDepthBasicInfo}>
                 <dl className={detailStyles.inDepthMeta}>

@@ -1,3 +1,4 @@
+import { decodeInDepthReviewCursor } from '@/lib/in-depth-pagination.js';
 import { EditorialConflictError } from '@/lib/in-depth-editorial.js';
 import {
   generateAndSaveInDepthIntroduction,
@@ -11,7 +12,7 @@ import { getDatabasePool } from '@/db/index.js';
 import {
   getInDepthReviewItem,
   InDepthReviewStatusSchema,
-  listInDepthReviewItems,
+  getInDepthReviewPage,
   parseInDepthReviewUpdate,
   updateInDepthReviewItem,
 } from '@/lib/in-depth-reads.js';
@@ -38,8 +39,14 @@ export async function GET(request: Request): Promise<Response> {
     if (!status.success) {
       return Response.json({ error: 'Invalid review status.' }, { status: 400 });
     }
-    const items = await listInDepthReviewItems(getDatabasePool(), status.data);
-    return Response.json({ items }, { headers: { 'Cache-Control': 'no-store' } });
+    let cursor;
+    try {
+      cursor = decodeInDepthReviewCursor(params.get('cursor'));
+    } catch {
+      return Response.json({ error: 'Invalid review cursor.' }, { status: 400 });
+    }
+    const page = await getInDepthReviewPage(getDatabasePool(), status.data, cursor);
+    return Response.json(page, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     console.error('Failed to load In-depth Review.', error);
     return Response.json({ error: 'Failed to load In-depth Review.' }, { status: 500 });

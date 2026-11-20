@@ -15,6 +15,8 @@ import {
 import type { Pool } from 'pg';
 import {
   IN_DEPTH_PAGE_SIZE,
+  IN_DEPTH_REVIEW_PAGE_SIZE,
+  encodeInDepthReviewCursor,
   type InDepthCursor,
   encodeInDepthCursor,
 } from './in-depth-pagination.js';
@@ -133,7 +135,7 @@ const REVIEW_COLUMNS = `
   idc.id, idc.discovery_candidate_id as "candidateId", dc.run_id as "runId",
   idc.review_status as "reviewStatus", idc.editorial_notes as "editorialNotes",
   ${EDITORIAL_COLUMNS}, idc.reviewed_at::text as "reviewedAt",
-  idc.created_at::text as "createdAt", dc.created_at::text as "candidateCreatedAt",
+  idc.created_at::text as "createdAt", to_char(dc.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "candidateCreatedAt",
   dc.discovery_path as "discoveryPath", dc.url,
   dc.title as "originalTitle", dc.title_zh as "titleZh", dc.author, dc.published_at::text as "publishedAt",
   dc.category, dc.publication, dc.content_type as "contentType",
@@ -142,19 +144,46 @@ const REVIEW_COLUMNS = `
   dc.evidence, dc.evaluation, dc.extra_info as "extraInfo",
   ${DAILY_SOURCE_COLUMN}`;
 
-export async function listInDepthReviewItems(
+async function loadInDepthReviewItems(
   db: Queryable,
-  status: InDepthReviewStatus = 'pending',
+  status: InDepthReviewStatus,
+  cursor: InDepthCursor | null,
+  limit: number,
 ): Promise<InDepthReviewItem[]> {
   const result = await db.query<InDepthReviewItem>(
     `select ${REVIEW_COLUMNS}
        from in_depth_candidates idc
        join discovery_candidates dc on dc.id = idc.discovery_candidate_id
       where idc.review_status = $1
-      order by dc.created_at desc, dc.id desc`,
-    [status],
+        and ($2::timestamptz is null or (dc.created_at, dc.id) < ($2::timestamptz, $3::uuid))
+      order by dc.created_at desc, dc.id desc limit $4`,
+    [status, cursor?.createdAt ?? null, cursor?.id ?? null, limit],
   );
   return normalizePublications(db, result.rows);
+}
+
+export async function listInDepthReviewItems(
+  db: Queryable,
+  status: InDepthReviewStatus = 'pending',
+) {
+  return loadInDepthReviewItems(db, status, null, IN_DEPTH_REVIEW_PAGE_SIZE);
+}
+
+export async function getInDepthReviewPage(
+  db: Queryable,
+  status: InDepthReviewStatus = 'pending',
+  cursor: InDepthCursor | null = null,
+) {
+  const rows = await loadInDepthReviewItems(db, status, cursor, IN_DEPTH_REVIEW_PAGE_SIZE + 1);
+  const items = rows.slice(0, IN_DEPTH_REVIEW_PAGE_SIZE);
+  const last = items.at(-1);
+  return {
+    items,
+    nextCursor:
+      rows.length > IN_DEPTH_REVIEW_PAGE_SIZE && last
+        ? encodeInDepthReviewCursor({ createdAt: last.candidateCreatedAt, id: last.candidateId })
+        : null,
+  };
 }
 
 export async function getInDepthReviewItem(

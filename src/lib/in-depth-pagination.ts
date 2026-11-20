@@ -30,3 +30,13 @@ export function encodeInDepthCursor(value: InDepthCursor): string {
     CURSOR_PREFIX + Buffer.from(JSON.stringify(CursorSchema.parse(value))).toString('base64url')
   );
 }
+
+export const IN_DEPTH_REVIEW_PAGE_SIZE = 20;
+export function decodeInDepthReviewCursor(value: string | null): InDepthCursor | null {
+  if (value === null) return null;
+  if (!value.startsWith('review1.')) throw new Error('Invalid review cursor.');
+  return decodeInDepthCursor('idc1.' + value.slice('review1.'.length));
+}
+export function encodeInDepthReviewCursor(value: InDepthCursor): string {
+  return 'review1.' + encodeInDepthCursor(value).slice('idc1.'.length);
+}

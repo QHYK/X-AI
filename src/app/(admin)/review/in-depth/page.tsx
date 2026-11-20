@@ -1,6 +1,6 @@
 import { getDatabasePool } from '@/db/index.js';
 import { resolveDailyScope } from '@/lib/daily-scope.js';
-import { InDepthReviewStatusSchema, listInDepthReviewItems } from '@/lib/in-depth-reads.js';
+import { InDepthReviewStatusSchema, getInDepthReviewPage } from '@/lib/in-depth-reads.js';
 import { InDepthReviewClient } from './review-client.js';
 import { ReviewHeader } from '../review-header.js';
 import styles from '../review.module.css';
@@ -15,7 +15,7 @@ export default async function InDepthReviewPage(props: {
   const rawStatus = Array.isArray(params.status) ? params.status[0] : params.status;
   const parsed = InDepthReviewStatusSchema.safeParse(rawStatus ?? 'pending');
   const status = parsed.success ? parsed.data : 'pending';
-  const items = await listInDepthReviewItems(getDatabasePool(), status);
+  const page = await getInDepthReviewPage(getDatabasePool(), status);
 
   return (
     <main className={styles.page}>
@@ -27,7 +27,8 @@ export default async function InDepthReviewPage(props: {
       />
       <InDepthReviewClient
         key={status}
-        initialItems={items}
+        initialItems={page.items}
+        initialNextCursor={page.nextCursor}
         status={status}
       />
     </main>
