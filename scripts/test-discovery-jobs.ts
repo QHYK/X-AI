@@ -522,3 +522,13 @@ assert.equal(
 console.log(
   'Standalone no-parent submission, concurrent idempotency, queued different topics and isolated inputs passed.',
 );
+
+const autonomous = await submitStandaloneDiscoveryJob(
+  db,
+  { ...standaloneInput, requestId: 'autonomous', researchTopic: '', instructions: null },
+  standaloneServices,
+);
+assert.equal(
+  (autonomous.configSnapshot?.openContext as { researchTopic: string }).researchTopic,
+  '',
+);

@@ -3,7 +3,7 @@ import { JSDOM } from 'jsdom';
 import { digest, type ContentReferences } from './html.js';
 import { linkEvidence } from './link-tools.js';
 
-export const SOURCE_RULE_VERSION = 2;
+export const SOURCE_RULE_VERSION = 3;
 export type SourceContext = { subject?: string; senderName?: string };
 export type LinkEvidence = NonNullable<ReturnType<typeof linkEvidence>> & {
   start_offset: number;
@@ -84,6 +84,12 @@ export function extractSourceSections(
       label: string,
       notes = '',
     ) {
+      if (source === 'The Information AM') {
+        const promoFooter =
+          exact('p', 'Cut through the noise.')[0] ??
+          find('p', (t) => /^Cut through the noise\./i.test(t))[0];
+        if (promoFooter) b = Math.min(b, start(promoFooter));
+      }
       if (a < 0 || b <= a) {
         result.warnings.push(`${label}: 起止标记缺失或顺序不正确`);
         return;
@@ -119,7 +125,10 @@ export function extractSourceSections(
       const ctaLink = urls.find((u) =>
         /^(?:read (?:more|the full article|our special report)|watch now)$/i.test(u.anchor_text),
       );
-      const main = source === 'The Information Briefing' ? urls[0] : (headlineLink ?? ctaLink);
+      const main =
+        source === 'The Information Briefing' || source === '增长黑客AI周报'
+          ? urls[0]
+          : (headlineLink ?? ctaLink);
       const raw = digest(`${SOURCE_RULE_VERSION}:${preview.html_sha256}:${a}:${b}:${label}`).slice(
         0,
         32,
@@ -339,7 +348,60 @@ export function extractSourceSections(
       const greeting = find('p', (t) => /^Greetings\s/i.test(t))[0];
       const welcome = find('td,p', (t) => /^Welcome, Weekenders!$/i.test(t)).at(-1);
       const plan = find('h2', (t) => /^(?:Pro|Annual) Subscription$/i.test(t))[0];
-      if (plan && !first) {
+      const saleCopy = find(
+        'p',
+        (t) =>
+          /(?:Black Friday|early access)/i.test(t) &&
+          /(?:subscribe|lock in|pay for just year one|25% off)/i.test(t),
+      );
+      const saleLink = anchors.some((a) =>
+        /(?:subscribe|save 25%|get .*access|join|register)/i.test(text(a)),
+      );
+      const roundup =
+        find('h1', (t) => /^(?:Monday Readout|Big Tech News|Finance News)$/i.test(t)).length > 0;
+      const liveEvent = find('h1', (t) => /(?:IPO Live|live summit)/i.test(t)).length > 0;
+      const thematicStart = exact('p', 'Hi there,')[0];
+      const thematicEnd = find('p', (t) => /^Cut through the noise\./i.test(t))[0];
+      const thematicIntro = find('p', (t) => /^Here are (?:\d+|[a-z]+) stories\b/i.test(t)).find(
+        (e) =>
+          thematicStart &&
+          start(e) >= end(thematicStart) &&
+          thematicEnd &&
+          end(e) <= start(thematicEnd),
+      );
+      const thematicHeadings = find('h4', (t) => !!t).filter(
+        (e) =>
+          thematicIntro &&
+          start(e) >= end(thematicIntro) &&
+          thematicEnd &&
+          end(e) <= start(thematicEnd),
+      );
+      if (
+        !first &&
+        !doc.querySelector('h1') &&
+        context.subject?.trim() &&
+        thematicStart &&
+        thematicEnd &&
+        thematicIntro &&
+        thematicHeadings.length > 0
+      ) {
+        result.template = 'information:thematic_digest';
+        add(
+          start(thematicStart),
+          start(thematicEnd),
+          context.subject.trim(),
+          'standalone_content',
+          'thematic_digest',
+        );
+      } else if (
+        !first &&
+        !ctas.some((e) => /^read the full article$/i.test(text(e))) &&
+        saleCopy.length &&
+        (saleLink || roundup || liveEvent)
+      ) {
+        result.template = 'information:sales_promotion';
+        result.warnings.push('已忽略订阅促销 / 活动营销邮件');
+      } else if (plan && !first) {
         result.template = 'information:subscription_ad';
         result.warnings.push('已忽略订阅推广邮件');
       } else if (first) {
@@ -473,6 +535,36 @@ export function extractSourceSections(
         first = false;
       });
       if (!sections.length) result.warnings.push('Superhuman: 未找到 h5 / h4 栏目');
+    } else if (source === '增长黑客AI周报') {
+      result.template = 'growth_hacker:weekly';
+      const intro = find('p', (t) => /以下是本周正刊内容/.test(t))[0];
+      const references = exact('h3', '随便看看：')[0];
+      const resources = exact('h3', '适合个人上手的教程/评测/资源：')[0];
+      if (
+        required(intro, '正刊内容起点') &&
+        required(references, '随便看看') &&
+        required(resources, '教程/评测/资源')
+      ) {
+        const heads = find('h3', (t) => !!t).filter(
+          (e) => start(e) >= end(intro) && start(e) < start(references),
+        );
+        heads.forEach((h, i) =>
+          add(
+            start(h),
+            heads[i + 1] ? start(heads[i + 1]) : start(references),
+            text(h),
+            'standalone_content',
+            'growth_standalone',
+          ),
+        );
+        find('li', (t) => !!t)
+          .filter((e) => start(e) >= end(references) && end(e) < start(resources))
+          .forEach((e) => {
+            const a = e.querySelector('a[href]');
+            if (a && text(a))
+              add(start(e), end(e), text(a), 'external_reference', 'growth_reference');
+          });
+      }
     } else if (source === 'The Daily Upside') {
       const market = exact('div', 'MARKETS').at(-1),
         cutoff = exact('div', 'Extra Upside').at(-1);
@@ -541,6 +633,10 @@ export function createSourceGuidance(
 export function isExplicitNewsletterSkip(guidance: SourceGuidance) {
   return (
     guidance.units.length === 0 &&
-    ['information:subscription_ad', 'information:episode_promotion'].includes(guidance.template)
+    [
+      'information:subscription_ad',
+      'information:episode_promotion',
+      'information:sales_promotion',
+    ].includes(guidance.template)
   );
 }

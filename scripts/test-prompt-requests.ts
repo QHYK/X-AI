@@ -16,7 +16,12 @@ import type { Pool } from 'pg';
 import { getDailyBriefForDailyDate } from '../src/lib/daily-brief.js';
 import type { createStage4EnrichmentSchema } from '../src/processing/stage4-contract.js';
 import { getActiveMemories, formatMemories } from '../src/lib/memories.js';
-import { preparePromptPreview, displayPromptRequest, parsePreviewArgs } from './preview-prompt.js';
+import {
+  preparePromptPreview,
+  displayPromptRequest,
+  parsePreviewArgs,
+  displayD5Prompt,
+} from './preview-prompt.js';
 import { PromptMemory } from './fixtures/prompt-runtime.js';
 import { withPromptBindings, databasePromptBinder } from '../src/lib/prompts/runtime.js';
 
@@ -677,12 +682,32 @@ try {
     assert.ok(!JSON.parse(preview.businessInput).memory.includes('event marker'));
     assert.equal(eventPreview.request.max_output_tokens, 8000);
     assert.equal(preview.request.max_output_tokens, 2400);
-    for (const step of ['D2', 'stage1', 'stage3:event'])
+    const d5Business = JSON.stringify({
+      memory: ['private data'],
+      manualContext: 'private context',
+    });
+    assert.deepEqual(
+      displayD5Prompt({ instructions: 'Editorial criteria', input: d5Business }, d5Business),
+      { instructions: 'Editorial criteria', input: {} },
+    );
+    assert.deepEqual(
+      displayD5Prompt(
+        { instructions: 'Editorial criteria', input: `Research: ${d5Business}` },
+        d5Business,
+      ),
+      { instructions: 'Editorial criteria', input: 'Research: {}' },
+    );
+    assert.throws(
+      () => displayD5Prompt({ input: 'missing insertion' }, d5Business),
+      /Cannot safely locate/,
+    );
+    for (const step of ['D2', 'D5', 'stage1', 'stage3:event'])
       assert.equal(parsePreviewArgs([step]).step, step.toLowerCase());
     for (const args of [
       [],
       ['stage2'],
       ['D2', '--date=2026-11-05'],
+      ['D5', '--date=2026-11-05'],
       ['stage1', '--dates=a,b'],
       ['stage1', '--date=bad'],
     ])

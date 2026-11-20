@@ -1,3 +1,6 @@
+import { productionPrompt } from '../src/lib/prompts/runtime.js';
+import { buildDiscoveryD5UserPrompt } from '../src/prompts/discovery-open-agent.js';
+import { resolveDiscoveryD5RuntimeConfig } from '../src/discovery/open-discovery.js';
 import { pathToFileURL } from 'node:url';
 import { getDatabasePool } from '../src/db/index.js';
 import { loadPipelineEnvironment } from '../src/lib/pipeline-env.js';
@@ -36,13 +39,14 @@ import { prepareStage3EventRequest } from '../src/processing/stage3-event-rankin
 import { buildStage3EventRankingInputFromDb } from '../src/processing/stage3-job.js';
 import { resolveStageLlmRuntimeConfig } from '../src/processing/stage-llm-runtime-config.js';
 
-export type PreviewStep = 'd2' | 'stage1' | 'stage3:event';
+export type PreviewStep = 'd2' | 'd5' | 'stage1' | 'stage3:event';
 const usage =
-  'Usage: npm run test:prompt -- D2|stage1|stage3:event [--date=YYYY-MM-DD | --dates=YYYY-MM-DD,YYYY-MM-DD]';
+  'Usage: npm run test:prompt -- D2|D5|stage1|stage3:event [--date=YYYY-MM-DD | --dates=YYYY-MM-DD,YYYY-MM-DD]';
 
 export function parsePreviewArgs(args: string[]) {
   const step = args[0]?.toLowerCase();
-  if (!['d2', 'stage1', 'stage3:event'].includes(step) || args.length > 2) throw new Error(usage);
+  if (!['d2', 'd5', 'stage1', 'stage3:event'].includes(step) || args.length > 2)
+    throw new Error(usage);
   const options: { date?: string; dates?: DiscoveryDailyDatePair } = {};
   if (args[1]) {
     if (step === 'd2' && args[1].startsWith('--dates=')) {
@@ -50,7 +54,7 @@ export function parsePreviewArgs(args: string[]) {
       if (values.length !== 2 || values.some((date) => !/^\d{4}-\d{2}-\d{2}$/.test(date)))
         throw new Error(usage);
       options.dates = validateDiscoveryDailyDates([values[0], values[1]]);
-    } else if (step !== 'd2' && args[1].startsWith('--date=')) {
+    } else if (step !== 'd2' && step !== 'd5' && args[1].startsWith('--date=')) {
       const date = args[1].slice('--date='.length);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(usage);
       options.date = resolveDailyScope(date).dailyDate;
@@ -101,7 +105,7 @@ export function displayPromptRequest(
 /** One read-only preview path; Run bindings and model clients are never created. */
 export async function preparePromptPreview(
   db: Pick<Pool, 'query'>,
-  step: PreviewStep,
+  step: Exclude<PreviewStep, 'd5'>,
   options: { date?: string; dates?: DiscoveryDailyDatePair } = {},
 ) {
   return withPromptBindings(
@@ -185,6 +189,17 @@ export async function preparePromptPreview(
   );
 }
 
+/** Hide business data only; retain any surrounding user Prompt instructions. */
+export function displayD5Prompt(
+  prompt: { instructions?: string; input: string },
+  businessInput: string,
+) {
+  if (!businessInput || !prompt.input.includes(businessInput))
+    throw new Error('Cannot safely locate D5 business input for display.');
+  const input = prompt.input.replaceAll(businessInput, '{}');
+  return { instructions: prompt.instructions, input: input === '{}' ? {} : input };
+}
+
 async function main() {
   const { step, options } = parsePreviewArgs(process.argv.slice(2));
   loadPipelineEnvironment();
@@ -194,6 +209,25 @@ async function main() {
     try {
       // All reads share one consistent snapshot; PostgreSQL itself forbids accidental writes.
       await client.query('begin isolation level repeatable read read only');
+      if (step === 'd5') {
+        const preview = await withPromptBindings(
+          client,
+          (_key, active) => active(client),
+          async () => {
+            const businessInput = buildDiscoveryD5UserPrompt();
+            const prompt = await productionPrompt('discovery.d5.open_discovery', businessInput);
+            const config = resolveDiscoveryD5RuntimeConfig();
+            return {
+              versionId: prompt.versionId,
+              model: config.model,
+              ...displayD5Prompt(prompt, businessInput),
+            };
+          },
+          { binding: 'active' },
+        );
+        console.log(JSON.stringify(preview, null, 2));
+        return;
+      }
       const prepared = await preparePromptPreview(client, step, options);
       const parameters = displayPromptRequest(prepared, prepared.provider, prepared.field);
       console.error(

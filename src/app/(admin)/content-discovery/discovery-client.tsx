@@ -173,12 +173,11 @@ export function ContentDiscoveryClient() {
             className={detailStyles.inDepthEditor}
           >
             <label>
-              研究主题 · 必填
+              研究主题 · 可选
               <textarea
-                required
                 maxLength={16000}
                 rows={7}
-                placeholder="希望深入了解什么？可以粘贴新闻标题、摘要或背景材料。"
+                placeholder="留空则自主发现。也可以粘贴新闻标题、摘要、背景材料或研究问题。"
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
               />
@@ -316,7 +315,7 @@ export function ContentDiscoveryClient() {
                 aria-pressed={run?.id === item.id}
                 onClick={() => void select(item.id)}
               >
-                <strong>{item.input.researchTopic.slice(0, 120)}</strong>
+                <strong>{item.input.researchTopic.slice(0, 120) || '自主发现'}</strong>
                 <span>
                   {item.status} · {item.created_at}
                 </span>

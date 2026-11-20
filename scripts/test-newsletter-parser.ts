@@ -1,3 +1,4 @@
+import './test-newsletter-recent-formats.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { JSDOM } from 'jsdom';
@@ -101,7 +102,10 @@ for (const status of ['unsupported', 'failed'] as const) {
   if (status === 'unsupported') assert.ok(d.html.includes('Inspect this unsupported newsletter'));
 }
 const journal = JSON.parse(await readFile('drizzle/meta/_journal.json', 'utf8'));
-assert.equal(journal.entries.at(-1).tag, '0029_newsletter_emails');
+assert.equal(
+  journal.entries.filter((entry: { tag: string }) => entry.tag === '0029_newsletter_emails').length,
+  1,
+);
 const sql = await readFile('drizzle/0029_newsletter_emails.sql', 'utf8');
 assert.equal((sql.match(/CREATE TABLE/g) ?? []).length, 1);
 assert.match(sql, /raw_message.*jsonb NOT NULL/);

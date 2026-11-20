@@ -20,6 +20,7 @@ export function newsletterSource(mail: NewsletterMail) {
   if (address === 'morningwire@apnews.com') return 'The Associated Press';
   if (address === 'superhuman@mail.joinsuperhuman.ai' || /^Superhuman/.test(name))
     return 'Superhuman';
+  if (address === 'ghacker@substack.com') return '增长黑客AI周报';
   if (address === 'squad@thedailyupside.com') return 'The Daily Upside';
   return name || 'Unknown';
 }

@@ -15,7 +15,7 @@ const Input = z.union([
   z
     .object({
       mode: z.literal('standalone'),
-      researchTopic: z.string().trim().min(1).max(16000),
+      researchTopic: z.string().trim().max(16000).default(''),
       referenceUrl: z
         .url()
         .max(2048)

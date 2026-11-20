@@ -98,6 +98,7 @@ globalThis.fetch = async (input, init) => {
         },
   );
 };
+Object.defineProperty(globalThis.crypto, 'randomUUID', { configurable: true, value: undefined });
 const root = createRoot(document.getElementById('root')!);
 try {
   await act(async () => {
@@ -164,6 +165,15 @@ try {
   assert.equal(
     (document.querySelector('select[aria-label="Newsletter 邮件"]') as HTMLSelectElement).value,
     'sample',
+  );
+  await act(async () => {
+    button('下载本封标注').click();
+    await new Promise((r) => setTimeout(r, 10));
+  });
+  const addedAnnotation = JSON.parse(await (downloaded as unknown as Blob).text());
+  assert.match(
+    addedAnnotation.added_units[2].manual_id,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
   );
   dom.window.confirm = () => true;
   await act(async () => {

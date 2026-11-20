@@ -275,7 +275,7 @@ D2 只过滤已知非 Event 输入中 `directEligible=false` 的 Direct Lead，�
 
 ### 8.4 人工补充执行
 
-Admin Content Discovery 可创建无父 Run、无 Daily 窗口的独立 Open Run，仅执行 D5。研究主题必填，参考 URL 与补充指令可选；URL 为线索，不保证入选。三个输入固定在原 Run 配置，补充指令为低优先级上下文，不写 Memory，不覆盖编辑标准、工具和验证规则。同日允许多个主题；请求 ID 幂等，任务进入既有 Worker 队列并由全局锁串行执行。失败不自动付费重跑，显式 Resume 沿用原输入和版本绑定。关联式 Retry Open 与自动 Fallback 保持原语义。
+Admin Content Discovery 可创建无父 Run、无 Daily 窗口的独立 Open Run，仅执行 D5。研究主题可选，留空时自主发现，参考 URL 与补充指令可选；URL 为线索，不保证入选。三个输入固定在原 Run 配置，补充指令为低优先级上下文，不写 Memory，不覆盖编辑标准、工具和验证规则。同日允许多个主题；请求 ID 幂等，任务进入既有 Worker 队列并由全局锁串行执行。失败不自动付费重跑，显式 Resume 沿用原输入和版本绑定。关联式 Retry Open 与自动 Fallback 保持原语义。
 
 - **Implemented**：通过 Dashboard Retry Open 或 CLI 人工 Open 创建关联原 Regular Run 的新 Open Run；这不是原 Run Resume，独立保存结果和 Trace，不覆盖原候选。操作入口见 `../09-operations.md`。
 - **Planned**：从原 D2 中选择一个 `leadId` 单独执行，创建关联原 Run 与所选 Lead 的新 Run。当前 CLI、Admin API 和审核页面尚未提供此入口；保留的技术约定见 `../04-technical-spec/discovery.md` §6.3。

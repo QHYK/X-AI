@@ -1,4 +1,5 @@
 'use client';
+import { browserUuid } from '@/lib/browser-uuid.js';
 import { useEffect, useRef, useState } from 'react';
 import type { NewsletterListItem, NewsletterParserDetail } from '@/lib/newsletter-parser.js';
 import {
@@ -261,9 +262,9 @@ export function NewsletterParser() {
       {detail && (
         <>
           <p>
-            {detail.source} · <b>ID:</b><code>{detail.id}</code>
-             · {detail.receivedAt ?? '接收时间未知'} · {detail.template ?? '—'} 
-             · {detail.units.length}个内容单元 · 采集时间{' '}
+            {detail.source} · <b>ID:</b>
+            <code>{detail.id}</code>· {detail.receivedAt ?? '接收时间未知'} ·{' '}
+            {detail.template ?? '—'}· {detail.units.length}个内容单元 · 采集时间{' '}
             {detail.collectedAt} · 状态{' '}
             <strong
               className={
@@ -395,7 +396,7 @@ export function NewsletterParser() {
               }}
               onAdd={() => {
                 const unit: NewsletterReviewUnit = {
-                  id: crypto.randomUUID(),
+                  id: browserUuid(),
                   status: 'unreviewed',
                   content_type: null,
                   corrections: { title: null, summary: null, original_url: null },

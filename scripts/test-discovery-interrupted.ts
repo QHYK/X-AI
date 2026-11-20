@@ -254,7 +254,7 @@ assert.equal(
   '原始研究',
 );
 stored.status = 'running';
-stored.config_snapshot.openContext = { kind: 'standalone', researchTopic: '' };
+stored.config_snapshot.openContext = { kind: 'standalone', researchTopic: 42 };
 const beforeInvalidStandalone = paidSteps;
 await assert.rejects(invoke(args), /missing its execution context/);
 assert.equal(paidSteps, beforeInvalidStandalone);
